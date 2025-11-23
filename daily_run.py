@@ -271,10 +271,21 @@ def run_random_search(
 # PLOTTING HELPERS
 # =========================
 
-def plot_equity_curve(equity_curve, filename="equity_curve.png"):
+def plot_equity_curve(equity_curve, prices, filename="equity_curve.png"):
+    # Pure risk-on curve (always 33/33/33)
+    rets = prices.pct_change().fillna(0.0)
+    cols = ["GLD", "TQQQ", "BTC-USD"]
+    pure_risk_on_rets = (rets[cols] * np.array([1/3, 1/3, 1/3])).sum(axis=1)
+    pure_risk_on_curve = (1 + pure_risk_on_rets).cumprod()
+
     plt.figure(figsize=(10, 5))
-    plt.plot(equity_curve.index, equity_curve.values, label="Optimized Strategy", linewidth=2)
-    plt.title("Equity Curve – Optimized Strategy")
+    plt.plot(equity_curve.index, equity_curve.values,
+             label="Optimized Strategy", linewidth=2)
+    plt.plot(pure_risk_on_curve.index, pure_risk_on_curve.values,
+             label="Pure Risk-On (33/33/33 BTC/GLD/TQQQ)",
+             linestyle="--", linewidth=2)
+
+    plt.title("Equity Curve – Optimized Strategy vs Pure Risk-On")
     plt.xlabel("Date")
     plt.ylabel("Portfolio Value (normalized)")
     plt.grid(alpha=0.3)
@@ -419,7 +430,7 @@ if __name__ == "__main__":
     risk_on_signal = best_result["risk_on_signal"]
     equity_curve = best_result["equity_curve"]
 
-    plot_equity_curve(equity_curve, "equity_curve.png")
+    plot_equity_curve(equity_curve, prices, "equity_curve.png")
     plot_risk_on_history(risk_on_signal, "risk_on_history.png")
 
     is_risk_on_today = bool(risk_on_signal.iloc[-1])
