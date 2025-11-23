@@ -372,7 +372,7 @@ def send_email(regime, params: StrategyParams, perf: dict):
     """
 
     msg = MIMEMultipart("mixed")
-    msg["Subject"] = f"BTC MA Model – {regime} (Daily Optimized)"
+    msg["Subject"] = f" MA Strategy Report – {regime}"
     msg["From"] = EMAIL_USER
     msg["To"] = SEND_TO
 
