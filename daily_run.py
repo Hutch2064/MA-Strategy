@@ -214,7 +214,7 @@ def random_param_sample():
 
     ma_lengths = list(np.random.randint(min_length, max_length + 1, size=n_ma))
     ma_types = [np.random.choice(["sma", "ema"]) for _ in range(n_ma)]
-    ma_tolerances = list(np.random.choice([0.0, 0.005, 0.01, 0.02, 0.05], size=n_ma))
+    ma_tolerances = list(np.random.uniform(0.0, 0.05, size=n_ma))
 
     min_ma_above = np.random.randint(1, n_ma + 1)
     confirm_days = int(np.random.choice([1, 3, 5, 10, 20]))
