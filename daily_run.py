@@ -294,21 +294,6 @@ def plot_equity_curve(equity_curve, prices, filename="equity_curve.png"):
     plt.savefig(filename)
     plt.close()
 
-
-def plot_risk_on_history(risk_on_signal, filename="risk_on_history.png"):
-    plt.figure(figsize=(10, 2.5))
-    y = risk_on_signal.astype(int)
-    plt.step(risk_on_signal.index, y.values, where="post", linewidth=2)
-    plt.ylim(-0.1, 1.1)
-    plt.yticks([0, 1], ["Risk-Off", "Risk-On"])
-    plt.title("Risk-On / Risk-Off History (Optimized)")
-    plt.xlabel("Date")
-    plt.grid(axis="x", alpha=0.3)
-    plt.tight_layout()
-    plt.savefig(filename)
-    plt.close()
-
-
 # =========================
 # EMAIL SENDER
 # =========================
@@ -352,7 +337,7 @@ def send_email(regime, params: StrategyParams, perf: dict):
     html = f"""
     <html>
       <body>
-        <h2>Daily BTC Optimized MA Signal</h2>
+        <h2>Optimized MA Signal</h2>
         <p><b>Today's Regime:</b> {regime}</p>
 
         <h3>Performance (Optimized Strategy)</h3>
@@ -431,7 +416,6 @@ if __name__ == "__main__":
     equity_curve = best_result["equity_curve"]
 
     plot_equity_curve(equity_curve, prices, "equity_curve.png")
-    plot_risk_on_history(risk_on_signal, "risk_on_history.png")
 
     is_risk_on_today = bool(risk_on_signal.iloc[-1])
     regime_text = "RISK-ON (33/33/33 3XGLD / TQQQ / BTC)" if is_risk_on_today else "RISK-OFF (100% UUP)"
