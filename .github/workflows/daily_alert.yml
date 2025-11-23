@@ -2,7 +2,8 @@ name: Daily MA Strategy Alert
 
 on:
   schedule:
-    - cron: "0 13 * * *"   # Runs 7 AM CST (13:00 UTC)
+    # Runs at 7 PM CST (01:00 UTC next day)
+    - cron: "0 1 * * *"
   workflow_dispatch:       # Allows manual runs
 
 jobs:
