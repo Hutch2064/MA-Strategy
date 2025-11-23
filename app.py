@@ -9,13 +9,13 @@ import streamlit as st
 # CONFIG
 # =========================
 
-DEFAULT_START_DATE = "2015-01-01"
+DEFAULT_START_DATE = "2011-11-24"
 DEFAULT_END_DATE = None  # None = up to today
 
-TICKERS = ["BTC-USD", "SHNY", "TQQQ", "UUP"]
+TICKERS = ["BTC-USD", "GLD", "TQQQ", "UUP"]
 
 RISK_ON_WEIGHTS = {
-    "SHNY": 1.0 / 3.0,
+    "GLD": 3.0 / 3.0,
     "TQQQ": 1.0 / 3.0,
     "BTC-USD": 1.0 / 3.0,
 }
@@ -295,7 +295,7 @@ def main():
     st.write(
         "This app optimizes a BTC-based risk-on / risk-off strategy using moving averages "
         "and backtests the resulting portfolio:\n\n"
-        "- **Risk-On**: 33.33% SHNY, 33.33% TQQQ, 33.33% BTC\n"
+        "- **Risk-On**: 33.33% 3XGLD, 33.33% TQQQ, 33.33% BTC\n"
         "- **Risk-Off**: 100% UUP\n\n"
         "The optimizer searches over MA lengths (21–252 days), number of MAs, SMA vs EMA, "
         "tolerances, confirmation window, and confirmation count, maximizing Sharpe ratio."
@@ -325,7 +325,7 @@ def main():
         prices = load_price_data(TICKERS, start_date, end_date_val)
 
         # Keep only the core assets and drop rows with missing data
-        core_assets = [t for t in ["BTC-USD", "SHNY", "TQQQ", "UUP"] if t in prices.columns]
+        core_assets = [t for t in ["BTC-USD", "GLD", "TQQQ", "UUP"] if t in prices.columns]
         if len(core_assets) < 4:
             st.error(f"Missing one or more tickers in data. Found: {core_assets}")
             return
@@ -346,7 +346,7 @@ def main():
 
         # Pure risk-on benchmark (always 33/33/33)
         rets = prices.pct_change().fillna(0.0)
-        cols = ["SHNY", "TQQQ", "BTC-USD"]
+        cols = ["GLD", "TQQQ", "BTC-USD"]
         pure_risk_on_rets = (rets[cols] * np.array([1 / 3, 1 / 3, 1 / 3])).sum(axis=1)
         pure_risk_on_curve = (1 + pure_risk_on_rets).cumprod()
 
@@ -372,7 +372,7 @@ def main():
 
     # Current regime
     is_risk_on_today = bool(risk_on_signal.iloc[-1])
-    regime_text = "RISK-ON (33/33/33 SHNY / TQQQ / BTC)" if is_risk_on_today else "RISK-OFF (100% UUP)"
+    regime_text = "RISK-ON (33/33/33 3XGLD / TQQQ / BTC)" if is_risk_on_today else "RISK-OFF (100% UUP)"
     regime_color = "🟢" if is_risk_on_today else "🔴"
 
     st.subheader("Current Regime")
