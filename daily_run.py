@@ -13,7 +13,7 @@ from email import encoders
 from dataclasses import dataclass
 
 # =========================
-# CONFIG (same as app.py)
+# CONFIG (identical)
 # =========================
 
 DEFAULT_START_DATE = "2011-11-24"
@@ -36,7 +36,30 @@ RISK_FREE_RATE = 0.0
 
 
 # =========================
-# MOVING AVERAGES & SIGNALS
+# DATA LOADING (same logic as load_price_data)
+# =========================
+
+def load_price_data_raw(tickers, start_date, end_date=None):
+    data = yf.download(
+        tickers,
+        start=start_date,
+        end=end_date,
+        progress=False
+    )
+
+    if "Adj Close" in data.columns:
+        px = data["Adj Close"].copy()
+    else:
+        px = data["Close"].copy()
+
+    if isinstance(px, pd.Series):
+        px = px.to_frame(name=tickers[0])
+
+    return px.dropna(how="all")
+
+
+# =========================
+# MOVING AVERAGES & SIGNALS (verbatim)
 # =========================
 
 def compute_ma(series, length, ma_type="ema"):
@@ -57,6 +80,14 @@ def generate_risk_on_signal(
     min_ma_above: int,
     confirm_days: int = 1,
 ):
+    """
+    price_btc: BTC-USD price series
+    ma_lengths: list[int]
+    ma_types: list['sma' | 'ema']
+    ma_tolerances: list[float], price > MA * (1 + tol)
+    min_ma_above: how many MAs must be satisfied
+    confirm_days: condition must hold this many consecutive days
+    """
     conditions = []
 
     for length, ma_type, tol in zip(ma_lengths, ma_types, ma_tolerances):
@@ -82,7 +113,7 @@ def generate_risk_on_signal(
 
 
 # =========================
-# BACKTEST ENGINE
+# BACKTEST ENGINE (verbatim)
 # =========================
 
 def build_weight_df(prices, risk_on_signal, risk_on_weights, risk_off_weights):
@@ -149,7 +180,7 @@ def backtest_strategy(prices, risk_on_signal, risk_on_weights, risk_off_weights)
 
 
 # =========================
-# PARAM DATACLASS
+# PARAM DATACLASS (verbatim)
 # =========================
 
 @dataclass
@@ -162,10 +193,20 @@ class StrategyParams:
 
 
 # =========================
-# RANDOM SEARCH OPTIMIZER
+# RANDOM SEARCH OPTIMIZER (verbatim)
 # =========================
 
 def random_param_sample():
+    """
+    Sample one set of strategy parameters.
+
+    MA lengths: any integer from 21 to 252
+    Number of MAs: 1 to 6
+    MA type: SMA or EMA
+    Tolerance: 0% to 5%
+    min_ma_above: 1 .. n_ma
+    confirm_days: one of [1, 3, 5, 10, 20]
+    """
     min_length = 21
     max_length = 252
 
@@ -245,7 +286,6 @@ def plot_equity_curve(equity_curve, filename="equity_curve.png"):
 
 def plot_risk_on_history(risk_on_signal, filename="risk_on_history.png"):
     plt.figure(figsize=(10, 2.5))
-    # Convert bool to 0/1
     y = risk_on_signal.astype(int)
     plt.step(risk_on_signal.index, y.values, where="post", linewidth=2)
     plt.ylim(-0.1, 1.1)
@@ -285,7 +325,6 @@ def send_email(regime, params: StrategyParams, perf: dict):
     if not EMAIL_USER or not EMAIL_PASS or not SEND_TO:
         raise RuntimeError("Missing EMAIL_USER, EMAIL_PASS, or SEND_TO environment variables.")
 
-    # Build HTML body
     ma_rows = ""
     for i, (L, t, tol) in enumerate(
         zip(params.ma_lengths, params.ma_types, params.ma_tolerances), start=1
@@ -345,7 +384,6 @@ def send_email(regime, params: StrategyParams, perf: dict):
     msg.attach(msg_alt)
     msg_alt.attach(MIMEText(html, "html"))
 
-    # Attach plots
     attach_file(msg, "equity_curve.png", mime_subtype="octet-stream")
     attach_file(msg, "risk_on_history.png", mime_subtype="octet-stream")
 
@@ -359,22 +397,15 @@ def send_email(regime, params: StrategyParams, perf: dict):
 # =========================
 
 if __name__ == "__main__":
-    # 1) Download data
-    prices = yf.download(
-        TICKERS,
-        start=DEFAULT_START_DATE,
-        end=DEFAULT_END_DATE,
-        progress=False
-    )
+    # Same data handling as app.py main
+    prices = load_price_data_raw(TICKERS, DEFAULT_START_DATE, DEFAULT_END_DATE)
 
-    if "Adj Close" in prices.columns:
-        prices = prices["Adj Close"].copy()
-    else:
-        prices = prices["Close"].copy()
+    core_assets = [t for t in ["BTC-USD", "GLD", "TQQQ", "UUP"] if t in prices.columns]
+    if len(core_assets) < 4:
+        raise RuntimeError(f"Missing one or more tickers in data. Found: {core_assets}")
 
-    prices = prices.dropna(how="any")
+    prices = prices[core_assets].dropna(how="any")
 
-    # 2) Run optimizer (same as app)
     best_params, best_result = run_random_search(
         prices=prices,
         n_iter=DEFAULT_N_RANDOM_SEARCH_ITER,
@@ -388,15 +419,10 @@ if __name__ == "__main__":
     risk_on_signal = best_result["risk_on_signal"]
     equity_curve = best_result["equity_curve"]
 
-    # 3) Generate plots
     plot_equity_curve(equity_curve, "equity_curve.png")
     plot_risk_on_history(risk_on_signal, "risk_on_history.png")
 
-    # 4) Today's regime
     is_risk_on_today = bool(risk_on_signal.iloc[-1])
     regime_text = "RISK-ON (33/33/33 3XGLD / TQQQ / BTC)" if is_risk_on_today else "RISK-OFF (100% UUP)"
 
-    # 5) Send email with all requested info
     send_email(regime_text, best_params, perf)
-
-
