@@ -1,3 +1,5 @@
+APP
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -112,60 +114,33 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
     btc = prices["BTC-USD"]
 
-    # ==============================
-    # PRECOMPUTE ALL MOVING AVERAGES
-    # ==============================
-    ma_cache = {}
-
-    lengths = range(21, 253)
-    types = ["sma", "ema"]
-    tolerances = np.arange(0.0, 0.1001, 0.001)
-
-    # Precompute SMA & EMA for every length
-    for length in lengths:
-        # SMA
-        ma_cache[(length, "sma")] = btc.rolling(window=length, min_periods=length).mean()
-        # EMA
-        ma_cache[(length, "ema")] = btc.ewm(span=length, adjust=False).mean()
-
     best_sharpe = -1e9
     best = None
     best_cfg = None
 
-    # If running inside Streamlit, create progress bar
-    try:
-        progress = st.progress(0.0)
-        using_streamlit = True
-    except:
-        using_streamlit = False
+    lengths = range(21, 253)
+    types = ["sma", "ema"]
+    tolerances = np.arange(0.0, 0.1001, 0.001)  # 0.0% to 10.0% by 0.1%
 
+    progress = st.progress(0.0)
     total = len(lengths) * len(types) * len(tolerances)
     idx = 0
 
-    # ==============================
-    # MAIN GRID SEARCH LOOP
-    # ==============================
     for length in lengths:
         for ma_type in types:
-            ma = ma_cache[(length, ma_type)]
-
             for tol in tolerances:
-                # Use cached MA
-                signal = (btc > ma * (1 + tol)).fillna(False)
 
-                # Backtest
+                signal = generate_signal(btc, length, ma_type, tol)
                 result = backtest(prices, signal, risk_on_weights, risk_off_weights)
                 sharpe = result["performance"]["Sharpe"]
 
-                # Track best result
+                idx += 1
+                progress.progress(idx / total)
+
                 if sharpe > best_sharpe:
                     best_sharpe = sharpe
                     best_cfg = (length, ma_type, tol)
                     best = result
-
-                idx += 1
-                if using_streamlit:
-                    progress.progress(idx / total)
 
     return best_cfg, best
 
@@ -291,5 +266,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
