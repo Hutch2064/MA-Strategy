@@ -531,7 +531,7 @@ def main():
         if state == 1:  # RISK-ON
             ax.axvspan(start, end, color="blue", alpha=0.07)
         else:               # RISK-OFF
-        ax.axvspan(start, end, color="red", alpha=0.07)
+            ax.axvspan(start, end, color="red", alpha=0.07)
         
     ax.plot(best_result["equity_curve"], label="Optimized Strategy", linewidth=2)
     ax.plot(user_risk_on_curve, label="Risk-ON (Always On)", linestyle="--", linewidth=2)
