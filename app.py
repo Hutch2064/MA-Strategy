@@ -110,7 +110,7 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
-    btc = prices["BTC-USD"]
+    btc = prices["QQQ"]
 
     best_sharpe = -1e9
     best = None
@@ -194,8 +194,8 @@ def main():
     risk_off_weights = dict(zip(risk_off_tickers, risk_off_weights_list))
 
     all_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
-    if "BTC-USD" not in all_tickers:
-        all_tickers.append("BTC-USD")
+    if "QQQ" not in all_tickers:
+        all_tickers.append("QQQ")
 
     end_val = end if end.strip() != "" else None
     prices = load_price_data(all_tickers, start, end_val)
