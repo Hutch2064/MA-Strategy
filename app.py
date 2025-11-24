@@ -78,7 +78,7 @@ def generate_risk_on_signal(
     confirm_days: int = 1,
 ):
     """
-    price_btc: price series (BTC-USD or QQQ)
+    price_btc: BTC-USD price series
     ma_lengths: list[int]
     ma_types: list['sma' | 'ema']
     ma_tolerances: list[float], price > MA * (1 + tol)
@@ -182,18 +182,11 @@ def backtest_strategy(prices, risk_on_signal, risk_on_weights, risk_off_weights)
 
 @dataclass
 class StrategyParams:
-    # BTC MA config
-    btc_ma_lengths: list
-    btc_ma_types: list
-    btc_ma_tolerances: list
-    btc_min_ma_above: int
-    btc_confirm_days: int
-    # QQQ MA config
-    qqq_ma_lengths: list
-    qqq_ma_types: list
-    qqq_ma_tolerances: list
-    qqq_min_ma_above: int
-    qqq_confirm_days: int
+    ma_lengths: list
+    ma_types: list
+    ma_tolerances: list
+    min_ma_above: int
+    confirm_days: int
 
 
 # =========================
@@ -204,44 +197,32 @@ def random_param_sample(rng):
     """
     Sample one set of strategy parameters.
 
-    For EACH asset (BTC-USD, QQQ):
-      - MA lengths: any integer from 21 to 252
-      - Number of MAs: 1 to 4
-      - MA type: SMA or EMA
-      - Tolerance: 0% to 5%
-      - min_ma_above: 1 .. n_ma
-      - confirm_days: one of [1, 3, 5, 10, 20]
+    MA lengths: any integer from 21 to 252
+    Number of MAs: 1 to 4
+    MA type: SMA or EMA
+    Tolerance: 0% to 5%
+    min_ma_above: 1 .. n_ma
+    confirm_days: one of [1, 3, 5, 10, 20]
     """
     min_length = 21
     max_length = 252
 
-    # ----- BTC params -----
-    n_ma_btc = rng.integers(1, 5)  # 1–4 MAs
-    btc_ma_lengths = list(rng.integers(min_length, max_length + 1, size=n_ma_btc))
-    btc_ma_types = [rng.choice(["sma", "ema"]) for _ in range(n_ma_btc)]
-    btc_ma_tolerances = list(rng.uniform(0.0, 0.05, size=n_ma_btc))
-    btc_min_ma_above = rng.integers(1, n_ma_btc + 1)
-    btc_confirm_days = int(rng.choice([1, 3, 5, 10, 20]))
+    # 1–4 MAs (upper bound is exclusive, so use 5)
+    n_ma = rng.integers(1, 5)  # 1–4 MAs
 
-    # ----- QQQ params -----
-    n_ma_qqq = rng.integers(1, 5)  # 1–4 MAs
-    qqq_ma_lengths = list(rng.integers(min_length, max_length + 1, size=n_ma_qqq))
-    qqq_ma_types = [rng.choice(["sma", "ema"]) for _ in range(n_ma_qqq)]
-    qqq_ma_tolerances = list(rng.uniform(0.0, 0.05, size=n_ma_qqq))
-    qqq_min_ma_above = rng.integers(1, n_ma_qqq + 1)
-    qqq_confirm_days = int(rng.choice([1, 3, 5, 10, 20]))
+    ma_lengths = list(rng.integers(min_length, max_length + 1, size=n_ma))
+    ma_types = [rng.choice(["sma", "ema"]) for _ in range(n_ma)]
+    ma_tolerances = list(rng.uniform(0.0, 0.05, size=n_ma))
+
+    min_ma_above = rng.integers(1, n_ma + 1)
+    confirm_days = int(rng.choice([1, 3, 5, 10, 20]))
 
     return StrategyParams(
-        btc_ma_lengths=btc_ma_lengths,
-        btc_ma_types=btc_ma_types,
-        btc_ma_tolerances=btc_ma_tolerances,
-        btc_min_ma_above=btc_min_ma_above,
-        btc_confirm_days=btc_confirm_days,
-        qqq_ma_lengths=qqq_ma_lengths,
-        qqq_ma_types=qqq_ma_types,
-        qqq_ma_tolerances=qqq_ma_tolerances,
-        qqq_min_ma_above=qqq_min_ma_above,
-        qqq_confirm_days=qqq_confirm_days,
+        ma_lengths=ma_lengths,
+        ma_types=ma_types,
+        ma_tolerances=ma_tolerances,
+        min_ma_above=min_ma_above,
+        confirm_days=confirm_days,
     )
 
 
@@ -255,7 +236,6 @@ def run_random_search(
     progress_bar=None,
 ):
     btc = prices["BTC-USD"]
-    qqq = prices["QQQ"]
 
     rng = np.random.default_rng(seed)
 
@@ -266,28 +246,14 @@ def run_random_search(
     for i in range(n_iter):
         params = random_param_sample(rng)
 
-        # BTC signal
-        risk_on_btc = generate_risk_on_signal(
+        risk_on = generate_risk_on_signal(
             price_btc=btc,
-            ma_lengths=params.btc_ma_lengths,
-            ma_types=params.btc_ma_types,
-            ma_tolerances=params.btc_ma_tolerances,
-            min_ma_above=params.btc_min_ma_above,
-            confirm_days=params.btc_confirm_days,
+            ma_lengths=params.ma_lengths,
+            ma_types=params.ma_types,
+            ma_tolerances=params.ma_tolerances,
+            min_ma_above=params.min_ma_above,
+            confirm_days=params.confirm_days,
         )
-
-        # QQQ signal
-        risk_on_qqq = generate_risk_on_signal(
-            price_btc=qqq,
-            ma_lengths=params.qqq_ma_lengths,
-            ma_types=params.qqq_ma_types,
-            ma_tolerances=params.qqq_ma_tolerances,
-            min_ma_above=params.qqq_min_ma_above,
-            confirm_days=params.qqq_confirm_days,
-        )
-
-        # BOTH must be true for risk-on
-        risk_on = risk_on_btc & risk_on_qqq
 
         result = backtest_strategy(prices, risk_on, risk_on_weights, risk_off_weights)
         sharpe = result["performance"]["Sharpe"]
@@ -309,66 +275,38 @@ def run_random_search(
 
 def format_params(params: StrategyParams) -> pd.DataFrame:
     rows = []
-
-    # BTC rows
     for i, (L, t, tol) in enumerate(
-        zip(params.btc_ma_lengths, params.btc_ma_types, params.btc_ma_tolerances),
-        start=1
+        zip(params.ma_lengths, params.ma_types, params.ma_tolerances), start=1
     ):
         rows.append(
             {
-                "Asset": "BTC-USD",
                 "MA #": i,
                 "Length (days)": int(L),
                 "Type": t.upper(),
                 "Tolerance": f"{tol:.2%}",
             }
         )
-
-    # QQQ rows
-    for i, (L, t, tol) in enumerate(
-        zip(params.qqq_ma_lengths, params.qqq_ma_types, params.qqq_ma_tolerances),
-        start=1
-    ):
-        rows.append(
-            {
-                "Asset": "QQQ",
-                "MA #": i,
-                "Length (days)": int(L),
-                "Type": t.upper(),
-                "Tolerance": f"{tol:.2%}",
-            }
-        )
-
     df = pd.DataFrame(rows)
-
     meta = pd.DataFrame(
         {
-            "Asset": ["BTC-USD", "BTC-USD", "QQQ", "QQQ"],
-            "Setting": ["min_ma_above", "confirm_days", "min_ma_above", "confirm_days"],
-            "Value": [
-                params.btc_min_ma_above,
-                params.btc_confirm_days,
-                params.qqq_min_ma_above,
-                params.qqq_confirm_days,
-            ],
+            "Setting": ["min_ma_above", "confirm_days"],
+            "Value": [params.min_ma_above, params.confirm_days],
         }
     )
     return df, meta
 
 
 def main():
-    st.set_page_config(page_title="BTC + QQQ Trend Optimized Portfolio", layout="wide")
+    st.set_page_config(page_title="BTC Trend Optimized Portfolio", layout="wide")
 
-    st.title("Bitcoin + QQQ Trend – Optimized Risk-On Portfolio")
+    st.title("Bitcoin Trend – Optimized Risk-On Portfolio")
     st.write(
-        "This app optimizes a BTC- and QQQ-based risk-on / risk-off strategy using moving averages "
+        "This app optimizes a BTC-based risk-on / risk-off strategy using moving averages "
         "and backtests the resulting portfolio:\n\n"
         "- **Risk-On**: User-defined portfolio (any tickers + any weights, leverage allowed)\n"
         "- **Risk-Off**: User-defined portfolio (any tickers + weights, e.g. UUP, SHY, CASH)\n\n"
         "The optimizer searches over MA lengths (21–252 days), number of MAs (1–4), SMA vs EMA, "
-        "tolerances, confirmation window, and confirmation count for BOTH BTC-USD and QQQ, "
-        "maximizing Sharpe ratio. The model is risk-on only when BOTH BTC and QQQ signals are risk-on."
+        "tolerances, confirmation window, and confirmation count, maximizing Sharpe ratio."
     )
 
     # Sidebar controls
@@ -469,19 +407,16 @@ def main():
     risk_off_non_cash = [t for t in risk_off_tickers if t != "CASH"]
     all_tickers = sorted(set(risk_on_non_cash + risk_off_non_cash))
 
-    # Make sure BTC-USD and QQQ exist in the universe for the signal logic
+    # Make sure BTC-USD exists in the universe for the signal logic
     if "BTC-USD" not in all_tickers:
         all_tickers.append("BTC-USD")
-    if "QQQ" not in all_tickers:
-        all_tickers.append("QQQ")
 
     with st.spinner("Downloading data and running optimization..."):
         prices = load_price_data(all_tickers, start_date, end_date_val)
 
-        # Require BTC-USD and QQQ for signal generation
-        missing_core = [t for t in ["BTC-USD", "QQQ"] if t not in prices.columns]
-        if missing_core:
-            st.error(f"Core signal tickers missing from downloaded prices: {missing_core}")
+        # Require BTC-USD for signal generation
+        if "BTC-USD" not in prices.columns:
+            st.error("BTC-USD data is missing from the downloaded prices. Cannot build MA signal.")
             return
 
         prices = prices[sorted(prices.columns)].dropna(how="any")
@@ -548,7 +483,7 @@ def main():
     st.subheader("Optimized Moving Average Configuration")
 
     df_ma, df_meta = format_params(best_params)
-    st.write("**Moving Averages (BTC-USD & QQQ)**")
+    st.write("**Moving Averages**")
     st.dataframe(df_ma, use_container_width=True)
 
     st.write("**Global Settings**")
