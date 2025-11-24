@@ -161,7 +161,7 @@ def send_email(regime, cfg, perf):
     html = f"""
     <html>
       <body>
-        <h2>BTC MA Model — Daily Signal</h2>
+        <h2>BTC MA Optimized Portfolio — Daily Signal</h2>
         <p><b>Regime:</b> {regime}</p>
 
         <h3>Performance</h3>
@@ -184,7 +184,7 @@ def send_email(regime, cfg, perf):
     """
 
     msg = MIMEMultipart()
-    msg["Subject"] = f"BTC Trend Model — {regime}"
+    msg["Subject"] = f"BTC MA Optimized Portfolio — {regime}"
     msg["From"] = EMAIL_USER
     msg["To"] = SEND_TO
 
@@ -212,7 +212,7 @@ if __name__ == "__main__":
     eq = best_result["equity_curve"]
 
     is_on = bool(signal.iloc[-1])
-    regime = "RISK-ON (33/33/33)" if is_on else "RISK-OFF (100% UUP)"
+    regime = "RISK-ON" if is_on else "RISK-OFF"
 
     # Plot
     fig, ax = plt.subplots(figsize=(10, 5))
