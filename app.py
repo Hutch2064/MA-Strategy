@@ -9,7 +9,7 @@ import streamlit as st
 # CONFIG
 # =========================
 
-DEFAULT_START_DATE = "2011-11-24"
+DEFAULT_START_DATE = "2011-11-16"
 DEFAULT_END_DATE = None  # None = up to today
 
 # Base assets originally used (still used for default risk-on & benchmark)
