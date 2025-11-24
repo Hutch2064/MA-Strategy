@@ -30,23 +30,27 @@ RISK_OFF_WEIGHTS = {
 def load_price_data(tickers, start_date, end_date=None):
     data = yf.download(tickers, start=start_date, end=end_date, progress=False)
 
-    # NEW: flatten MultiIndex ALWAYS
+    # 1. ALWAYS FLATTEN MULTIINDEX
     if isinstance(data.columns, pd.MultiIndex):
+        # Example: ('Adj Close','BTC-USD') -> 'BTC-USD'
         data.columns = data.columns.get_level_values(-1)
 
-    # Prefer Adjusted closes
+    # 2. Pick adjusted or close
     if "Adj Close" in data.columns:
         px = data["Adj Close"].copy()
-    else:
+    elif "Close" in data.columns:
         px = data["Close"].copy()
+    else:
+        raise RuntimeError(f"No price columns found. Columns = {list(data.columns)}")
 
-    # Guarantee DataFrame
+    # 3. Ensure DataFrame, not Series
     if isinstance(px, pd.Series):
         px = px.to_frame(name=tickers[0])
 
-    # Keep only tickers we asked for
+    # 4. Keep only requested tickers
     px = px[[c for c in px.columns if c in tickers]]
 
+    # 5. Drop empty rows
     return px.dropna(how="all")
 
 # ============================================
