@@ -514,8 +514,23 @@ def main():
     ax.set_ylabel("Portfolio Value (normalized)")
     ax.legend()
     ax.grid(True, alpha=0.3)
+    
+# === Add vertical regime lines ===
 
-    st.pyplot(fig)
+    signal = risk_on_signal.astype(int)
+
+    # Find switch points
+    switch_points = signal.diff().fillna(0)
+
+    # Loop through switch points
+    for date, change in switch_points.items():
+        if change == 1:
+            # switched INTO risk-on → green line
+            ax.axvline(date, color="green", alpha=0.5, linewidth=1)
+        elif change == -1:
+            # switched INTO risk-off → red line
+            ax.axvline(date, color="red", alpha=0.5, linewidth=1)
+        st.pyplot(fig)
 
     st.caption(
         "Execution assumes trades occur on the next day's open based on today's signal "
