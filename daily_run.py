@@ -16,7 +16,7 @@ from dataclasses import dataclass
 # CONFIG (identical)
 # =========================
 
-DEFAULT_START_DATE = "2011-11-16"
+DEFAULT_START_DATE = "2011-11-24"
 DEFAULT_END_DATE = None  # None = up to today
 
 TICKERS = ["BTC-USD", "GLD", "TQQQ", "UUP"]
@@ -183,14 +183,16 @@ def random_param_sample(rng):
     min_length = 21
     max_length = 252
 
-    n_ma = rng.integers(1, 5)  # 1–4 MAs
+    # 1–4 MAs (upper bound exclusive)
+    n_ma = rng.integers(1, 5)
 
     ma_lengths = list(rng.integers(min_length, max_length + 1, size=n_ma))
     ma_types = [rng.choice(["sma", "ema"]) for _ in range(n_ma)]
     ma_tolerances = list(rng.uniform(0.0, 0.05, size=n_ma))
 
     min_ma_above = rng.integers(1, n_ma + 1)
-    confirm_days = np.random.randint(1, 6)
+    # Match Streamlit confirm_days domain and RNG
+    confirm_days = int(rng.choice([1, 3, 5, 10, 20]))
 
     return StrategyParams(
         ma_lengths=ma_lengths,
@@ -385,3 +387,4 @@ if __name__ == "__main__":
     regime_text = "RISK-ON (33/33/33 3XGLD / TQQQ / BTC)" if is_risk_on_today else "RISK-OFF (100% UUP)"
 
     send_email(regime_text, best_params, perf)
+
