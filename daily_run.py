@@ -190,7 +190,7 @@ def random_param_sample(rng):
     ma_tolerances = list(rng.uniform(0.0, 0.05, size=n_ma))
 
     min_ma_above = rng.integers(1, n_ma + 1)
-    confirm_days = np.random.randint(2, 6)
+    confirm_days = np.random.randint(1, 6)
 
     return StrategyParams(
         ma_lengths=ma_lengths,
