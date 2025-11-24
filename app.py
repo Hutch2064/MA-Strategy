@@ -147,8 +147,8 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 # ============================================
 
 def main():
-    st.set_page_config(page_title="BTC Trend Optimized Portfolio", layout="wide")
-    st.title("Bitcoin Trend – Optimized Risk-On Portfolio")
+    st.set_page_config(page_title="Bitcoin MA Optimized Portfolio", layout="wide")
+    st.title("Bitcoin MA Optimized Portfolio")
 
     st.write("""
     Deterministic brute-force moving-average regime model.
