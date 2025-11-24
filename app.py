@@ -448,6 +448,22 @@ def main():
 
         perf = best_result["performance"]
         risk_on_signal = best_result["risk_on_signal"]
+        # ==== TRADE COUNT & AVERAGE TRADES PER YEAR ====
+
+        # A “trade” happens when the regime flips (risk-on -> risk-off or the reverse)
+        signal_changes = risk_on_signal.astype(int).diff().abs().fillna(0)
+
+        num_trades = int(signal_changes.sum())
+        trades_per_year = num_trades / (len(risk_on_signal) / 252)
+
+        avg_trades_text = f"""
+        **Trading Frequency**
+        - Total trades: {num_trades}
+        - Average trades per year: {trades_per_year:.2f}
+        """
+
+        st.subheader("Trading Frequency Statistics")
+        st.markdown(avg_trades_text)
 
         # ---- Always-on user risk-on portfolio (no switching) ----
         rets = prices.pct_change().fillna(0.0)
