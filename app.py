@@ -530,7 +530,8 @@ def main():
         elif change == -1:
             # switched INTO risk-off → red line
             ax.axvline(date, color="red", alpha=0.5, linewidth=1)
-        st.pyplot(fig)
+    
+    st.pyplot(fig)
 
     st.caption(
         "Execution assumes trades occur on the next day's open based on today's signal "
