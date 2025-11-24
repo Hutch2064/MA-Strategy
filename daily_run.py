@@ -16,7 +16,7 @@ from dataclasses import dataclass
 # CONFIG (identical)
 # =========================
 
-DEFAULT_START_DATE = "2011-11-24"
+DEFAULT_START_DATE = "2011-11-16"
 DEFAULT_END_DATE = None  # None = up to today
 
 TICKERS = ["BTC-USD", "GLD", "TQQQ", "UUP"]
