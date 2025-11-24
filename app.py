@@ -26,7 +26,7 @@ RISK_OFF_WEIGHTS = {
     "UUP": 1.0,
 }
 
-DEFAULT_N_RANDOM_SEARCH_ITER = 300
+DEFAULT_N_RANDOM_SEARCH_ITER = 1000
 RISK_FREE_RATE = 0.0
 
 
@@ -192,7 +192,7 @@ class StrategyParams:
 # RANDOM SEARCH OPTIMIZER
 # =========================
 
-def random_param_sample():
+def random_param_sample(rng):
     """
     Sample one set of strategy parameters.
 
@@ -207,14 +207,14 @@ def random_param_sample():
     max_length = 252
 
     # 1–4 MAs (upper bound is exclusive, so use 5)
-    n_ma = np.random.randint(1, 5)  # 1–4 MAs
+    n_ma = rng.integers(1, 5)  # 1–4 MAs
 
-    ma_lengths = list(np.random.randint(min_length, max_length + 1, size=n_ma))
-    ma_types = [np.random.choice(["sma", "ema"]) for _ in range(n_ma)]
-    ma_tolerances = list(np.random.uniform(0.0, 0.05, size=n_ma))
+    ma_lengths = list(rng.integers(min_length, max_length + 1, size=n_ma))
+    ma_types = [rng.choice(["sma", "ema"]) for _ in range(n_ma)]
+    ma_tolerances = list(rng.uniform(0.0, 0.05, size=n_ma))
 
-    min_ma_above = np.random.randint(1, n_ma + 1)
-    confirm_days = int(np.random.choice([1, 3, 5, 10, 20]))
+    min_ma_above = rng.integers(1, n_ma + 1)
+    confirm_days = int(rng.choice([1, 3, 5, 10, 20]))
 
     return StrategyParams(
         ma_lengths=ma_lengths,
@@ -232,17 +232,18 @@ def run_random_search(
     risk_off_weights,
     rf_rate=0.0,
     seed=42,
+    progress_bar=None,
 ):
     btc = prices["BTC-USD"]
 
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     best_params = None
     best_result = None
     best_sharpe = -np.inf
 
-    for _ in range(n_iter):
-        params = random_param_sample()
+    for i in range(n_iter):
+        params = random_param_sample(rng)
 
         risk_on = generate_risk_on_signal(
             price_btc=btc,
@@ -260,6 +261,9 @@ def run_random_search(
             best_sharpe = sharpe
             best_params = params
             best_result = result
+
+        if progress_bar is not None:
+            progress_bar.progress((i + 1) / n_iter)
 
     return best_params, best_result
 
@@ -311,10 +315,9 @@ def main():
     end_date = st.sidebar.text_input("End Date (YYYY-MM-DD) or empty for today", "")
     end_date_val = end_date if end_date.strip() != "" else None
 
-    n_iter = st.sidebar.slider(
-        "Optimization iterations", min_value=50, max_value=1000,
-        value=DEFAULT_N_RANDOM_SEARCH_ITER, step=50
-    )
+    # Fixed iterations (not user-selected)
+    st.sidebar.markdown(f"Optimization iterations: **{DEFAULT_N_RANDOM_SEARCH_ITER}**")
+    n_iter = DEFAULT_N_RANDOM_SEARCH_ITER
 
     seed = st.sidebar.number_input("Random seed", min_value=0, value=42, step=1)
 
@@ -389,6 +392,8 @@ def main():
             st.error(f"Missing risk-off tickers in downloaded data: {missing_risk_off}")
             return
 
+        progress_bar = st.progress(0.0)
+
         best_params, best_result = run_random_search(
             prices=prices,
             n_iter=n_iter,
@@ -396,6 +401,7 @@ def main():
             risk_off_weights=risk_off_weights,
             rf_rate=RISK_FREE_RATE,
             seed=seed,
+            progress_bar=progress_bar,
         )
 
         perf = best_result["performance"]
