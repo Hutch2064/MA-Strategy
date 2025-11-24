@@ -211,6 +211,18 @@ def main():
     perf = best_result["performance"]
     sig = best_result["signal"]
 
+    # ==============================
+    # CURRENT DAY REGIME PRINTOUT
+    # ==============================
+    latest_day = sig.index[-1]               # last date in the dataset
+    latest_signal = sig.iloc[-1]             # True/False for final day
+
+    current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
+
+    st.subheader("Current Regime Status")
+    st.write(f"**Date:** {latest_day.date()}") 
+    st.write(f"**Regime:** {current_regime}")
+
     # Trade count
     switches = sig.astype(int).diff().abs().sum()
     trades_per_year = switches / (len(sig) / 252)
