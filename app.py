@@ -215,7 +215,7 @@ def random_param_sample(rng):
     ma_tolerances = list(rng.uniform(0.0, 0.05, size=n_ma))
 
     min_ma_above = rng.integers(1, n_ma + 1)
-    confirm_days = int(rng.choice([1,2, 3, 4, 5]))
+    confirm_days = int(rng.choice([1, 3, 5, 10, 20]))
 
     return StrategyParams(
         ma_lengths=ma_lengths,
@@ -514,23 +514,7 @@ def main():
     ax.set_ylabel("Portfolio Value (normalized)")
     ax.legend()
     ax.grid(True, alpha=0.3)
-    
-# === Add vertical regime lines ===
 
-    signal = risk_on_signal.astype(int)
-
-    # Find switch points
-    switch_points = signal.diff().fillna(0)
-
-    # Loop through switch points
-    for date, change in switch_points.items():
-        if change == 1:
-            # switched INTO risk-on → green line
-            ax.axvline(date, color="green", alpha=0.5, linewidth=1)
-        elif change == -1:
-            # switched INTO risk-off → red line
-            ax.axvline(date, color="red", alpha=0.5, linewidth=1)
-    
     st.pyplot(fig)
 
     st.caption(
@@ -541,5 +525,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
