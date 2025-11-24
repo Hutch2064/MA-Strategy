@@ -202,7 +202,7 @@ def random_param_sample(rng):
     MA type: SMA or EMA
     Tolerance: 0% to 5%
     min_ma_above: 1 .. n_ma
-    confirm_days: one of [1, 3, 5, 10, 20]
+    confirm_days:(2, 6)
     """
     min_length = 21
     max_length = 252
@@ -215,7 +215,7 @@ def random_param_sample(rng):
     ma_tolerances = list(rng.uniform(0.0, 0.05, size=n_ma))
 
     min_ma_above = rng.integers(1, n_ma + 1)
-    confirm_days = int(rng.choice([1, 3, 5, 10, 20]))
+    confirm_days = np.random.randint(2, 6)
 
     return StrategyParams(
         ma_lengths=ma_lengths,
