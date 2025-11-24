@@ -12,9 +12,10 @@ import streamlit as st
 DEFAULT_START_DATE = "2011-11-24"
 DEFAULT_END_DATE = None  # None = up to today
 
-# Base assets used for risk-on and as defaults
+# Base assets originally used (still used for default risk-on & benchmark)
 TICKERS = ["BTC-USD", "GLD", "TQQQ", "UUP"]
 
+# Default risk-on weights (used only for UI defaults; user can override)
 RISK_ON_WEIGHTS = {
     "GLD": 3.0 / 3.0,
     "TQQQ": 1.0 / 3.0,
@@ -296,13 +297,13 @@ def format_params(params: StrategyParams) -> pd.DataFrame:
 
 
 def main():
-    st.set_page_config(page_title="MA Strategy", layout="wide")
+    st.set_page_config(page_title="BTC Trend Optimized Portfolio", layout="wide")
 
-    st.title("MA Strategy")
+    st.title("Bitcoin Trend – Optimized Risk-On Portfolio")
     st.write(
         "This app optimizes a BTC-based risk-on / risk-off strategy using moving averages "
         "and backtests the resulting portfolio:\n\n"
-        "- **Risk-On**: 33.33% 3XGLD, 33.33% TQQQ, 33.33% BTC\n"
+        "- **Risk-On**: User-defined portfolio (any tickers + any weights, leverage allowed)\n"
         "- **Risk-Off**: User-defined portfolio (any tickers + weights, e.g. UUP, SHY, CASH)\n\n"
         "The optimizer searches over MA lengths (21–252 days), number of MAs (1–4), SMA vs EMA, "
         "tolerances, confirmation window, and confirmation count, maximizing Sharpe ratio."
@@ -321,19 +322,35 @@ def main():
 
     seed = st.sidebar.number_input("Random seed", min_value=0, value=42, step=1)
 
-    # Risk-off portfolio input
-    st.sidebar.header("Risk-Off Portfolio")
+    # ----- Risk-ON portfolio input -----
+    st.sidebar.header("Risk-ON Portfolio")
+
+    default_risk_on_tickers = ",".join(RISK_ON_WEIGHTS.keys())
+    default_risk_on_weights = ",".join(str(w) for w in RISK_ON_WEIGHTS.values())
+
+    risk_on_tickers_str = st.sidebar.text_input(
+        "Risk-ON Tickers (comma separated)",
+        value=default_risk_on_tickers
+    )
+
+    risk_on_weights_str = st.sidebar.text_input(
+        "Risk-ON Weights (comma separated, can sum to anything)",
+        value=default_risk_on_weights
+    )
+
+    # ----- Risk-OFF portfolio input -----
+    st.sidebar.header("Risk-OFF Portfolio")
 
     default_risk_off_tickers = ",".join(RISK_OFF_WEIGHTS.keys())
     default_risk_off_weights = ",".join(str(w) for w in RISK_OFF_WEIGHTS.values())
 
     risk_off_tickers_str = st.sidebar.text_input(
-        "Risk-Off Tickers (comma separated)",
+        "Risk-OFF Tickers (comma separated)",
         value=default_risk_off_tickers
     )
 
     risk_off_weights_str = st.sidebar.text_input(
-        "Risk-Off Weights (comma separated, must sum to 1.0)",
+        "Risk-OFF Weights (comma separated, must sum to 1.0)",
         value=default_risk_off_weights
     )
 
@@ -343,53 +360,78 @@ def main():
         st.info("Set your parameters in the sidebar and click **Run Backtest & Optimize**.")
         return
 
+    # Parse risk-on inputs
+    risk_on_tickers = [t.strip().upper() for t in risk_on_tickers_str.split(",") if t.strip() != ""]
+
+    try:
+        risk_on_weights_list = [float(w.strip()) for w in risk_on_weights_str.split(",") if w.strip() != ""]
+    except Exception:
+        st.error("Invalid Risk-ON weights. Please enter numbers separated by commas.")
+        return
+
+    if len(risk_on_tickers) == 0:
+        st.error("Please enter at least one Risk-ON ticker.")
+        return
+
+    if len(risk_on_tickers) != len(risk_on_weights_list):
+        st.error("Number of Risk-ON tickers must match number of Risk-ON weights.")
+        return
+
+    risk_on_weights = dict(zip(risk_on_tickers, risk_on_weights_list))
+
     # Parse risk-off inputs
     risk_off_tickers = [t.strip().upper() for t in risk_off_tickers_str.split(",") if t.strip() != ""]
 
     try:
         risk_off_weights_list = [float(w.strip()) for w in risk_off_weights_str.split(",") if w.strip() != ""]
     except Exception:
-        st.error("Invalid weights. Please enter numbers separated by commas.")
+        st.error("Invalid Risk-OFF weights. Please enter numbers separated by commas.")
         return
 
     if len(risk_off_tickers) == 0:
-        st.error("Please enter at least one risk-off ticker.")
+        st.error("Please enter at least one Risk-OFF ticker.")
         return
 
     if len(risk_off_tickers) != len(risk_off_weights_list):
-        st.error("Number of tickers must match number of weights.")
+        st.error("Number of Risk-OFF tickers must match number of Risk-OFF weights.")
         return
 
     if not np.isclose(sum(risk_off_weights_list), 1.0):
-        st.error("Weights must sum to 1.0.")
+        st.error("Risk-OFF weights must sum to 1.0.")
         return
 
     risk_off_weights = dict(zip(risk_off_tickers, risk_off_weights_list))
 
-    # Build dynamic ticker list: risk-on assets + non-CASH risk-off assets
-    base_assets = ["BTC-USD", "GLD", "TQQQ"]
+    # Build dynamic ticker list: all non-CASH risk-on + non-CASH risk-off
+    risk_on_non_cash = [t for t in risk_on_tickers if t != "CASH"]
     risk_off_non_cash = [t for t in risk_off_tickers if t != "CASH"]
-    all_tickers = sorted(set(base_assets + risk_off_non_cash))
+    all_tickers = sorted(set(risk_on_non_cash + risk_off_non_cash))
+
+    # Make sure BTC-USD exists in the universe for the signal logic
+    if "BTC-USD" not in all_tickers:
+        all_tickers.append("BTC-USD")
 
     with st.spinner("Downloading data and running optimization..."):
         prices = load_price_data(all_tickers, start_date, end_date_val)
 
-        # Require core risk-on assets
-        core_assets = [t for t in base_assets if t in prices.columns]
-        if len(core_assets) < len(base_assets):
-            st.error(f"Missing one or more core risk-on tickers in data. Found: {core_assets}")
+        # Require BTC-USD for signal generation
+        if "BTC-USD" not in prices.columns:
+            st.error("BTC-USD data is missing from the downloaded prices. Cannot build MA signal.")
             return
 
         prices = prices[sorted(prices.columns)].dropna(how="any")
 
-        # Add synthetic CASH if needed
-        if "CASH" in risk_off_tickers:
+        # Add synthetic CASH if needed (flat line at 1.0)
+        if "CASH" in risk_on_tickers or "CASH" in risk_off_tickers:
             prices["CASH"] = 1.0
 
-        # Validate risk-off tickers exist in prices (except CASH)
+        # Validate risk-on and risk-off tickers exist in prices (except CASH)
+        missing_risk_on = [t for t in risk_on_non_cash if t not in prices.columns]
         missing_risk_off = [t for t in risk_off_non_cash if t not in prices.columns]
-        if missing_risk_off:
-            st.error(f"Missing risk-off tickers in downloaded data: {missing_risk_off}")
+
+        missing_all = missing_risk_on + missing_risk_off
+        if missing_all:
+            st.error(f"Missing tickers in downloaded data: {missing_all}")
             return
 
         progress_bar = st.progress(0.0)
@@ -397,7 +439,7 @@ def main():
         best_params, best_result = run_random_search(
             prices=prices,
             n_iter=n_iter,
-            risk_on_weights=RISK_ON_WEIGHTS,
+            risk_on_weights=risk_on_weights,
             risk_off_weights=risk_off_weights,
             rf_rate=RISK_FREE_RATE,
             seed=seed,
@@ -407,11 +449,14 @@ def main():
         perf = best_result["performance"]
         risk_on_signal = best_result["risk_on_signal"]
 
-        # Pure risk-on benchmark (always 33/33/33)
+        # Pure risk-on benchmark (always 33/33/33 GLD/TQQQ/BTC-USD)
         rets = prices.pct_change().fillna(0.0)
-        cols = ["GLD", "TQQQ", "BTC-USD"]
-        pure_risk_on_rets = (rets[cols] * np.array([1 / 3, 1 / 3, 1 / 3])).sum(axis=1)
-        pure_risk_on_curve = (1 + pure_risk_on_rets).cumprod()
+        cols = [c for c in ["GLD", "TQQQ", "BTC-USD"] if c in prices.columns]
+        if len(cols) == 3:
+            pure_risk_on_rets = (rets[cols] * np.array([1 / 3, 1 / 3, 1 / 3])).sum(axis=1)
+            pure_risk_on_curve = (1 + pure_risk_on_rets).cumprod()
+        else:
+            pure_risk_on_curve = None
 
     # ====== Display Results ======
 
@@ -433,12 +478,15 @@ def main():
     st.write("**Global Settings**")
     st.dataframe(df_meta, use_container_width=True)
 
-    st.subheader("Selected Risk-Off Portfolio")
+    st.subheader("Selected Risk-ON Portfolio")
+    st.write(risk_on_weights)
+
+    st.subheader("Selected Risk-OFF Portfolio")
     st.write(risk_off_weights)
 
     # Current regime
     is_risk_on_today = bool(risk_on_signal.iloc[-1])
-    regime_text = "RISK-ON (33/33/33 3XGLD / TQQQ / BTC)" if is_risk_on_today else "RISK-OFF (Custom portfolio)"
+    regime_text = "RISK-ON (Custom portfolio)" if is_risk_on_today else "RISK-OFF (Custom portfolio)"
     regime_color = "🟢" if is_risk_on_today else "🔴"
 
     st.subheader("Current Regime")
@@ -449,7 +497,8 @@ def main():
 
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(best_result["equity_curve"], label="Optimized Strategy", linewidth=2)
-    ax.plot(pure_risk_on_curve, label="Pure Risk-On 33/33/33", linestyle="--", linewidth=2)
+    if pure_risk_on_curve is not None:
+        ax.plot(pure_risk_on_curve, label="Pure Risk-On 33/33/33 (GLD/TQQQ/BTC)", linestyle="--", linewidth=2)
     ax.set_title("Equity Curves: Optimized Strategy vs Pure Risk-On")
     ax.set_xlabel("Date")
     ax.set_ylabel("Portfolio Value (normalized)")
