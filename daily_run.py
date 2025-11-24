@@ -12,6 +12,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 from dataclasses import dataclass
+import time
 
 # =========================
 # CONFIG
@@ -23,9 +24,9 @@ DEFAULT_END_DATE = None
 TICKERS = ["BTC-USD", "GLD", "TQQQ", "UUP"]
 
 RISK_ON_WEIGHTS = {
-    "GLD": 3.0 / 3.0,
-    "TQQQ": 1.0 / 3.0,
-    "BTC-USD": 1.0 / 3.0,
+    "GLD": 1/3,
+    "TQQQ": 1/3,
+    "BTC-USD": 1/3,
 }
 
 RISK_OFF_WEIGHTS = {
@@ -36,15 +37,43 @@ RISK_FREE_RATE = 0.0
 
 
 # =========================
-# DATA LOADING
+# ROBUST PRICE LOADING
 # =========================
 
-def load_price_data_raw(tickers, start_date, end_date=None):
-    data = yf.download(tickers, start=start_date, end=end_date, progress=False)
-    px = data["Adj Close"] if "Adj Close" in data.columns else data["Close"]
-    if isinstance(px, pd.Series):
-        px = px.to_frame(name=tickers[0])
-    return px.dropna(how="all")
+def load_price_data_raw(tickers, start_date, end_date=None, retries=3):
+    """
+    More robust version of your Streamlit loader.
+    Retries downloads and ensures the returned DataFrame
+    contains all requested tickers.
+    """
+    for attempt in range(retries):
+        data = yf.download(
+            tickers, start=start_date, end=end_date,
+            progress=False, group_by='ticker'
+        )
+
+        try:
+            if "Adj Close" in data.columns:
+                px = data["Adj Close"].copy()
+            else:
+                px = data["Close"].copy()
+        except Exception:
+            time.sleep(1)
+            continue
+
+        # If single ticker, force DataFrame
+        if isinstance(px, pd.Series):
+            px = px.to_frame(name=tickers[0])
+
+        # Check completeness
+        missing = [t for t in tickers if t not in px.columns]
+        if len(missing) == 0:
+            return px.dropna(how="all")
+
+        # Retry if missing tickers
+        time.sleep(1)
+
+    raise RuntimeError(f"Failed to download required tickers: {missing}")
 
 
 # =========================
@@ -110,6 +139,9 @@ def backtest(prices, signal, ron_w, roff_w):
 # =========================
 
 def run_grid_search(prices, ron_w, roff_w):
+    if "BTC-USD" not in prices.columns:
+        raise ValueError("BTC-USD missing from price data.")
+
     btc = prices["BTC-USD"]
 
     lengths = range(21, 253)
@@ -221,9 +253,9 @@ def send_email(regime, params, perf):
     msg["From"] = EMAIL_USER
     msg["To"] = SEND_TO
 
-    msg_alt = MIMEMultipart("alternative")
-    msg.attach(msg_alt)
-    msg_alt.attach(MIMEText(html, "html"))
+    alt = MIMEMultipart("alternative")
+    alt.attach(MIMEText(html, "html"))
+    msg.attach(alt)
 
     attach_file(msg, "equity_curve.png")
 
@@ -238,7 +270,7 @@ def send_email(regime, params, perf):
 
 if __name__ == "__main__":
     prices = load_price_data_raw(TICKERS, DEFAULT_START_DATE, DEFAULT_END_DATE)
-    prices = prices.dropna()
+    prices = prices.dropna(how="any")
 
     best_params, best_result = run_grid_search(
         prices,
@@ -256,4 +288,3 @@ if __name__ == "__main__":
     regime = "RISK-ON (33/33/33)" if is_on else "RISK-OFF (100% UUP)"
 
     send_email(regime, best_params, perf)
-
