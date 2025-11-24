@@ -30,13 +30,22 @@ RISK_OFF_WEIGHTS = {
 def load_price_data(tickers, start_date, end_date=None):
     data = yf.download(tickers, start=start_date, end=end_date, progress=False)
 
+    # NEW: flatten MultiIndex ALWAYS
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.get_level_values(-1)
+
+    # Prefer Adjusted closes
     if "Adj Close" in data.columns:
         px = data["Adj Close"].copy()
     else:
         px = data["Close"].copy()
 
+    # Guarantee DataFrame
     if isinstance(px, pd.Series):
         px = px.to_frame(name=tickers[0])
+
+    # Keep only tickers we asked for
+    px = px[[c for c in px.columns if c in tickers]]
 
     return px.dropna(how="all")
 
