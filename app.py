@@ -507,6 +507,32 @@ def main():
     st.subheader("Equity Curve")
 
     fig, ax = plt.subplots(figsize=(12, 6))
+    # === Background shading for risk-on / risk-off periods ===
+    signal = risk_on_signal.astype(int)
+
+    # Identify transition points
+    changes = signal.diff().fillna(0)
+
+    segments = []
+    current_state = signal.iloc[0]
+    start_idx = signal.index[0]
+
+    for date, change in changes.iteritems():
+        if change != 0:  # state changed
+            segments.append((start_idx, date, current_state))
+            start_idx = date
+            current_state = 1 - current_state  # flip 0/1
+
+    # Add final segment to the end
+    segments.append((start_idx, signal.index[-1], current_state))
+
+    # Now shade each segment
+    for start, end, state in segments:
+        if state == 1:  # RISK-ON
+            ax.axvspan(start, end, color="blue", alpha=0.07)
+        else:               # RISK-OFF
+        ax.axvspan(start, end, color="red", alpha=0.07)
+        
     ax.plot(best_result["equity_curve"], label="Optimized Strategy", linewidth=2)
     ax.plot(user_risk_on_curve, label="Risk-ON (Always On)", linestyle="--", linewidth=2)
     ax.set_title("Equity Curves: Optimized Strategy vs Always-On Risk-ON")
