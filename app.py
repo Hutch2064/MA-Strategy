@@ -13,7 +13,7 @@ DEFAULT_START_DATE = "2011-11-24"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "GLD": 3/3,
+    "GLD": 1/3,
     "TQQQ": 1/3,
     "BTC-USD": 1/3,
 }
@@ -30,27 +30,14 @@ RISK_OFF_WEIGHTS = {
 def load_price_data(tickers, start_date, end_date=None):
     data = yf.download(tickers, start=start_date, end=end_date, progress=False)
 
-    # 1. ALWAYS FLATTEN MULTIINDEX
-    if isinstance(data.columns, pd.MultiIndex):
-        # Example: ('Adj Close','BTC-USD') -> 'BTC-USD'
-        data.columns = data.columns.get_level_values(-1)
-
-    # 2. Pick adjusted or close
     if "Adj Close" in data.columns:
         px = data["Adj Close"].copy()
-    elif "Close" in data.columns:
-        px = data["Close"].copy()
     else:
-        raise RuntimeError(f"No price columns found. Columns = {list(data.columns)}")
+        px = data["Close"].copy()
 
-    # 3. Ensure DataFrame, not Series
     if isinstance(px, pd.Series):
         px = px.to_frame(name=tickers[0])
 
-    # 4. Keep only requested tickers
-    px = px[[c for c in px.columns if c in tickers]]
-
-    # 5. Drop empty rows
     return px.dropna(how="all")
 
 # ============================================
@@ -277,4 +264,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
