@@ -118,7 +118,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 
     lengths = range(21, 253)
     types = ["sma", "ema"]
-    tolerances = np.arange(0.0, 0.1001, 0.0025)  # 0.0% to 10.0% by 0.1%
+    tolerances = np.arange(0.0, 0.1001, 0.0025)  # 0.0% to 10.0% by 0.25%
 
     progress = st.progress(0.0)
     total = len(lengths) * len(types) * len(tolerances)
