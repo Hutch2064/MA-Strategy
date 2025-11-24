@@ -110,6 +110,12 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
+    # Indicator assets
+    if "BTC-USD" not in prices.columns or "QQQ" not in prices.columns:
+        missing = [t for t in ["BTC-USD", "QQQ"] if t not in prices.columns]
+        st.error(f"Missing price data for: {', '.join(missing)}")
+        st.stop()
+
     btc = prices["BTC-USD"]
     qqq = prices["QQQ"]
 
@@ -126,7 +132,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     idx = 0
 
     for length in lengths:
-        # Precompute MAs ONCE per length & type (major speed-up)
+        # Precompute MAs ONCE per length & type (speed-up)
         for ma_type in types:
 
             btc_ma = compute_ma(btc, length, ma_type)
@@ -134,7 +140,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 
             for tol in tolerances:
 
-                # Compute signals using precomputed MAs (MORE speed-up)
+                # Compute signals using precomputed MAs
                 btc_signal = btc > btc_ma * (1 + tol)
                 qqq_signal = qqq > qqq_ma * (1 + tol)
 
@@ -160,11 +166,15 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 # ============================================
 
 def main():
-    st.set_page_config(page_title="Bitcoin MA Optimized Portfolio", layout="wide")
-    st.title("Bitcoin MA Optimized Portfolio")
+    st.set_page_config(page_title="Bitcoin + QQQ MA Optimized Portfolio", layout="wide")
+    st.title("Bitcoin + QQQ MA Optimized Portfolio")
 
     st.write("""
     Deterministic brute-force moving-average regime model.
+
+    Regime signal is based on BOTH BTC-USD and QQQ using the SAME MA:
+    - Risk-ON only when **both** BTC-USD and QQQ are above their MA by the tolerance.
+
     Searches all combinations of:
     - MA Length: 21–252  
     - Type: SMA/EMA  
@@ -207,6 +217,10 @@ def main():
     risk_off_weights = dict(zip(risk_off_tickers, risk_off_weights_list))
 
     all_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
+
+    # Ensure indicator tickers always included
+    if "BTC-USD" not in all_tickers:
+        all_tickers.append("BTC-USD")
     if "QQQ" not in all_tickers:
         all_tickers.append("QQQ")
 
@@ -233,7 +247,7 @@ def main():
     current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
     st.subheader("Current Regime Status")
-    st.write(f"**Date:** {latest_day.date()}") 
+    st.write(f"**Date:** {latest_day.date()}")
     st.write(f"**Regime:** {current_regime}")
 
     # Trade count
@@ -252,7 +266,7 @@ def main():
     col4.metric("Max Drawdown", f"{perf['MaxDrawdown']:.2%}")
     col5.metric("Total Return", f"{perf['TotalReturn']:.2%}")
 
-    st.subheader("Optimized MA Configuration")
+    st.subheader("Optimized MA Configuration (Shared for BTC & QQQ)")
     st.write(f"**MA Length:** {best_len}")
     st.write(f"**MA Type:** {best_type.upper()}")
     st.write(f"**Tolerance:** {best_tol:.2%}")
@@ -280,7 +294,7 @@ def main():
 
     # Plot equity curve
     st.subheader("Equity Curve")
-    fig, ax = plt.subplots(figsize=(12,6))
+    fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(best_result["equity_curve"], label="Optimized Strategy", linewidth=2)
     ax.plot(user_eq, label="Always-On Risk-ON", linestyle="--", linewidth=2)
     ax.legend()
@@ -289,3 +303,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
