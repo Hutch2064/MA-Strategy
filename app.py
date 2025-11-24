@@ -224,7 +224,7 @@ def random_param_sample(rng):
     btc_confirm_days = int(rng.choice([1, 3, 5, 10, 20]))
 
     # ----- QQQ params -----
-    n_ma_btc = rng.integers(1, 5)  # 1–4 MAs
+    n_ma_qqq = rng.integers(1, 5)  # 1–4 MAs
     qqq_ma_lengths = list(rng.integers(min_length, max_length + 1, size=n_ma_qqq))
     qqq_ma_types = [rng.choice(["sma", "ema"]) for _ in range(n_ma_qqq)]
     qqq_ma_tolerances = list(rng.uniform(0.0, 0.05, size=n_ma_qqq))
