@@ -449,16 +449,18 @@ def main():
         perf = best_result["performance"]
         risk_on_signal = best_result["risk_on_signal"]
 
-        # Pure risk-on benchmark (always 33/33/33 GLD/TQQQ/BTC-USD)
+        # ---- Always-on user risk-on portfolio (no switching) ----
         rets = prices.pct_change().fillna(0.0)
-        cols = [c for c in ["GLD", "TQQQ", "BTC-USD"] if c in prices.columns]
-        if len(cols) == 3:
-            pure_risk_on_rets = (rets[cols] * np.array([1 / 3, 1 / 3, 1 / 3])).sum(axis=1)
-            pure_risk_on_curve = (1 + pure_risk_on_rets).cumprod()
-        else:
-            pure_risk_on_curve = None
+        user_risk_on_rets = pd.Series(0.0, index=rets.index)
+        for asset, w in risk_on_weights.items():
+            if asset in rets.columns:
+                user_risk_on_rets += rets[asset] * w
+        user_risk_on_curve = (1 + user_risk_on_rets).cumprod()
+        user_perf = compute_performance(user_risk_on_rets, user_risk_on_curve)
 
     # ====== Display Results ======
+
+    st.markdown(f"**Backtest start date:** {start_date}")
 
     st.subheader("Optimized Strategy Performance")
 
@@ -468,6 +470,15 @@ def main():
     col3.metric("Sharpe", f"{perf['Sharpe']:.3f}")
     col4.metric("Max Drawdown", f"{perf['MaxDrawdown']:.2%}")
     col5.metric("Total Return", f"{perf['TotalReturn']:.2%}")
+
+    st.subheader("Always-On Risk-ON Portfolio Performance")
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("CAGR", f"{user_perf['CAGR']:.2%}")
+    c2.metric("Volatility", f"{user_perf['Volatility']:.2%}")
+    c3.metric("Sharpe", f"{user_perf['Sharpe']:.3f}")
+    c4.metric("Max Drawdown", f"{user_perf['MaxDrawdown']:.2%}")
+    c5.metric("Total Return", f"{user_perf['TotalReturn']:.2%}")
 
     st.subheader("Optimized Moving Average Configuration")
 
@@ -497,9 +508,8 @@ def main():
 
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(best_result["equity_curve"], label="Optimized Strategy", linewidth=2)
-    if pure_risk_on_curve is not None:
-        ax.plot(pure_risk_on_curve, label="Pure Risk-On 33/33/33 (GLD/TQQQ/BTC)", linestyle="--", linewidth=2)
-    ax.set_title("Equity Curves: Optimized Strategy vs Pure Risk-On")
+    ax.plot(user_risk_on_curve, label="Risk-ON (Always On)", linestyle="--", linewidth=2)
+    ax.set_title("Equity Curves: Optimized Strategy vs Always-On Risk-ON")
     ax.set_xlabel("Date")
     ax.set_ylabel("Portfolio Value (normalized)")
     ax.legend()
