@@ -13,11 +13,11 @@ DEFAULT_START_DATE = "2011-11-24"
 DEFAULT_END_DATE = None  # None = up to today
 
 # Base assets used for risk-on and as defaults
-TICKERS = ["BTC-USD", "GLD", "TQQQ", "UUP"]
+TICKERS = ["BTC-USD", "GLD", "FNGO", "UUP"]
 
 RISK_ON_WEIGHTS = {
     "GLD": 3.0 / 3.0,
-    "TQQQ": 1.0 / 3.0,
+    "FNGO": 1.0 / 3.0,
     "BTC-USD": 1.0 / 3.0,
 }
 
@@ -302,7 +302,7 @@ def main():
     st.write(
         "This app optimizes a BTC-based risk-on / risk-off strategy using moving averages "
         "and backtests the resulting portfolio:\n\n"
-        "- **Risk-On**: 33.33% 3XGLD, 33.33% TQQQ, 33.33% BTC\n"
+        "- **Risk-On**: 33.33% 3XGLD, 33.33% FNGO, 33.33% BTC\n"
         "- **Risk-Off**: User-defined portfolio (any tickers + weights, e.g. UUP, SHY, CASH)\n\n"
         "The optimizer searches over MA lengths (21–252 days), number of MAs (1–4), SMA vs EMA, "
         "tolerances, confirmation window, and confirmation count, maximizing Sharpe ratio."
@@ -367,7 +367,7 @@ def main():
     risk_off_weights = dict(zip(risk_off_tickers, risk_off_weights_list))
 
     # Build dynamic ticker list: risk-on assets + non-CASH risk-off assets
-    base_assets = ["BTC-USD", "GLD", "TQQQ"]
+    base_assets = ["BTC-USD", "GLD", "FNGO"]
     risk_off_non_cash = [t for t in risk_off_tickers if t != "CASH"]
     all_tickers = sorted(set(base_assets + risk_off_non_cash))
 
@@ -409,7 +409,7 @@ def main():
 
         # Pure risk-on benchmark (always 33/33/33)
         rets = prices.pct_change().fillna(0.0)
-        cols = ["GLD", "TQQQ", "BTC-USD"]
+        cols = ["GLD", "FNGO", "BTC-USD"]
         pure_risk_on_rets = (rets[cols] * np.array([1 / 3, 1 / 3, 1 / 3])).sum(axis=1)
         pure_risk_on_curve = (1 + pure_risk_on_rets).cumprod()
 
@@ -438,7 +438,7 @@ def main():
 
     # Current regime
     is_risk_on_today = bool(risk_on_signal.iloc[-1])
-    regime_text = "RISK-ON (33/33/33 3XGLD / TQQQ / BTC)" if is_risk_on_today else "RISK-OFF (Custom portfolio)"
+    regime_text = "RISK-ON (33/33/33 3XGLD / FNGO / BTC)" if is_risk_on_today else "RISK-OFF (Custom portfolio)"
     regime_color = "🟢" if is_risk_on_today else "🔴"
 
     st.subheader("Current Regime")
