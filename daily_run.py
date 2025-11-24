@@ -11,8 +11,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-from dataclasses import dataclass
-import time
+
 
 # =========================
 # CONFIG
@@ -37,43 +36,41 @@ RISK_FREE_RATE = 0.0
 
 
 # =========================
-# ROBUST PRICE LOADING
+# OLD WORKING LOADER — DO NOT TOUCH
 # =========================
 
-def load_price_data_raw(tickers, start_date, end_date=None, retries=3):
-    """
-    More robust version of your Streamlit loader.
-    Retries downloads and ensures the returned DataFrame
-    contains all requested tickers.
-    """
-    for attempt in range(retries):
-        data = yf.download(
-            tickers, start=start_date, end=end_date,
-            progress=False, group_by='ticker'
-        )
+def load_price_data_raw(tickers, start_date, end_date=None):
+    data = yf.download(
+        tickers,
+        start=start_date,
+        end=end_date,
+        progress=False
+    )
 
-        try:
-            if "Adj Close" in data.columns:
-                px = data["Adj Close"].copy()
-            else:
-                px = data["Close"].copy()
-        except Exception:
-            time.sleep(1)
-            continue
+    # yfinance sometimes returns multi-index, sometimes flat
+    if isinstance(data.columns, pd.MultiIndex):
+        if "Adj Close" in data.columns.levels[0]:
+            px = data["Adj Close"]
+        else:
+            px = data["Close"]
+    else:
+        if "Adj Close" in data.columns:
+            px = data["Adj Close"]
+        else:
+            px = data["Close"]
 
-        # If single ticker, force DataFrame
-        if isinstance(px, pd.Series):
-            px = px.to_frame(name=tickers[0])
+    # If single ticker, make into DataFrame
+    if isinstance(px, pd.Series):
+        px = px.to_frame(name=tickers[0])
 
-        # Check completeness
-        missing = [t for t in tickers if t not in px.columns]
-        if len(missing) == 0:
-            return px.dropna(how="all")
+    # Drop rows where all assets are missing
+    px = px.dropna(how="all")
 
-        # Retry if missing tickers
-        time.sleep(1)
+    # Guarantee BTC-USD present or die
+    if "BTC-USD" not in px.columns:
+        raise RuntimeError("BTC-USD missing from downloaded data. Yahoo API glitch.")
 
-    raise RuntimeError(f"Failed to download required tickers: {missing}")
+    return px
 
 
 # =========================
@@ -135,13 +132,10 @@ def backtest(prices, signal, ron_w, roff_w):
 
 
 # =========================
-# DETERMINISTIC GRID SEARCH
+# GRID SEARCH — DETERMINISTIC
 # =========================
 
 def run_grid_search(prices, ron_w, roff_w):
-    if "BTC-USD" not in prices.columns:
-        raise ValueError("BTC-USD missing from price data.")
-
     btc = prices["BTC-USD"]
 
     lengths = range(21, 253)
@@ -288,3 +282,4 @@ if __name__ == "__main__":
     regime = "RISK-ON (33/33/33)" if is_on else "RISK-OFF (100% UUP)"
 
     send_email(regime, best_params, perf)
+
