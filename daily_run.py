@@ -201,7 +201,7 @@ def random_param_sample():
     Sample one set of strategy parameters.
 
     MA lengths: any integer from 21 to 252
-    Number of MAs: 1 to 6
+    Number of MAs: 1 to 4
     MA type: SMA or EMA
     Tolerance: 0% to 5%
     min_ma_above: 1 .. n_ma
@@ -210,7 +210,7 @@ def random_param_sample():
     min_length = 21
     max_length = 252
 
-    n_ma = np.random.randint(1, 7)  # 1–6 MAs
+    n_ma = np.random.randint(1, 4)  # 1–4 MAs
 
     ma_lengths = list(np.random.randint(min_length, max_length + 1, size=n_ma))
     ma_types = [np.random.choice(["sma", "ema"]) for _ in range(n_ma)]
