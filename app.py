@@ -296,9 +296,9 @@ def format_params(params: StrategyParams) -> pd.DataFrame:
 
 
 def main():
-    st.set_page_config(page_title="BTC Trend Optimized Portfolio", layout="wide")
+    st.set_page_config(page_title="MA Strategy", layout="wide")
 
-    st.title("Bitcoin Trend – Optimized Risk-On Portfolio")
+    st.title("MA Strategy")
     st.write(
         "This app optimizes a BTC-based risk-on / risk-off strategy using moving averages "
         "and backtests the resulting portfolio:\n\n"
