@@ -210,7 +210,7 @@ def random_param_sample():
     min_length = 21
     max_length = 252
 
-    n_ma = np.random.randint(1, 5)  # 1–4 MAs
+    n_ma = rng.integers(1, 5)  # chooses 1,2,3,4
 
     ma_lengths = list(np.random.randint(min_length, max_length + 1, size=n_ma))
     ma_types = [np.random.choice(["sma", "ema"]) for _ in range(n_ma)]
