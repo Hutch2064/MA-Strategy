@@ -110,25 +110,38 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
-    btc = prices["QQQ"]
+    btc = prices["BTC-USD"]
+    qqq = prices["QQQ"]
 
     best_sharpe = -1e9
-    best = None
     best_cfg = None
+    best_result = None
 
     lengths = range(21, 253)
     types = ["sma", "ema"]
-    tolerances = np.arange(0.0, 0.1001, 0.001)  # 0.0% to 10.0% by 0.1%
+    tolerances = np.arange(0.0, 0.1001, 0.001)
 
     progress = st.progress(0.0)
     total = len(lengths) * len(types) * len(tolerances)
     idx = 0
 
     for length in lengths:
+        # Precompute MAs ONCE per length & type (major speed-up)
         for ma_type in types:
+
+            btc_ma = compute_ma(btc, length, ma_type)
+            qqq_ma = compute_ma(qqq, length, ma_type)
+
             for tol in tolerances:
 
-                signal = generate_signal(btc, length, ma_type, tol)
+                # Compute signals using precomputed MAs (MORE speed-up)
+                btc_signal = btc > btc_ma * (1 + tol)
+                qqq_signal = qqq > qqq_ma * (1 + tol)
+
+                # Final AND signal
+                signal = (btc_signal & qqq_signal).fillna(False)
+
+                # Backtest with the shared MA signal
                 result = backtest(prices, signal, risk_on_weights, risk_off_weights)
                 sharpe = result["performance"]["Sharpe"]
 
@@ -138,9 +151,9 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                 if sharpe > best_sharpe:
                     best_sharpe = sharpe
                     best_cfg = (length, ma_type, tol)
-                    best = result
+                    best_result = result
 
-    return best_cfg, best
+    return best_cfg, best_result
 
 # ============================================
 # STREAMLIT APP
