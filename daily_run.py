@@ -34,9 +34,8 @@ RISK_OFF_WEIGHTS = {
 DEFAULT_N_RANDOM_SEARCH_ITER = 1000
 RISK_FREE_RATE = 0.0
 
-
 # =========================
-# DATA LOADING (same logic as load_price_data)
+# DATA LOADING
 # =========================
 
 def load_price_data_raw(tickers, start_date, end_date=None):
@@ -57,9 +56,8 @@ def load_price_data_raw(tickers, start_date, end_date=None):
 
     return px.dropna(how="all")
 
-
 # =========================
-# MOVING AVERAGES & SIGNALS (verbatim)
+# MOVING AVERAGES & SIGNALS
 # =========================
 
 def compute_ma(series, length, ma_type="ema"):
@@ -71,7 +69,6 @@ def compute_ma(series, length, ma_type="ema"):
     else:
         raise ValueError(f"Unknown ma_type: {ma_type}")
 
-
 def generate_risk_on_signal(
     price_btc: pd.Series,
     ma_lengths,
@@ -80,14 +77,6 @@ def generate_risk_on_signal(
     min_ma_above: int,
     confirm_days: int = 1,
 ):
-    """
-    price_btc: BTC-USD price series
-    ma_lengths: list[int]
-    ma_types: list['sma' | 'ema']
-    ma_tolerances: list[float], price > MA * (1 + tol)
-    min_ma_above: how many MAs must be satisfied
-    confirm_days: condition must hold this many consecutive days
-    """
     conditions = []
 
     for length, ma_type, tol in zip(ma_lengths, ma_types, ma_tolerances):
@@ -111,9 +100,8 @@ def generate_risk_on_signal(
 
     return risk_on_raw.reindex(price_btc.index).fillna(False)
 
-
 # =========================
-# BACKTEST ENGINE (verbatim)
+# BACKTEST ENGINE
 # =========================
 
 def build_weight_df(prices, risk_on_signal, risk_on_weights, risk_off_weights):
@@ -129,7 +117,6 @@ def build_weight_df(prices, risk_on_signal, risk_on_weights, risk_off_weights):
             weights.loc[~risk_on_signal, asset] = w
 
     return weights
-
 
 def compute_performance(returns, equity_curve, rf_rate=0.0):
     n_days = len(returns)
@@ -160,12 +147,10 @@ def compute_performance(returns, equity_curve, rf_rate=0.0):
         "TotalReturn": total_return,
     }
 
-
 def backtest_strategy(prices, risk_on_signal, risk_on_weights, risk_off_weights):
     rets = prices.pct_change().fillna(0.0)
     weights = build_weight_df(prices, risk_on_signal, risk_on_weights, risk_off_weights)
 
-    # REAL-LIFE EXECUTION: use yesterday's weights on today's returns
     weights_shifted = weights.shift(1).fillna(0.0)
     strat_rets = (weights_shifted * rets).sum(axis=1)
     equity_curve = (1 + strat_rets).cumprod()
@@ -178,9 +163,8 @@ def backtest_strategy(prices, risk_on_signal, risk_on_weights, risk_off_weights)
         "performance": compute_performance(strat_rets, equity_curve),
     }
 
-
 # =========================
-# PARAM DATACLASS (verbatim)
+# PARAM DATACLASS
 # =========================
 
 @dataclass
@@ -191,33 +175,22 @@ class StrategyParams:
     min_ma_above: int
     confirm_days: int
 
-
 # =========================
-# RANDOM SEARCH OPTIMIZER (verbatim)
+# RANDOM SEARCH OPTIMIZER (patched to Streamlit-match)
 # =========================
 
-def random_param_sample():
-    """
-    Sample one set of strategy parameters.
-
-    MA lengths: any integer from 21 to 252
-    Number of MAs: 1 to 4
-    MA type: SMA or EMA
-    Tolerance: 0% to 5%
-    min_ma_above: 1 .. n_ma
-    confirm_days: one of [1, 3, 5, 10, 20]
-    """
+def random_param_sample(rng):
     min_length = 21
     max_length = 252
 
-    n_ma = rng.integers(1, 5)  # chooses 1,2,3,4
+    n_ma = rng.integers(1, 5)  # 1–4 MAs
 
-    ma_lengths = list(np.random.randint(min_length, max_length + 1, size=n_ma))
-    ma_types = [np.random.choice(["sma", "ema"]) for _ in range(n_ma)]
-    ma_tolerances = list(np.random.uniform(0.0, 0.05, size=n_ma))
+    ma_lengths = list(rng.integers(min_length, max_length + 1, size=n_ma))
+    ma_types = [rng.choice(["sma", "ema"]) for _ in range(n_ma)]
+    ma_tolerances = list(rng.uniform(0.0, 0.05, size=n_ma))
 
-    min_ma_above = np.random.randint(1, n_ma + 1)
-    confirm_days = int(np.random.choice([1, 3, 5, 10, 20]))
+    min_ma_above = rng.integers(1, n_ma + 1)
+    confirm_days = int(rng.choice([1, 3, 5, 10, 20]))
 
     return StrategyParams(
         ma_lengths=ma_lengths,
@@ -226,7 +199,6 @@ def random_param_sample():
         min_ma_above=min_ma_above,
         confirm_days=confirm_days,
     )
-
 
 def run_random_search(
     prices,
@@ -237,15 +209,14 @@ def run_random_search(
     seed=42,
 ):
     btc = prices["BTC-USD"]
-
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     best_params = None
     best_result = None
     best_sharpe = -np.inf
 
     for _ in range(n_iter):
-        params = random_param_sample()
+        params = random_param_sample(rng)
 
         risk_on = generate_risk_on_signal(
             price_btc=btc,
@@ -266,13 +237,11 @@ def run_random_search(
 
     return best_params, best_result
 
-
 # =========================
-# PLOTTING HELPERS
+# PLOT
 # =========================
 
 def plot_equity_curve(equity_curve, prices, filename="equity_curve.png"):
-    # Pure risk-on curve (always 33/33/33)
     rets = prices.pct_change().fillna(0.0)
     cols = ["GLD", "TQQQ", "BTC-USD"]
     pure_risk_on_rets = (rets[cols] * np.array([1/3, 1/3, 1/3])).sum(axis=1)
@@ -295,7 +264,7 @@ def plot_equity_curve(equity_curve, prices, filename="equity_curve.png"):
     plt.close()
 
 # =========================
-# EMAIL SENDER
+# EMAIL
 # =========================
 
 def attach_file(msg, filepath, mime_subtype="octet-stream"):
@@ -312,7 +281,6 @@ def attach_file(msg, filepath, mime_subtype="octet-stream"):
     )
     msg.attach(part)
 
-
 def send_email(regime, params: StrategyParams, perf: dict):
     EMAIL_USER = os.getenv("EMAIL_USER")
     EMAIL_PASS = os.getenv("EMAIL_PASS")
@@ -322,9 +290,7 @@ def send_email(regime, params: StrategyParams, perf: dict):
         raise RuntimeError("Missing EMAIL_USER, EMAIL_PASS, or SEND_TO environment variables.")
 
     ma_rows = ""
-    for i, (L, t, tol) in enumerate(
-        zip(params.ma_lengths, params.ma_types, params.ma_tolerances), start=1
-    ):
+    for i, (L, t, tol) in enumerate(zip(params.ma_lengths, params.ma_types, params.ma_tolerances), start=1):
         ma_rows += f"""
         <tr>
           <td>{i}</td>
@@ -387,13 +353,11 @@ def send_email(regime, params: StrategyParams, perf: dict):
         server.login(EMAIL_USER, EMAIL_PASS)
         server.sendmail(EMAIL_USER, SEND_TO, msg.as_string())
 
-
 # =========================
 # MAIN DAILY JOB
 # =========================
 
 if __name__ == "__main__":
-    # Same data handling as app.py main
     prices = load_price_data_raw(TICKERS, DEFAULT_START_DATE, DEFAULT_END_DATE)
 
     core_assets = [t for t in ["BTC-USD", "GLD", "TQQQ", "UUP"] if t in prices.columns]
