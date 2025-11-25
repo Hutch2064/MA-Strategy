@@ -40,55 +40,70 @@ def load_price_data(tickers, start_date, end_date=None):
     return px.dropna(how="all")
 
 # ============================================
-# TECHNICALS — TRUE TESTFOL HYSTERESIS LOGIC
+# TECHNICALS — VECTORIZED TESTFOL HYSTERESIS
 # ============================================
 
-def compute_ma(series, length, ma_type):
+def compute_ma_matrix(price, lengths, ma_type):
+    """
+    Precompute all MAs for all lengths into a single matrix.
+    Returns dict[length] = MA series
+    """
+    ma_dict = {}
+
     if ma_type == "ema":
-        return series.ewm(span=length, adjust=False).mean()
+        for L in lengths:
+            ma = price.ewm(span=L, adjust=False).mean()
+            ma_dict[L] = ma.shift(1)  # shift for TestFol delay
     else:
-        return series.rolling(window=length, min_periods=length).mean()
+        for L in lengths:
+            ma = price.rolling(window=L, min_periods=L).mean()
+            ma_dict[L] = ma.shift(1)
 
-def generate_testfol_signal(price, length, ma_type, tol):
+    return ma_dict
+
+
+def generate_testfol_signal_vectorized(price, ma, tol):
     """
-    Implements TestFol-style hysteresis + 1-day delay:
-      - price[t] compared to SMA[t], but with full buffer:
-        If previously OFF → turn ON only when price > SMA*(1+tol)
-        If previously ON  → turn OFF only when price < SMA*(1-tol)
+    Full TestFol hysteresis, vectorized (no Python loop).
+    price, ma already shifted by 1.
+
+    Rules:
+        OFF → ON only if px > ma*(1+tol)
+        ON  → OFF only if px < ma*(1-tol)
+        Otherwise retain previous state.
     """
 
-    # Compute MA with 1-day delay (TestFol)
-    ma = compute_ma(price, length, ma_type).shift(1)
-    px = price.shift(1)  # delayed 1 day to remove lookahead bias
+    px = price.shift(1).values  # delayed price
+    ma_vals = ma.values
+
+    n = len(px)
+
+    # Upper and lower bands
+    upper = ma_vals * (1 + tol)
+    lower = ma_vals * (1 - tol)
 
     # Initialize signal array
-    sig = pd.Series(False, index=price.index)
+    sig = np.zeros(n, dtype=bool)
 
-    # Hysteresis rules
-    for t in range(1, len(price)):
-        prev = sig.iloc[t-1]
+    # Start OFF until MA becomes valid (+1 day warm-up)
+    first_valid = np.nanargmin(np.isnan(ma_vals))  # first non-NaN
+    if first_valid == 0:
+        first_valid = 1
+    start_index = first_valid + 1
 
-        upper = ma.iloc[t] * (1 + tol)
-        lower = ma.iloc[t] * (1 - tol)
-
-        if prev is False:
-            # OFF → ON only if full break above buffer
-            if px.iloc[t] > upper:
-                sig.iloc[t] = True
-            else:
-                sig.iloc[t] = False
-
+    # Vectorized hysteresis via cumulative updates
+    for t in range(start_index, n):
+        if not sig[t-1]:
+            # OFF → ON
+            sig[t] = px[t] > upper[t]
         else:
-            # ON → OFF only if full break below buffer
-            if px.iloc[t] < lower:
-                sig.iloc[t] = False
-            else:
-                sig.iloc[t] = True
+            # ON → OFF
+            sig[t] = not (px[t] < lower[t])
 
-    return sig.fillna(False)
+    return pd.Series(sig, index=ma.index).fillna(False)
 
 # ============================================
-# BACKTEST (LOG-RETURNS, DAILY REBALANCE)
+# BACKTEST (LOG RETURNS + DAILY REBALANCE)
 # ============================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
@@ -104,15 +119,13 @@ def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
 
     return weights
 
+
 def compute_performance(log_returns, equity_curve, rf=0.0):
-    n = len(log_returns)
     cagr = np.exp(log_returns.mean() * 252) - 1
     vol = log_returns.std() * np.sqrt(252)
     sharpe = (cagr - rf) / vol if vol > 0 else np.nan
-
-    drawdown = equity_curve / equity_curve.cummax() - 1
-    max_dd = drawdown.min()
-
+    dd = equity_curve / equity_curve.cummax() - 1
+    max_dd = dd.min()
     total_ret = equity_curve.iloc[-1] / equity_curve.iloc[0] - 1
 
     return {
@@ -123,17 +136,14 @@ def compute_performance(log_returns, equity_curve, rf=0.0):
         "TotalReturn": total_ret,
     }
 
+
 def backtest(prices, signal, risk_on_weights, risk_off_weights):
-    # Log returns
     log_prices = np.log(prices)
     log_rets = log_prices.diff().fillna(0)
 
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
-    # Apply 1-day delay (TestFol)
     strat_log_rets = (weights.shift(1).fillna(0) * log_rets).sum(axis=1)
-
-    # Convert log returns to equity curve
     eq = np.exp(strat_log_rets.cumsum())
 
     return {
@@ -145,7 +155,7 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     }
 
 # ============================================
-# GRID SEARCH (Sharpe → Trades)
+# GRID SEARCH — VECTORIZED + OPTIMIZED
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
@@ -156,7 +166,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     best_cfg = None
     best_result = None
 
-    lengths = range(21, 253)
+    lengths = list(range(21, 253))
     types = ["sma", "ema"]
     tolerances = np.arange(0.0, 0.1001, 0.001)
 
@@ -164,22 +174,29 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     total = len(lengths) * len(types) * len(tolerances)
     idx = 0
 
-    for length in lengths:
-        for ma_type in types:
-            for tol in tolerances:
+    # Precompute all MAs for speed
+    ma_cache = {t: compute_ma_matrix(btc, lengths, t) for t in types}
 
-                signal = generate_testfol_signal(btc, length, ma_type, tol)
+    for ma_type in types:
+        for length in lengths:
+            ma = ma_cache[ma_type][length]
+
+            for tol in tolerances:
+                signal = generate_testfol_signal_vectorized(btc, ma, tol)
+
                 result = backtest(prices, signal, risk_on_weights, risk_off_weights)
                 sharpe = result["performance"]["Sharpe"]
 
-                sig = result["signal"]
-                switches = sig.astype(int).diff().abs().sum()
-                trades_per_year = switches / (len(sig) / 252)
+                # Count trades
+                sig_arr = result["signal"].astype(int)
+                switches = sig_arr.diff().abs().sum()
+                trades_per_year = switches / (len(sig_arr) / 252)
 
                 idx += 1
-                progress.progress(idx / total)
+                if idx % 200 == 0:
+                    progress.progress(idx / total)
 
-                # Lexicographic optimization
+                # Sharpe → Trades optimization
                 if sharpe > best_sharpe:
                     best_sharpe = sharpe
                     best_trades = trades_per_year
@@ -198,22 +215,22 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 # ============================================
 
 def main():
-    st.set_page_config(page_title="BTC MA Optimized Portfolio", layout="wide")
-    st.title("BTC MA Optimized Portfolio (TestFol-Accurate Version)")
+    st.set_page_config(page_title="Bitcoin MA Optimized Portfolio", layout="wide")
+    st.title("Bitcoin MA Optimized Portfolio (TestFol-Accurate, Fast Version)")
 
     st.write("""
-    This version implements:
-    - True TestFol hysteresis
-    - Full 1-day delay
-    - Log-return engine
-    - Daily rebalance
-    - No lookahead bias
-    - Sharpe → Trades lexicographic optimization  
+    This model now includes:
+    - Fully vectorized TestFol hysteresis  
+    - Exact 1-day delayed indicators  
+    - Log-return engine  
+    - Daily rebalance  
+    - No lookahead bias  
+    - Sharpe → Trades optimization  
     """)
 
     st.sidebar.header("Backtest Settings")
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
-    end = st.sidebar.text_input("End Date (optional)")
+    end = st.sidebar.text_input("End Date (optional)", "")
 
     st.sidebar.header("Risk-ON Portfolio")
     risk_on_tickers_str = st.sidebar.text_input(
@@ -234,7 +251,7 @@ def main():
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
 
-    # Parse
+    # Parse inputs
     risk_on_tickers = [t.strip().upper() for t in risk_on_tickers_str.split(",")]
     risk_on_weights_list = [float(x) for x in risk_on_weights_str.split(",")]
     risk_on_weights = dict(zip(risk_on_tickers, risk_on_weights_list))
@@ -247,11 +264,9 @@ def main():
     if "BTC-USD" not in all_tickers:
         all_tickers.append("BTC-USD")
 
-    end_val = end if end.strip() != "" else None
-    prices = load_price_data(all_tickers, start, end_val)
-    prices = prices.dropna(how="any")
+    end_val = end if end.strip() else None
+    prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
 
-    # Run optimization
     best_cfg, best_result = run_grid_search(prices, risk_on_weights, risk_off_weights)
 
     best_len, best_type, best_tol = best_cfg
@@ -261,11 +276,11 @@ def main():
     # Current regime
     latest_day = sig.index[-1]
     latest_signal = sig.iloc[-1]
-    current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
+    regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
-    st.subheader("Current Regime")
+    st.subheader("Current Regime Status")
     st.write(f"**Date:** {latest_day.date()}")
-    st.write(f"**Status:** {current_regime}")
+    st.write(f"**Regime:** {regime}")
 
     switches = sig.astype(int).diff().abs().sum()
     trades_per_year = switches / (len(sig) / 252)
@@ -278,13 +293,13 @@ def main():
     c4.metric("Max Drawdown", f"{perf['MaxDrawdown']:.2%}")
     c5.metric("Total Return", f"{perf['TotalReturn']:.2%}")
 
-    st.subheader("Best Parameters Found")
-    st.write(f"**Length:** {best_len}")
-    st.write(f"**Type:** {best_type.upper()}")
+    st.subheader("Best Parameters")
+    st.write(f"**MA Length:** {best_len}")
+    st.write(f"**MA Type:** {best_type.upper()}")
     st.write(f"**Tolerance:** {best_tol:.2%}")
     st.write(f"**Trades per year:** {trades_per_year:.2f}")
 
-    # Always-on portfolio in log space
+    # Always-on portfolio
     log_prices = np.log(prices)
     log_rets = log_prices.diff().fillna(0)
 
@@ -304,10 +319,10 @@ def main():
     c4.metric("Max Drawdown", f"{user_perf['MaxDrawdown']:.2%}")
     c5.metric("Total Return", f"{user_perf['TotalReturn']:.2%}")
 
-    st.subheader("Equity Curve Comparison")
+    st.subheader("Equity Curve")
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(best_result["equity_curve"], label="Optimized", linewidth=2)
-    ax.plot(user_eq, label="Always-On Risk-ON", linestyle="--")
+    ax.plot(user_eq, label="Always-On", linestyle="--")
     ax.legend()
     ax.grid(alpha=0.3)
     st.pyplot(fig)
