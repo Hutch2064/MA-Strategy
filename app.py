@@ -3,7 +3,6 @@ import pandas as pd
 import yfinance as yf
 import matplotlib.pyplot as plt
 import streamlit as st
-from dataclasses import dataclass
 
 # ============================================
 # CONFIG
@@ -13,7 +12,7 @@ DEFAULT_START_DATE = "2011-11-24"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "GLD": 3/3,
+    "GLD": 1/3,
     "TQQQ": 1/3,
     "BTC-USD": 1/3,
 }
@@ -23,7 +22,7 @@ RISK_OFF_WEIGHTS = {
 }
 
 # ============================================
-# DATA
+# DATA LOADING
 # ============================================
 
 @st.cache_data(show_spinner=True)
@@ -41,21 +40,55 @@ def load_price_data(tickers, start_date, end_date=None):
     return px.dropna(how="all")
 
 # ============================================
-# TECHNICALS
+# TECHNICALS — TRUE TESTFOL HYSTERESIS LOGIC
 # ============================================
 
 def compute_ma(series, length, ma_type):
     if ma_type == "ema":
         return series.ewm(span=length, adjust=False).mean()
-    return series.rolling(window=length, min_periods=length).mean()
+    else:
+        return series.rolling(window=length, min_periods=length).mean()
 
-def generate_signal(price, length, ma_type, tol):
-    ma = compute_ma(price, length, ma_type)
-    sig = price > ma * (1 + tol)
+def generate_testfol_signal(price, length, ma_type, tol):
+    """
+    Implements TestFol-style hysteresis + 1-day delay:
+      - price[t] compared to SMA[t], but with full buffer:
+        If previously OFF → turn ON only when price > SMA*(1+tol)
+        If previously ON  → turn OFF only when price < SMA*(1-tol)
+    """
+
+    # Compute MA with 1-day delay (TestFol)
+    ma = compute_ma(price, length, ma_type).shift(1)
+    px = price.shift(1)  # delayed 1 day to remove lookahead bias
+
+    # Initialize signal array
+    sig = pd.Series(False, index=price.index)
+
+    # Hysteresis rules
+    for t in range(1, len(price)):
+        prev = sig.iloc[t-1]
+
+        upper = ma.iloc[t] * (1 + tol)
+        lower = ma.iloc[t] * (1 - tol)
+
+        if prev is False:
+            # OFF → ON only if full break above buffer
+            if px.iloc[t] > upper:
+                sig.iloc[t] = True
+            else:
+                sig.iloc[t] = False
+
+        else:
+            # ON → OFF only if full break below buffer
+            if px.iloc[t] < lower:
+                sig.iloc[t] = False
+            else:
+                sig.iloc[t] = True
+
     return sig.fillna(False)
 
 # ============================================
-# BACKTEST
+# BACKTEST (LOG-RETURNS, DAILY REBALANCE)
 # ============================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
@@ -71,16 +104,16 @@ def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
 
     return weights
 
-def compute_performance(returns, equity_curve, rf=0.0):
-    n = len(returns)
-    total_ret = equity_curve.iloc[-1] / equity_curve.iloc[0] - 1
-    cagr = (1 + total_ret)**(252/n) - 1
-
-    vol = returns.std() * np.sqrt(252)
+def compute_performance(log_returns, equity_curve, rf=0.0):
+    n = len(log_returns)
+    cagr = np.exp(log_returns.mean() * 252) - 1
+    vol = log_returns.std() * np.sqrt(252)
     sharpe = (cagr - rf) / vol if vol > 0 else np.nan
 
-    dd = equity_curve / equity_curve.cummax() - 1
-    max_dd = dd.min()
+    drawdown = equity_curve / equity_curve.cummax() - 1
+    max_dd = drawdown.min()
+
+    total_ret = equity_curve.iloc[-1] / equity_curve.iloc[0] - 1
 
     return {
         "CAGR": cagr,
@@ -91,41 +124,41 @@ def compute_performance(returns, equity_curve, rf=0.0):
     }
 
 def backtest(prices, signal, risk_on_weights, risk_off_weights):
-    # Use log returns: diff of log prices
+    # Log returns
     log_prices = np.log(prices)
-    rets = log_prices.diff().fillna(0)
+    log_rets = log_prices.diff().fillna(0)
 
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
-    # One-day delayed execution
-    strat_rets = (weights.shift(1).fillna(0) * rets).sum(axis=1)
+    # Apply 1-day delay (TestFol)
+    strat_log_rets = (weights.shift(1).fillna(0) * log_rets).sum(axis=1)
 
-    # Equity curve from cumulative log returns
-    eq = np.exp(strat_rets.cumsum())
+    # Convert log returns to equity curve
+    eq = np.exp(strat_log_rets.cumsum())
 
     return {
-        "returns": strat_rets,          # log returns
+        "returns": strat_log_rets,
         "equity_curve": eq,
         "weights": weights,
         "signal": signal,
-        "performance": compute_performance(strat_rets, eq),
+        "performance": compute_performance(strat_log_rets, eq),
     }
 
 # ============================================
-# GRID SEARCH (DETERMINISTIC — Sharpe FIRST, trades-per-year SECOND)
+# GRID SEARCH (Sharpe → Trades)
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
     btc = prices["BTC-USD"]
 
     best_sharpe = -1e9
-    best_trades_per_year = np.inf
+    best_trades = np.inf
     best_cfg = None
     best_result = None
 
     lengths = range(21, 253)
     types = ["sma", "ema"]
-    tolerances = np.arange(0.0, 0.1001, 0.001)  # 0.0% to 10.0% by 0.1%
+    tolerances = np.arange(0.0, 0.1001, 0.001)
 
     progress = st.progress(0.0)
     total = len(lengths) * len(types) * len(tolerances)
@@ -135,11 +168,10 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
         for ma_type in types:
             for tol in tolerances:
 
-                signal = generate_signal(btc, length, ma_type, tol)
+                signal = generate_testfol_signal(btc, length, ma_type, tol)
                 result = backtest(prices, signal, risk_on_weights, risk_off_weights)
                 sharpe = result["performance"]["Sharpe"]
 
-                # Count trades per year
                 sig = result["signal"]
                 switches = sig.astype(int).diff().abs().sum()
                 trades_per_year = switches / (len(sig) / 252)
@@ -147,20 +179,17 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                 idx += 1
                 progress.progress(idx / total)
 
-                # STRICT LEXICOGRAPHIC OPTIMIZATION:
-                # 1. Highest Sharpe wins
-                # 2. If Sharpe ties exactly, the fewest trades wins
+                # Lexicographic optimization
                 if sharpe > best_sharpe:
                     best_sharpe = sharpe
-                    best_trades_per_year = trades_per_year
+                    best_trades = trades_per_year
                     best_cfg = (length, ma_type, tol)
                     best_result = result
 
-                elif sharpe == best_sharpe:
-                    if trades_per_year < best_trades_per_year:
-                        best_trades_per_year = trades_per_year
-                        best_cfg = (length, ma_type, tol)
-                        best_result = result
+                elif sharpe == best_sharpe and trades_per_year < best_trades:
+                    best_trades = trades_per_year
+                    best_cfg = (length, ma_type, tol)
+                    best_result = result
 
     return best_cfg, best_result
 
@@ -169,23 +198,23 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 # ============================================
 
 def main():
-    st.set_page_config(page_title="Bitcoin MA Optimized Portfolio", layout="wide")
-    st.title("Bitcoin MA Optimized Portfolio")
+    st.set_page_config(page_title="BTC MA Optimized Portfolio", layout="wide")
+    st.title("BTC MA Optimized Portfolio (TestFol-Accurate Version)")
 
     st.write("""
-    Deterministic brute-force moving-average regime model (BTC indicator).
-
-    Optimization Objective:
-    1. Maximize Sharpe  
-    2. If multiple configs have the same Sharpe, select the one with the **lowest trades per year**  
+    This version implements:
+    - True TestFol hysteresis
+    - Full 1-day delay
+    - Log-return engine
+    - Daily rebalance
+    - No lookahead bias
+    - Sharpe → Trades lexicographic optimization  
     """)
 
-    # User inputs
     st.sidebar.header("Backtest Settings")
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
-    end = st.sidebar.text_input("End Date (optional)", "")
+    end = st.sidebar.text_input("End Date (optional)")
 
-    # Risk-ON portfolio
     st.sidebar.header("Risk-ON Portfolio")
     risk_on_tickers_str = st.sidebar.text_input(
         "Tickers", ",".join(RISK_ON_WEIGHTS.keys())
@@ -194,7 +223,6 @@ def main():
         "Weights", ",".join(str(w) for w in RISK_ON_WEIGHTS.values())
     )
 
-    # Risk-OFF portfolio
     st.sidebar.header("Risk-OFF Portfolio")
     risk_off_tickers_str = st.sidebar.text_input(
         "Tickers", ",".join(RISK_OFF_WEIGHTS.keys())
@@ -206,7 +234,7 @@ def main():
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
 
-    # Parse tickers + weights
+    # Parse
     risk_on_tickers = [t.strip().upper() for t in risk_on_tickers_str.split(",")]
     risk_on_weights_list = [float(x) for x in risk_on_weights_str.split(",")]
     risk_on_weights = dict(zip(risk_on_tickers, risk_on_weights_list))
@@ -223,66 +251,52 @@ def main():
     prices = load_price_data(all_tickers, start, end_val)
     prices = prices.dropna(how="any")
 
-    # GRID SEARCH
-    best_cfg, best_result = run_grid_search(
-        prices, risk_on_weights, risk_off_weights
-    )
+    # Run optimization
+    best_cfg, best_result = run_grid_search(prices, risk_on_weights, risk_off_weights)
 
     best_len, best_type, best_tol = best_cfg
-
     perf = best_result["performance"]
     sig = best_result["signal"]
 
-    # ==============================
-    # CURRENT DAY REGIME STATUS
-    # ==============================
+    # Current regime
     latest_day = sig.index[-1]
     latest_signal = sig.iloc[-1]
     current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
-    st.subheader("Current Regime Status")
+    st.subheader("Current Regime")
     st.write(f"**Date:** {latest_day.date()}")
-    st.write(f"**Regime:** {current_regime}")
+    st.write(f"**Status:** {current_regime}")
 
-    # Trade count
     switches = sig.astype(int).diff().abs().sum()
     trades_per_year = switches / (len(sig) / 252)
 
-    # =====================================
-    # OUTPUT
-    # =====================================
-
     st.subheader("Optimized Strategy Performance")
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("CAGR", f"{perf['CAGR']:.2%}")
-    col2.metric("Volatility", f"{perf['Volatility']:.2%}")
-    col3.metric("Sharpe", f"{perf['Sharpe']:.3f}")
-    col4.metric("Max Drawdown", f"{perf['MaxDrawdown']:.2%}")
-    col5.metric("Total Return", f"{perf['TotalReturn']:.2%}")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("CAGR", f"{perf['CAGR']:.2%}")
+    c2.metric("Volatility", f"{perf['Volatility']:.2%}")
+    c3.metric("Sharpe", f"{perf['Sharpe']:.3f}")
+    c4.metric("Max Drawdown", f"{perf['MaxDrawdown']:.2%}")
+    c5.metric("Total Return", f"{perf['TotalReturn']:.2%}")
 
-    st.subheader("Optimized MA Configuration")
-    st.write(f"**MA Length:** {best_len}")
-    st.write(f"**MA Type:** {best_type.upper()}")
+    st.subheader("Best Parameters Found")
+    st.write(f"**Length:** {best_len}")
+    st.write(f"**Type:** {best_type.upper()}")
     st.write(f"**Tolerance:** {best_tol:.2%}")
-    st.write(f"**Trades per year (selected config):** {trades_per_year:.2f}")
-
-    st.subheader("Trading Frequency")
-    st.write(f"**Total Trades:** {int(switches)}")
     st.write(f"**Trades per year:** {trades_per_year:.2f}")
 
-    # User always-on (also using log returns, to match methodology)
+    # Always-on portfolio in log space
     log_prices = np.log(prices)
-    rets = log_prices.diff().fillna(0)
+    log_rets = log_prices.diff().fillna(0)
 
-    user_rets = pd.Series(0, index=rets.index)
+    user_rets = pd.Series(0, index=log_rets.index)
     for a, w in risk_on_weights.items():
-        if a in rets.columns:
-            user_rets += rets[a] * w
+        if a in log_rets.columns:
+            user_rets += log_rets[a] * w
 
     user_eq = np.exp(user_rets.cumsum())
     user_perf = compute_performance(user_rets, user_eq)
 
-    st.subheader("Always-On Portfolio Performance")
+    st.subheader("Always-On Performance")
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("CAGR", f"{user_perf['CAGR']:.2%}")
     c2.metric("Volatility", f"{user_perf['Volatility']:.2%}")
@@ -290,16 +304,14 @@ def main():
     c4.metric("Max Drawdown", f"{user_perf['MaxDrawdown']:.2%}")
     c5.metric("Total Return", f"{user_perf['TotalReturn']:.2%}")
 
-    # Plot
-    st.subheader("Equity Curve")
-    fig, ax = plt.subplots(figsize=(12,6))
-    ax.plot(best_result["equity_curve"], label="Optimized Strategy", linewidth=2)
-    ax.plot(user_eq, label="Always-On Risk-ON", linestyle="--", linewidth=2)
+    st.subheader("Equity Curve Comparison")
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(best_result["equity_curve"], label="Optimized", linewidth=2)
+    ax.plot(user_eq, label="Always-On Risk-ON", linestyle="--")
     ax.legend()
     ax.grid(alpha=0.3)
     st.pyplot(fig)
 
 if __name__ == "__main__":
     main()
-
 
