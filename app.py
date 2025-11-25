@@ -110,44 +110,25 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
-    # Indicator assets
-    if "BTC-USD" not in prices.columns or "QQQ" not in prices.columns:
-        missing = [t for t in ["BTC-USD", "QQQ"] if t not in prices.columns]
-        st.error(f"Missing price data for: {', '.join(missing)}")
-        st.stop()
-
     btc = prices["BTC-USD"]
-    qqq = prices["QQQ"]
 
     best_sharpe = -1e9
+    best = None
     best_cfg = None
-    best_result = None
 
     lengths = range(21, 253)
     types = ["sma", "ema"]
-    tolerances = np.arange(0.0, 0.1001, 0.001)
+    tolerances = np.arange(0.0, 0.1001, 0.001)  # 0.0% to 10.0% by 0.1%
 
     progress = st.progress(0.0)
     total = len(lengths) * len(types) * len(tolerances)
     idx = 0
 
     for length in lengths:
-        # Precompute MAs ONCE per length & type (speed-up)
         for ma_type in types:
-
-            btc_ma = compute_ma(btc, length, ma_type)
-            qqq_ma = compute_ma(qqq, length, ma_type)
-
             for tol in tolerances:
 
-                # Compute signals using precomputed MAs
-                btc_signal = btc > btc_ma * (1 + tol)
-                qqq_signal = qqq > qqq_ma * (1 + tol)
-
-                # Final AND signal
-                signal = (btc_signal & qqq_signal).fillna(False)
-
-                # Backtest with the shared MA signal
+                signal = generate_signal(btc, length, ma_type, tol)
                 result = backtest(prices, signal, risk_on_weights, risk_off_weights)
                 sharpe = result["performance"]["Sharpe"]
 
@@ -157,24 +138,20 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                 if sharpe > best_sharpe:
                     best_sharpe = sharpe
                     best_cfg = (length, ma_type, tol)
-                    best_result = result
+                    best = result
 
-    return best_cfg, best_result
+    return best_cfg, best
 
 # ============================================
 # STREAMLIT APP
 # ============================================
 
 def main():
-    st.set_page_config(page_title="Bitcoin + QQQ MA Optimized Portfolio", layout="wide")
-    st.title("Bitcoin + QQQ MA Optimized Portfolio")
+    st.set_page_config(page_title="Bitcoin MA Optimized Portfolio", layout="wide")
+    st.title("Bitcoin MA Optimized Portfolio")
 
     st.write("""
     Deterministic brute-force moving-average regime model.
-
-    Regime signal is based on BOTH BTC-USD and QQQ using the SAME MA:
-    - Risk-ON only when **both** BTC-USD and QQQ are above their MA by the tolerance.
-
     Searches all combinations of:
     - MA Length: 21–252  
     - Type: SMA/EMA  
@@ -217,12 +194,8 @@ def main():
     risk_off_weights = dict(zip(risk_off_tickers, risk_off_weights_list))
 
     all_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
-
-    # Ensure indicator tickers always included
     if "BTC-USD" not in all_tickers:
         all_tickers.append("BTC-USD")
-    if "QQQ" not in all_tickers:
-        all_tickers.append("QQQ")
 
     end_val = end if end.strip() != "" else None
     prices = load_price_data(all_tickers, start, end_val)
@@ -237,18 +210,6 @@ def main():
 
     perf = best_result["performance"]
     sig = best_result["signal"]
-
-    # ==============================
-    # CURRENT DAY REGIME PRINTOUT
-    # ==============================
-    latest_day = sig.index[-1]               # last date in the dataset
-    latest_signal = sig.iloc[-1]             # True/False for final day
-
-    current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
-
-    st.subheader("Current Regime Status")
-    st.write(f"**Date:** {latest_day.date()}")
-    st.write(f"**Regime:** {current_regime}")
 
     # Trade count
     switches = sig.astype(int).diff().abs().sum()
@@ -266,7 +227,7 @@ def main():
     col4.metric("Max Drawdown", f"{perf['MaxDrawdown']:.2%}")
     col5.metric("Total Return", f"{perf['TotalReturn']:.2%}")
 
-    st.subheader("Optimized MA Configuration (Shared for BTC & QQQ)")
+    st.subheader("Optimized MA Configuration")
     st.write(f"**MA Length:** {best_len}")
     st.write(f"**MA Type:** {best_type.upper()}")
     st.write(f"**Tolerance:** {best_tol:.2%}")
@@ -294,7 +255,7 @@ def main():
 
     # Plot equity curve
     st.subheader("Equity Curve")
-    fig, ax = plt.subplots(figsize=(12, 6))
+    fig, ax = plt.subplots(figsize=(12,6))
     ax.plot(best_result["equity_curve"], label="Optimized Strategy", linewidth=2)
     ax.plot(user_eq, label="Always-On Risk-ON", linestyle="--", linewidth=2)
     ax.legend()
