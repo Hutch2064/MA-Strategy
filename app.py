@@ -91,14 +91,20 @@ def compute_performance(returns, equity_curve, rf=0.0):
     }
 
 def backtest(prices, signal, risk_on_weights, risk_off_weights):
-    rets = prices.pct_change().fillna(0)
+    # Use log returns: diff of log prices
+    log_prices = np.log(prices)
+    rets = log_prices.diff().fillna(0)
+
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
+    # One-day delayed execution
     strat_rets = (weights.shift(1).fillna(0) * rets).sum(axis=1)
-    eq = (1 + strat_rets).cumprod()
+
+    # Equity curve from cumulative log returns
+    eq = np.exp(strat_rets.cumsum())
 
     return {
-        "returns": strat_rets,
+        "returns": strat_rets,          # log returns
         "equity_curve": eq,
         "weights": weights,
         "signal": signal,
@@ -141,11 +147,9 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                 idx += 1
                 progress.progress(idx / total)
 
-                # =========================================
                 # STRICT LEXICOGRAPHIC OPTIMIZATION:
                 # 1. Highest Sharpe wins
                 # 2. If Sharpe ties exactly, the fewest trades wins
-                # =========================================
                 if sharpe > best_sharpe:
                     best_sharpe = sharpe
                     best_trades_per_year = trades_per_year
@@ -266,13 +270,16 @@ def main():
     st.write(f"**Total Trades:** {int(switches)}")
     st.write(f"**Trades per year:** {trades_per_year:.2f}")
 
-    # User always-on
-    rets = prices.pct_change().fillna(0)
+    # User always-on (also using log returns, to match methodology)
+    log_prices = np.log(prices)
+    rets = log_prices.diff().fillna(0)
+
     user_rets = pd.Series(0, index=rets.index)
     for a, w in risk_on_weights.items():
         if a in rets.columns:
             user_rets += rets[a] * w
-    user_eq = (1 + user_rets).cumprod()
+
+    user_eq = np.exp(user_rets.cumsum())
     user_perf = compute_performance(user_rets, user_eq)
 
     st.subheader("Always-On Portfolio Performance")
