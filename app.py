@@ -106,15 +106,16 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     }
 
 # ============================================
-# GRID SEARCH (DETERMINISTIC)
+# GRID SEARCH (DETERMINISTIC — Sharpe FIRST, trades-per-year SECOND)
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
     btc = prices["BTC-USD"]
 
     best_sharpe = -1e9
-    best = None
+    best_trades_per_year = np.inf
     best_cfg = None
+    best_result = None
 
     lengths = range(21, 253)
     types = ["sma", "ema"]
@@ -132,15 +133,32 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                 result = backtest(prices, signal, risk_on_weights, risk_off_weights)
                 sharpe = result["performance"]["Sharpe"]
 
+                # Count trades per year
+                sig = result["signal"]
+                switches = sig.astype(int).diff().abs().sum()
+                trades_per_year = switches / (len(sig) / 252)
+
                 idx += 1
                 progress.progress(idx / total)
 
+                # =========================================
+                # STRICT LEXICOGRAPHIC OPTIMIZATION:
+                # 1. Highest Sharpe wins
+                # 2. If Sharpe ties exactly, the fewest trades wins
+                # =========================================
                 if sharpe > best_sharpe:
                     best_sharpe = sharpe
+                    best_trades_per_year = trades_per_year
                     best_cfg = (length, ma_type, tol)
-                    best = result
+                    best_result = result
 
-    return best_cfg, best
+                elif sharpe == best_sharpe:
+                    if trades_per_year < best_trades_per_year:
+                        best_trades_per_year = trades_per_year
+                        best_cfg = (length, ma_type, tol)
+                        best_result = result
+
+    return best_cfg, best_result
 
 # ============================================
 # STREAMLIT APP
@@ -151,11 +169,11 @@ def main():
     st.title("Bitcoin MA Optimized Portfolio")
 
     st.write("""
-    Deterministic brute-force moving-average regime model.
-    Searches all combinations of:
-    - MA Length: 21–252  
-    - Type: SMA/EMA  
-    - Tolerance: 0.0%–10.0% (0.1% steps)  
+    Deterministic brute-force moving-average regime model (BTC indicator).
+
+    Optimization Objective:
+    1. Maximize Sharpe  
+    2. If multiple configs have the same Sharpe, select the one with the **lowest trades per year**  
     """)
 
     # User inputs
@@ -212,15 +230,14 @@ def main():
     sig = best_result["signal"]
 
     # ==============================
-    # CURRENT DAY REGIME PRINTOUT
+    # CURRENT DAY REGIME STATUS
     # ==============================
-    latest_day = sig.index[-1]               # last date in the dataset
-    latest_signal = sig.iloc[-1]             # True/False for final day
-
+    latest_day = sig.index[-1]
+    latest_signal = sig.iloc[-1]
     current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
     st.subheader("Current Regime Status")
-    st.write(f"**Date:** {latest_day.date()}") 
+    st.write(f"**Date:** {latest_day.date()}")
     st.write(f"**Regime:** {current_regime}")
 
     # Trade count
@@ -243,6 +260,7 @@ def main():
     st.write(f"**MA Length:** {best_len}")
     st.write(f"**MA Type:** {best_type.upper()}")
     st.write(f"**Tolerance:** {best_tol:.2%}")
+    st.write(f"**Trades per year (selected config):** {trades_per_year:.2f}")
 
     st.subheader("Trading Frequency")
     st.write(f"**Total Trades:** {int(switches)}")
@@ -265,7 +283,7 @@ def main():
     c4.metric("Max Drawdown", f"{user_perf['MaxDrawdown']:.2%}")
     c5.metric("Total Return", f"{user_perf['TotalReturn']:.2%}")
 
-    # Plot equity curve
+    # Plot
     st.subheader("Equity Curve")
     fig, ax = plt.subplots(figsize=(12,6))
     ax.plot(best_result["equity_curve"], label="Optimized Strategy", linewidth=2)
@@ -276,4 +294,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
