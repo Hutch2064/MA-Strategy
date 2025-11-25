@@ -25,7 +25,7 @@ RISK_ON_WEIGHTS = {
 }
 
 RISK_OFF_WEIGHTS = {
-    "UUP": 1.0,
+    "SHY": 1.0,
 }
 
 # ============================================
@@ -245,7 +245,7 @@ def send_email(regime, cfg, perf):
 # ============================================
 
 if __name__ == "__main__":
-    tickers = ["BTC-USD", "GLD", "TQQQ", "UUP"]
+    tickers = ["BTC-USD", "GLD", "TQQQ", "SHY"]
     prices = load_price_data(tickers, DEFAULT_START_DATE).dropna(how="any")
 
     best_cfg, best_result = run_grid_search(prices, RISK_ON_WEIGHTS, RISK_OFF_WEIGHTS)
