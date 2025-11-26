@@ -19,9 +19,9 @@ DEFAULT_START_DATE = "2011-11-24"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "GLD": 2.7/3,
-    "TQQQ": .9/3,
-    "BTC-USD": 1.2/3,
+    "GLD": .9,
+    "TQQQ": .3,
+    "BTC-USD": .4,
 }
 
 RISK_OFF_WEIGHTS = {
