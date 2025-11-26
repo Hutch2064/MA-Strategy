@@ -5,9 +5,9 @@ import yfinance as yf
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from email.mime_text import MIMEText
-from email.mime_multipart import MIMEMultipart
-from email.mime_base import MIMEBase
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
 from email import encoders
 import smtplib
 
@@ -19,7 +19,7 @@ DEFAULT_START_DATE = "2011-11-24"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "GLD": 1.0,   # 3/3
+    "GLD": 1.0,
     "TQQQ": 1/3,
     "BTC-USD": 1/3,
 }
@@ -51,7 +51,6 @@ def load_price_data(tickers, start_date, end_date=None):
 
 def compute_ma_matrix(price, lengths, ma_type):
     ma_dict = {}
-
     if ma_type == "ema":
         for L in lengths:
             ma = price.ewm(span=L, adjust=False).mean()
@@ -60,9 +59,7 @@ def compute_ma_matrix(price, lengths, ma_type):
         for L in lengths:
             ma = price.rolling(window=L, min_periods=L).mean()
             ma_dict[L] = ma.shift(1)
-
     return ma_dict
-
 
 def generate_testfol_signal_vectorized(price, ma, tol):
     px = price.shift(1).values
@@ -73,7 +70,6 @@ def generate_testfol_signal_vectorized(price, ma, tol):
     lower = ma_vals * (1 - tol)
 
     sig = np.zeros(n, dtype=bool)
-
     first_valid = np.nanargmin(np.isnan(ma_vals))
     if first_valid == 0:
         first_valid = 1
@@ -104,7 +100,6 @@ def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
 
     return weights
 
-
 def compute_performance(log_returns, equity_curve, rf=0.0):
     cagr = np.exp(log_returns.mean() * 252) - 1
     vol = log_returns.std() * np.sqrt(252)
@@ -120,7 +115,6 @@ def compute_performance(log_returns, equity_curve, rf=0.0):
         "MaxDrawdown": max_dd,
         "TotalReturn": total_ret,
     }
-
 
 def backtest(prices, signal, risk_on_weights, risk_off_weights):
     log_px = np.log(prices)
@@ -139,12 +133,11 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     }
 
 # ============================================
-# GRID SEARCH — SAME AS STREAMLIT
+# GRID SEARCH — MATCH STREAMLIT
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
     btc = prices["BTC-USD"]
-
     best_sharpe = -1e9
     best_trades = np.inf
     best_cfg = None
@@ -159,10 +152,8 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     for ma_type in types:
         for L in lengths:
             ma_series = ma_cache[ma_type][L]
-
             for tol in tolerances:
                 signal = generate_testfol_signal_vectorized(btc, ma_series, tol)
-
                 result = backtest(prices, signal, risk_on_weights, risk_off_weights)
                 sharpe = result["performance"]["Sharpe"]
 
@@ -175,7 +166,6 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                     best_trades = trades_per_year
                     best_cfg = (L, ma_type, tol)
                     best_result = result
-
                 elif sharpe == best_sharpe and trades_per_year < best_trades:
                     best_trades = trades_per_year
                     best_cfg = (L, ma_type, tol)
@@ -194,7 +184,6 @@ def attach_file(msg, filepath):
     encoders.encode_base64(part)
     part.add_header("Content-Disposition", f'attachment; filename="{filepath}"')
     msg.attach(part)
-
 
 def send_email(regime, cfg, perf, perf_on, perf_off):
     EMAIL_USER = os.getenv("EMAIL_USER")
@@ -225,7 +214,7 @@ def send_email(regime, cfg, perf, perf_on, perf_off):
           <li>Tolerance: {tol:.3f}</li>
         </ul>
 
-        <h3>Always-ON Risk-ON Portfolio Performance</h3>
+        <h3>Always-ON Risk-ON Portfolio</h3>
         <ul>
           <li><b>CAGR:</b> {perf_on['CAGR']:.2%}</li>
           <li><b>Volatility:</b> {perf_on['Volatility']:.2%}</li>
@@ -234,7 +223,7 @@ def send_email(regime, cfg, perf, perf_on, perf_off):
           <li><b>Total Return:</b> {perf_on['TotalReturn']:.2%}</li>
         </ul>
 
-        <h3>Always-ON Risk-OFF Portfolio Performance</h3>
+        <h3>Always-ON Risk-OFF Portfolio</h3>
         <ul>
           <li><b>CAGR:</b> {perf_off['CAGR']:.2%}</li>
           <li><b>Volatility:</b> {perf_off['Volatility']:.2%}</li>
@@ -275,11 +264,9 @@ if __name__ == "__main__":
     latest_signal = bool(sig.iloc[-1])
     regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
-    # Always-ON portfolios (log-return engine to match)
+    # Always-ON Risk-ON
     log_px = np.log(prices)
     log_rets = log_px.diff().fillna(0)
-
-    # Always fully Risk-ON
     risk_on_log = pd.Series(0.0, index=log_rets.index)
     for a, w in RISK_ON_WEIGHTS.items():
         if a in log_rets.columns:
@@ -287,7 +274,7 @@ if __name__ == "__main__":
     risk_on_eq = np.exp(risk_on_log.cumsum())
     perf_on = compute_performance(risk_on_log, risk_on_eq)
 
-    # Always fully Risk-OFF
+    # Always-ON Risk-OFF
     risk_off_log = pd.Series(0.0, index=log_rets.index)
     for a, w in RISK_OFF_WEIGHTS.items():
         if a in log_rets.columns:
