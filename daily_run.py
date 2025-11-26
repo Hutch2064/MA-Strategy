@@ -5,9 +5,9 @@ import yfinance as yf
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
+from email.mime_text import MIMEText
+from email.mime_multipart import MIMEMultipart
+from email.mime_base import MIMEBase
 from email import encoders
 import smtplib
 
@@ -196,7 +196,7 @@ def attach_file(msg, filepath):
     msg.attach(part)
 
 
-def send_email(regime, cfg, perf):
+def send_email(regime, cfg, perf, perf_on, perf_off):
     EMAIL_USER = os.getenv("EMAIL_USER")
     EMAIL_PASS = os.getenv("EMAIL_PASS")
     SEND_TO = os.getenv("SEND_TO")
@@ -209,7 +209,7 @@ def send_email(regime, cfg, perf):
         <h2>BTC MA Optimized Portfolio — Daily Signal</h2>
         <p><b>Regime:</b> {regime}</p>
 
-        <h3>Performance</h3>
+        <h3>Optimized Strategy Performance</h3>
         <ul>
           <li><b>CAGR:</b> {perf['CAGR']:.2%}</li>
           <li><b>Volatility:</b> {perf['Volatility']:.2%}</li>
@@ -223,6 +223,24 @@ def send_email(regime, cfg, perf):
           <li>Length: {L}</li>
           <li>Type: {ma_type.upper()}</li>
           <li>Tolerance: {tol:.3f}</li>
+        </ul>
+
+        <h3>Always-ON Risk-ON Portfolio Performance</h3>
+        <ul>
+          <li><b>CAGR:</b> {perf_on['CAGR']:.2%}</li>
+          <li><b>Volatility:</b> {perf_on['Volatility']:.2%}</li>
+          <li><b>Sharpe:</b> {perf_on['Sharpe']:.3f}</li>
+          <li><b>Max Drawdown:</b> {perf_on['MaxDrawdown']:.2%}</li>
+          <li><b>Total Return:</b> {perf_on['TotalReturn']:.2%}</li>
+        </ul>
+
+        <h3>Always-ON Risk-OFF Portfolio Performance</h3>
+        <ul>
+          <li><b>CAGR:</b> {perf_off['CAGR']:.2%}</li>
+          <li><b>Volatility:</b> {perf_off['Volatility']:.2%}</li>
+          <li><b>Sharpe:</b> {perf_off['Sharpe']:.3f}</li>
+          <li><b>Max Drawdown:</b> {perf_off['MaxDrawdown']:.2%}</li>
+          <li><b>Total Return:</b> {perf_off['TotalReturn']:.2%}</li>
         </ul>
       </body>
     </html>
@@ -248,8 +266,8 @@ if __name__ == "__main__":
     tickers = ["BTC-USD", "GLD", "TQQQ", "SHY"]
     prices = load_price_data(tickers, DEFAULT_START_DATE).dropna(how="any")
 
+    # Optimized strategy
     best_cfg, best_result = run_grid_search(prices, RISK_ON_WEIGHTS, RISK_OFF_WEIGHTS)
-
     perf = best_result["performance"]
     sig = best_result["signal"]
     eq = best_result["equity_curve"]
@@ -257,15 +275,35 @@ if __name__ == "__main__":
     latest_signal = bool(sig.iloc[-1])
     regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
+    # Always-ON portfolios (log-return engine to match)
+    log_px = np.log(prices)
+    log_rets = log_px.diff().fillna(0)
+
+    # Always fully Risk-ON
+    risk_on_log = pd.Series(0.0, index=log_rets.index)
+    for a, w in RISK_ON_WEIGHTS.items():
+        if a in log_rets.columns:
+            risk_on_log += log_rets[a] * w
+    risk_on_eq = np.exp(risk_on_log.cumsum())
+    perf_on = compute_performance(risk_on_log, risk_on_eq)
+
+    # Always fully Risk-OFF
+    risk_off_log = pd.Series(0.0, index=log_rets.index)
+    for a, w in RISK_OFF_WEIGHTS.items():
+        if a in log_rets.columns:
+            risk_off_log += log_rets[a] * w
+    risk_off_eq = np.exp(risk_off_log.cumsum())
+    perf_off = compute_performance(risk_off_log, risk_off_eq)
+
+    # Plot all three
     fig, ax = plt.subplots(figsize=(10, 5))
     ax.plot(eq, label="Optimized Strategy")
+    ax.plot(risk_on_eq, label="Always Risk-ON", linestyle="--")
+    ax.plot(risk_off_eq, label="Always Risk-OFF", linestyle=":")
     ax.legend()
     ax.grid(alpha=0.3)
     plt.tight_layout()
     plt.savefig("equity_curve.png")
     plt.close()
 
-    send_email(regime, best_cfg, perf)
-
-
-
+    send_email(regime, best_cfg, perf, perf_on, perf_off)
