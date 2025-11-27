@@ -3,3 +3,4 @@ yfinance
 pandas
 numpy
 matplotlib
+optuna==3.6.1
