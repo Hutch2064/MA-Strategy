@@ -152,7 +152,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 
     lengths = list(range(21, 201))
     types = ["sma", "ema"]
-    tolerances = np.arange(0.0, .0501, 0.005)
+    tolerances = np.arange(0.0, .0501, 0.01)
     delays = list(range(0, 22))
 
     ma_cache = {
