@@ -156,9 +156,9 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     best_cfg = None
     best_result = None
 
-    lengths = list(range(21, 253))
+    lengths = list(range(21, 201))
     types = ["sma", "ema"]
-    tolerances = np.arange(0.0, 0.1001, 0.002)
+    tolerances = np.arange(0.0, .0501, 0.005)
     delays = range(0, 22)
 
     progress = st.progress(0.0)
