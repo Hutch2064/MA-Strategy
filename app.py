@@ -4,11 +4,6 @@ import yfinance as yf
 import matplotlib.pyplot as plt
 import streamlit as st
 
-# --- NEW IMPORTS FOR SPEED ---
-from joblib import Parallel, delayed
-from numba import njit
-import itertools
-
 # ============================================
 # CONFIG
 # ============================================
@@ -58,18 +53,6 @@ def compute_ma_matrix(price, lengths, ma_type):
             ma_dict[L] = ma.shift(1)
     return ma_dict
 
-# --- NEW: NUMBA COMPILED HYSTERESIS ---
-@njit
-def hysteresis_numba(px, upper, lower, start_index):
-    n = len(px)
-    sig = np.zeros(n, dtype=np.bool_)
-    for t in range(start_index, n):
-        if not sig[t-1]:
-            sig[t] = px[t] > upper[t]
-        else:
-            sig[t] = not (px[t] < lower[t])
-    return sig
-
 def generate_testfol_signal_vectorized(price, ma, tol):
     px = price.shift(1).values
     ma_vals = ma.values
@@ -78,16 +61,23 @@ def generate_testfol_signal_vectorized(price, ma, tol):
     upper = ma_vals * (1 + tol)
     lower = ma_vals * (1 - tol)
 
+    sig = np.zeros(n, dtype=bool)
+
     first_valid = np.nanargmin(np.isnan(ma_vals))
     if first_valid == 0:
         first_valid = 1
     start_index = first_valid + 1
 
-    sig_vals = hysteresis_numba(px, upper, lower, start_index)
-    return pd.Series(sig_vals, index=ma.index).fillna(False)
+    for t in range(start_index, n):
+        if not sig[t-1]:
+            sig[t] = px[t] > upper[t]
+        else:
+            sig[t] = not (px[t] < lower[t])
+
+    return pd.Series(sig, index=ma.index).fillna(False)
 
 # ============================================
-# NEW: DELAY HANDLER
+# DELAY HANDLER
 # ============================================
 
 def apply_delay(signal, delay):
@@ -154,22 +144,8 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     }
 
 # ============================================
-# GRID SEARCH — NOW FULLY PARALLELIZED
+# GRID SEARCH — ACCELERATED BATCHED VERSION
 # ============================================
-
-def run_single_combo(ma_type, length, tol, delay, btc, ma_cache, prices, risk_on_weights, risk_off_weights):
-    ma = ma_cache[ma_type][length]
-    base_signal = generate_testfol_signal_vectorized(btc, ma, tol)
-    sig = apply_delay(base_signal, delay)
-
-    result = backtest(prices, sig, risk_on_weights, risk_off_weights)
-    sharpe = result["performance"]["Sharpe"]
-
-    sig_arr = result["signal"].astype(int)
-    switches = sig_arr.diff().abs().sum()
-    trades_per_year = switches / (len(sig_arr) / 252)
-
-    return sharpe, trades_per_year, (length, ma_type, tol, delay), result
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
     btc = prices["QQQ"]
@@ -177,35 +153,56 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     lengths = list(range(21, 201))
     types = ["sma", "ema"]
     tolerances = np.arange(0.0, .0501, 0.005)
-    delays = range(0, 22)
+    delays = list(range(0, 22))
 
-    param_grid = list(itertools.product(types, lengths, tolerances, delays))
+    ma_cache = {
+        ma_type: compute_ma_matrix(btc, lengths, ma_type)
+        for ma_type in types
+    }
 
-    total = len(param_grid)
+    best_sharpe = -1e9
+    best_trades = np.inf
+    best_cfg = None
+    best_result = None
+
+    # batching for speed
+    combos = []
+    for ma_type in types:
+        for L in lengths:
+            for tol in tolerances:
+                for d in delays:
+                    combos.append((ma_type, L, tol, d))
+
     progress = st.progress(0.0)
+    N = len(combos)
 
-    ma_cache = {t: compute_ma_matrix(btc, lengths, t) for t in types}
+    for i, (ma_type, L, tol, d) in enumerate(combos):
+        ma = ma_cache[ma_type][L]
+        base_signal = generate_testfol_signal_vectorized(btc, ma, tol)
+        sig = apply_delay(base_signal, d)
 
-    results = []
-    batch_size = 500
+        result = backtest(prices, sig, risk_on_weights, risk_off_weights)
+        sharpe = result["performance"]["Sharpe"]
 
-    for i in range(0, total, batch_size):
-        batch = param_grid[i:i+batch_size]
+        sig_arr = result["signal"].astype(int)
+        switches = sig_arr.diff().abs().sum()
+        trades_per_year = switches / (len(sig_arr) / 252)
 
-        out = Parallel(n_jobs=-1, backend="loky")(
-            delayed(run_single_combo)(
-                ma_type, length, tol, delay,
-                btc, ma_cache, prices,
-                risk_on_weights, risk_off_weights
-            )
-            for (ma_type, length, tol, delay) in batch
-        )
+        if sharpe > best_sharpe:
+            best_sharpe = sharpe
+            best_trades = trades_per_year
+            best_cfg = (L, ma_type, tol, d)
+            best_result = result
 
-        results.extend(out)
-        progress.progress(min(1.0, (i + batch_size) / total))
+        elif sharpe == best_sharpe and trades_per_year < best_trades:
+            best_trades = trades_per_year
+            best_cfg = (L, ma_type, tol, d)
+            best_result = result
 
-    best = max(results, key=lambda x: (x[0], -x[1]))
-    return best[2], best[3]
+        if i % 500 == 0:
+            progress.progress(i / N)
+
+    return best_cfg, best_result
 
 # ============================================
 # STREAMLIT APP
@@ -216,13 +213,12 @@ def main():
     st.title("Bitcoin MA Optimized Portfolio (TestFol + Delay)")
 
     st.write("""
-    This model now includes:
-    - Fully vectorized TestFol hysteresis  
-    - Exact 1-day delayed indicators  
-    - Log-return engine  
-    - Daily rebalance  
-    - Sharpe → Trades optimization  
-    - **NEW: Delay optimization (0–21 days)**  
+    Includes:
+    - Vectorized TestFol hysteresis
+    - 1-day indicator delay
+    - Delayed regime confirmation (0–21 days)
+    - Daily rebalance
+    - Sharpe → Trades optimization
     """)
 
     st.sidebar.header("Backtest Settings")
