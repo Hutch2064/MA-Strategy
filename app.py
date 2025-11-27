@@ -40,7 +40,7 @@ def load_price_data(tickers, start_date, end_date=None):
     return px.dropna(how="all")
 
 # ============================================
-# TECHNICALS — RAW MA MATRIX (NO SHIFT HERE)
+# TECHNICALS — VECTORIZED TESTFOL HYSTERESIS
 # ============================================
 
 def compute_ma_matrix(price, lengths, ma_type):
@@ -49,23 +49,20 @@ def compute_ma_matrix(price, lengths, ma_type):
     if ma_type == "ema":
         for L in lengths:
             ma = price.ewm(span=L, adjust=False).mean()
-            ma_dict[L] = ma  # NO SHIFT HERE
+            ma_dict[L] = ma.shift(1)
     else:
         for L in lengths:
             ma = price.rolling(window=L, min_periods=L).mean()
-            ma_dict[L] = ma  # NO SHIFT HERE
+            ma_dict[L] = ma.shift(1)
 
     return ma_dict
 
-# ============================================
-# SIGNAL — TESTFOL HYSTERESIS (UNCHANGED)
-# ============================================
 
 def generate_testfol_signal_vectorized(price, ma, tol):
     px = price.shift(1).values
     ma_vals = ma.values
-
     n = len(px)
+
     upper = ma_vals * (1 + tol)
     lower = ma_vals * (1 - tol)
 
@@ -84,8 +81,29 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 
     return pd.Series(sig, index=ma.index).fillna(False)
 
+
 # ============================================
-# BACKTEST (UNCHANGED)
+# TRUE STATE-TRANSITION DELAY (NEW)
+# ============================================
+
+def apply_delay_to_signal(signal, delay):
+    if delay == 0:
+        return signal
+
+    sig = signal.values
+    out = sig.copy()
+    n = len(sig)
+
+    for t in range(1, n):
+        if sig[t] != sig[t-1]:
+            freeze_end = min(n, t + delay)
+            out[t:freeze_end] = sig[t-1]
+
+    return pd.Series(out, index=signal.index)
+
+
+# ============================================
+# BACKTEST (LOG RETURNS + DAILY REBALANCE)
 # ============================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
@@ -100,6 +118,7 @@ def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
             weights.loc[~signal, a] = w
 
     return weights
+
 
 def compute_performance(log_returns, equity_curve, rf=0.0):
     cagr = np.exp(log_returns.mean() * 252) - 1
@@ -117,11 +136,13 @@ def compute_performance(log_returns, equity_curve, rf=0.0):
         "TotalReturn": total_ret,
     }
 
+
 def backtest(prices, signal, risk_on_weights, risk_off_weights):
     log_prices = np.log(prices)
     log_rets = log_prices.diff().fillna(0)
 
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
+
     strat_log_rets = (weights.shift(1).fillna(0) * log_rets).sum(axis=1)
     eq = np.exp(strat_log_rets.cumsum())
 
@@ -134,7 +155,7 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     }
 
 # ============================================
-# GRID SEARCH — NOW WITH DELAY
+# GRID SEARCH — now includes DELAY
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
@@ -145,28 +166,28 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     best_cfg = None
     best_result = None
 
-    lengths = list(range(21, 253))
+    lengths = list(range(20, 201))
     types = ["sma", "ema"]
-    tolerances = np.arange(0.0, 0.0501, 0.002)
-    delays = list(range(0, 22))  # <<< NEW
+    tolerances = np.arange(0.0, 0.0501, 0.001)   # 0–5% in 0.1% steps
+    delays = list(range(0, 22))                  # NEW: 0–21 day delays
 
-    total = len(lengths) * len(types) * len(tolerances) * len(delays)
     progress = st.progress(0.0)
+    total = len(lengths) * len(types) * len(tolerances) * len(delays)
     idx = 0
 
     ma_cache = {t: compute_ma_matrix(btc, lengths, t) for t in types}
 
     for ma_type in types:
-        for L in lengths:
-            raw_ma = ma_cache[ma_type][L]
+        for length in lengths:
+            ma = ma_cache[ma_type][length]
 
-            for delay in delays:
-                delayed_ma = raw_ma.shift(delay).shift(1)
+            for tol in tolerances:
+                base_signal = generate_testfol_signal_vectorized(btc, ma, tol)
 
-                for tol in tolerances:
-                    signal = generate_testfol_signal_vectorized(btc, delayed_ma, tol)
-                    result = backtest(prices, signal, risk_on_weights, risk_off_weights)
+                for delay in delays:
+                    delayed_signal = apply_delay_to_signal(base_signal, delay)
 
+                    result = backtest(prices, delayed_signal, risk_on_weights, risk_off_weights)
                     sharpe = result["performance"]["Sharpe"]
 
                     sig_arr = result["signal"].astype(int)
@@ -174,18 +195,18 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                     trades_per_year = switches / (len(sig_arr) / 252)
 
                     idx += 1
-                    if idx % 400 == 0:
+                    if idx % 500 == 0:
                         progress.progress(idx / total)
 
                     if sharpe > best_sharpe:
                         best_sharpe = sharpe
                         best_trades = trades_per_year
-                        best_cfg = (L, ma_type, tol, delay)
+                        best_cfg = (length, ma_type, tol, delay)
                         best_result = result
 
                     elif sharpe == best_sharpe and trades_per_year < best_trades:
                         best_trades = trades_per_year
-                        best_cfg = (L, ma_type, tol, delay)
+                        best_cfg = (length, ma_type, tol, delay)
                         best_result = result
 
     return best_cfg, best_result
@@ -196,16 +217,16 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 
 def main():
     st.set_page_config(page_title="Bitcoin MA Optimized Portfolio", layout="wide")
-    st.title("Bitcoin MA Optimized Portfolio (with Delay Optimization)")
+    st.title("Bitcoin MA Optimized Portfolio (TestFol-Accurate + Delay Optimized)")
 
     st.write("""
     This model now includes:
-    - Delay optimization (0–21 days)
-    - Fully vectorized hysteresis  
-    - Exact 1-day delay  
-    - Log-returns  
+    - Fully vectorized TestFol hysteresis  
+    - Exact 1-day delayed indicators  
+    - **Optimized state-transition delay (0–21 days)**  
+    - Log-return engine  
     - Daily rebalance  
-    - No lookahead  
+    - No lookahead bias  
     - Sharpe → Trades optimization  
     """)
 
@@ -248,13 +269,14 @@ def main():
     prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
 
     best_cfg, best_result = run_grid_search(prices, risk_on_weights, risk_off_weights)
-    best_len, best_type, best_tol, best_delay = best_cfg
 
+    best_len, best_type, best_tol, best_delay = best_cfg
     perf = best_result["performance"]
     sig = best_result["signal"]
 
     latest_day = sig.index[-1]
-    regime = "RISK-ON" if sig.iloc[-1] else "RISK-OFF"
+    latest_signal = sig.iloc[-1]
+    regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
     st.subheader("Current Regime Status")
     st.write(f"**Date:** {latest_day.date()}")
@@ -278,7 +300,6 @@ def main():
     st.write(f"**Delay:** {best_delay} days")
     st.write(f"**Trades per year:** {trades_per_year:.2f}")
 
-    # Always-on portfolio
     log_prices = np.log(prices)
     log_rets = log_prices.diff().fillna(0)
 
