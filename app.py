@@ -4,6 +4,11 @@ import yfinance as yf
 import matplotlib.pyplot as plt
 import streamlit as st
 
+# --- NEW IMPORTS FOR SPEED ---
+from joblib import Parallel, delayed
+from numba import njit
+import itertools
+
 # ============================================
 # CONFIG
 # ============================================
@@ -53,6 +58,18 @@ def compute_ma_matrix(price, lengths, ma_type):
             ma_dict[L] = ma.shift(1)
     return ma_dict
 
+# --- NEW: NUMBA COMPILED HYSTERESIS ---
+@njit
+def hysteresis_numba(px, upper, lower, start_index):
+    n = len(px)
+    sig = np.zeros(n, dtype=np.bool_)
+    for t in range(start_index, n):
+        if not sig[t-1]:
+            sig[t] = px[t] > upper[t]
+        else:
+            sig[t] = not (px[t] < lower[t])
+    return sig
+
 def generate_testfol_signal_vectorized(price, ma, tol):
     px = price.shift(1).values
     ma_vals = ma.values
@@ -61,27 +78,19 @@ def generate_testfol_signal_vectorized(price, ma, tol):
     upper = ma_vals * (1 + tol)
     lower = ma_vals * (1 - tol)
 
-    sig = np.zeros(n, dtype=bool)
-
     first_valid = np.nanargmin(np.isnan(ma_vals))
     if first_valid == 0:
         first_valid = 1
     start_index = first_valid + 1
 
-    for t in range(start_index, n):
-        if not sig[t-1]:
-            sig[t] = px[t] > upper[t]
-        else:
-            sig[t] = not (px[t] < lower[t])
-
-    return pd.Series(sig, index=ma.index).fillna(False)
+    sig_vals = hysteresis_numba(px, upper, lower, start_index)
+    return pd.Series(sig_vals, index=ma.index).fillna(False)
 
 # ============================================
 # NEW: DELAY HANDLER
 # ============================================
 
 def apply_delay(signal, delay):
-    """Delay switching by `delay` days after each regime flip."""
     if delay == 0:
         return signal
 
@@ -89,7 +98,7 @@ def apply_delay(signal, delay):
     out = sig.copy()
 
     for i in range(1, len(sig)):
-        if sig[i] != sig[i-1]:  # flip detected
+        if sig[i] != sig[i-1]:
             end = min(i + delay, len(sig))
             out[i:end] = out[i-1]
 
@@ -145,61 +154,58 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     }
 
 # ============================================
-# GRID SEARCH — NOW WITH DELAY
+# GRID SEARCH — NOW FULLY PARALLELIZED
 # ============================================
 
-def run_grid_search(prices, risk_on_weights, risk_off_weights):
-    btc = prices["QQQ"]  # <-- matches your risk-on ticker
+def run_single_combo(ma_type, length, tol, delay, btc, ma_cache, prices, risk_on_weights, risk_off_weights):
+    ma = ma_cache[ma_type][length]
+    base_signal = generate_testfol_signal_vectorized(btc, ma, tol)
+    sig = apply_delay(base_signal, delay)
 
-    best_sharpe = -1e9
-    best_trades = np.inf
-    best_cfg = None
-    best_result = None
+    result = backtest(prices, sig, risk_on_weights, risk_off_weights)
+    sharpe = result["performance"]["Sharpe"]
+
+    sig_arr = result["signal"].astype(int)
+    switches = sig_arr.diff().abs().sum()
+    trades_per_year = switches / (len(sig_arr) / 252)
+
+    return sharpe, trades_per_year, (length, ma_type, tol, delay), result
+
+def run_grid_search(prices, risk_on_weights, risk_off_weights):
+    btc = prices["QQQ"]
 
     lengths = list(range(21, 201))
     types = ["sma", "ema"]
     tolerances = np.arange(0.0, .0501, 0.005)
     delays = range(0, 22)
 
+    param_grid = list(itertools.product(types, lengths, tolerances, delays))
+
+    total = len(param_grid)
     progress = st.progress(0.0)
-    total = len(lengths) * len(types) * len(tolerances) * len(delays)
-    idx = 0
 
     ma_cache = {t: compute_ma_matrix(btc, lengths, t) for t in types}
 
-    for ma_type in types:
-        for length in lengths:
-            ma = ma_cache[ma_type][length]
+    results = []
+    batch_size = 500
 
-            for tol in tolerances:
-                base_signal = generate_testfol_signal_vectorized(btc, ma, tol)
+    for i in range(0, total, batch_size):
+        batch = param_grid[i:i+batch_size]
 
-                for delay in delays:
-                    sig = apply_delay(base_signal, delay)
+        out = Parallel(n_jobs=-1, backend="loky")(
+            delayed(run_single_combo)(
+                ma_type, length, tol, delay,
+                btc, ma_cache, prices,
+                risk_on_weights, risk_off_weights
+            )
+            for (ma_type, length, tol, delay) in batch
+        )
 
-                    result = backtest(prices, sig, risk_on_weights, risk_off_weights)
-                    sharpe = result["performance"]["Sharpe"]
+        results.extend(out)
+        progress.progress(min(1.0, (i + batch_size) / total))
 
-                    sig_arr = result["signal"].astype(int)
-                    switches = sig_arr.diff().abs().sum()
-                    trades_per_year = switches / (len(sig_arr) / 252)
-
-                    idx += 1
-                    if idx % 500 == 0:
-                        progress.progress(idx / total)
-
-                    if sharpe > best_sharpe:
-                        best_sharpe = sharpe
-                        best_trades = trades_per_year
-                        best_cfg = (length, ma_type, tol, delay)
-                        best_result = result
-
-                    elif sharpe == best_sharpe and trades_per_year < best_trades:
-                        best_trades = trades_per_year
-                        best_cfg = (length, ma_type, tol, delay)
-                        best_result = result
-
-    return best_cfg, best_result
+    best = max(results, key=lambda x: (x[0], -x[1]))
+    return best[2], best[3]
 
 # ============================================
 # STREAMLIT APP
@@ -290,7 +296,6 @@ def main():
     st.write(f"**Delay:** {best_delay} days")
     st.write(f"**Trades per year:** {trades_per_year:.2f}")
 
-    # Always-on
     log_prices = np.log(prices)
     log_rets = log_prices.diff().fillna(0)
     user_rets = pd.Series(0, index=log_rets.index)
