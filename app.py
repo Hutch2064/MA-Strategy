@@ -90,7 +90,6 @@ def apply_delay(signal, delay):
 
     for i in range(1, len(sig)):
         if sig[i] != sig[i-1]:  # flip detected
-            # hold previous regime for `delay` days
             end = min(i + delay, len(sig))
             out[i:end] = out[i-1]
 
@@ -150,7 +149,7 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
-    btc = prices["BTC-USD"]
+    btc = prices["QQQ"]  # <-- matches your risk-on ticker
 
     best_sharpe = -1e9
     best_trades = np.inf
@@ -160,7 +159,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     lengths = list(range(21, 253))
     types = ["sma", "ema"]
     tolerances = np.arange(0.0, 0.1001, 0.002)
-    delays = range(0, 22)  # <----- NEW
+    delays = range(0, 22)
 
     progress = st.progress(0.0)
     total = len(lengths) * len(types) * len(tolerances) * len(delays)
@@ -226,18 +225,18 @@ def main():
 
     st.sidebar.header("Risk-ON Portfolio")
     risk_on_tickers_str = st.sidebar.text_input(
-        "Tickers", ",".join(RISK_ON_WEIGHTS.keys())
+        "Risk-ON Tickers", ",".join(RISK_ON_WEIGHTS.keys())
     )
     risk_on_weights_str = st.sidebar.text_input(
-        "Weights", ",".join(str(w) for w in RISK_ON_WEIGHTS.values())
+        "Risk-ON Weights", ",".join(str(w) for w in RISK_ON_WEIGHTS.values())
     )
 
     st.sidebar.header("Risk-OFF Portfolio")
     risk_off_tickers_str = st.sidebar.text_input(
-        "Tickers", ",".join(RISK_OFF_WEIGHTS.keys())
+        "Risk-OFF Tickers", ",".join(RISK_OFF_WEIGHTS.keys())
     )
     risk_off_weights_str = st.sidebar.text_input(
-        "Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values())
+        "Risk-OFF Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values())
     )
 
     if not st.sidebar.button("Run Backtest & Optimize"):
