@@ -21,6 +21,8 @@ RISK_OFF_WEIGHTS = {
     "UUP": 1.0,
 }
 
+TRANSACTION_COST = 0.001   # <--- NEW: 0.10% cost per regime switch (log-return space)
+
 # ============================================
 # DATA LOADING
 # ============================================
@@ -44,16 +46,12 @@ def load_price_data(tickers, start_date, end_date=None):
 # ============================================
 
 def compute_ma_matrix(price, lengths, ma_type):
-    """
-    Precompute all MAs for all lengths into a single matrix.
-    Returns dict[length] = MA series
-    """
     ma_dict = {}
 
     if ma_type == "ema":
         for L in lengths:
             ma = price.ewm(span=L, adjust=False).mean()
-            ma_dict[L] = ma.shift(1)  # shift for TestFol delay
+            ma_dict[L] = ma.shift(1)
     else:
         for L in lengths:
             ma = price.rolling(window=L, min_periods=L).mean()
@@ -63,41 +61,25 @@ def compute_ma_matrix(price, lengths, ma_type):
 
 
 def generate_testfol_signal_vectorized(price, ma, tol):
-    """
-    Full TestFol hysteresis, vectorized (no Python loop).
-    price, ma already shifted by 1.
 
-    Rules:
-        OFF → ON only if px > ma*(1+tol)
-        ON  → OFF only if px < ma*(1-tol)
-        Otherwise retain previous state.
-    """
-
-    px = price.shift(1).values  # delayed price
+    px = price.shift(1).values
     ma_vals = ma.values
-
     n = len(px)
 
-    # Upper and lower bands
     upper = ma_vals * (1 + tol)
     lower = ma_vals * (1 - tol)
 
-    # Initialize signal array
     sig = np.zeros(n, dtype=bool)
 
-    # Start OFF until MA becomes valid (+1 day warm-up)
-    first_valid = np.nanargmin(np.isnan(ma_vals))  # first non-NaN
+    first_valid = np.nanargmin(np.isnan(ma_vals))
     if first_valid == 0:
         first_valid = 1
     start_index = first_valid + 1
 
-    # Vectorized hysteresis via cumulative updates
     for t in range(start_index, n):
         if not sig[t-1]:
-            # OFF → ON
             sig[t] = px[t] > upper[t]
         else:
-            # ON → OFF
             sig[t] = not (px[t] < lower[t])
 
     return pd.Series(sig, index=ma.index).fillna(False)
@@ -138,12 +120,21 @@ def compute_performance(log_returns, equity_curve, rf=0.0):
 
 
 def backtest(prices, signal, risk_on_weights, risk_off_weights):
+
     log_prices = np.log(prices)
     log_rets = log_prices.diff().fillna(0)
 
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
     strat_log_rets = (weights.shift(1).fillna(0) * log_rets).sum(axis=1)
+
+    # --------------------------------------------
+    # NEW: apply 0.10% transaction cost PER SIGNAL FLIP
+    # --------------------------------------------
+    flips = signal.astype(int).diff().abs().fillna(0)
+    strat_log_rets -= flips * TRANSACTION_COST
+    # --------------------------------------------
+
     eq = np.exp(strat_log_rets.cumsum())
 
     return {
@@ -174,7 +165,6 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     total = len(lengths) * len(types) * len(tolerances)
     idx = 0
 
-    # Precompute all MAs for speed
     ma_cache = {t: compute_ma_matrix(btc, lengths, t) for t in types}
 
     for ma_type in types:
@@ -187,7 +177,6 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                 result = backtest(prices, signal, risk_on_weights, risk_off_weights)
                 sharpe = result["performance"]["Sharpe"]
 
-                # Count trades
                 sig_arr = result["signal"].astype(int)
                 switches = sig_arr.diff().abs().sum()
                 trades_per_year = switches / (len(sig_arr) / 252)
@@ -196,7 +185,6 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                 if idx % 200 == 0:
                     progress.progress(idx / total)
 
-                # Sharpe → Trades optimization
                 if sharpe > best_sharpe:
                     best_sharpe = sharpe
                     best_trades = trades_per_year
@@ -226,6 +214,7 @@ def main():
     - Daily rebalance  
     - No lookahead bias  
     - Sharpe → Trades optimization  
+    - **0.10% transaction cost applied per regime switch**
     """)
 
     st.sidebar.header("Backtest Settings")
@@ -251,7 +240,6 @@ def main():
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
 
-    # Parse inputs
     risk_on_tickers = [t.strip().upper() for t in risk_on_tickers_str.split(",")]
     risk_on_weights_list = [float(x) for x in risk_on_weights_str.split(",")]
     risk_on_weights = dict(zip(risk_on_tickers, risk_on_weights_list))
@@ -273,7 +261,6 @@ def main():
     perf = best_result["performance"]
     sig = best_result["signal"]
 
-    # Current regime
     latest_day = sig.index[-1]
     latest_signal = sig.iloc[-1]
     regime = "RISK-ON" if latest_signal else "RISK-OFF"
