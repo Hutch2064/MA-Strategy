@@ -40,70 +40,52 @@ def load_price_data(tickers, start_date, end_date=None):
     return px.dropna(how="all")
 
 # ============================================
-# TECHNICALS — VECTORIZED TESTFOL HYSTERESIS
+# TECHNICALS — RAW MA MATRIX (NO SHIFT HERE)
 # ============================================
 
 def compute_ma_matrix(price, lengths, ma_type):
-    """
-    Precompute all MAs for all lengths into a single matrix.
-    Returns dict[length] = MA series
-    """
     ma_dict = {}
 
     if ma_type == "ema":
         for L in lengths:
             ma = price.ewm(span=L, adjust=False).mean()
-            ma_dict[L] = ma.shift(1)  # shift for TestFol delay
+            ma_dict[L] = ma  # NO SHIFT HERE
     else:
         for L in lengths:
             ma = price.rolling(window=L, min_periods=L).mean()
-            ma_dict[L] = ma.shift(1)
+            ma_dict[L] = ma  # NO SHIFT HERE
 
     return ma_dict
 
+# ============================================
+# SIGNAL — TESTFOL HYSTERESIS (UNCHANGED)
+# ============================================
 
 def generate_testfol_signal_vectorized(price, ma, tol):
-    """
-    Full TestFol hysteresis, vectorized (no Python loop).
-    price, ma already shifted by 1.
-
-    Rules:
-        OFF → ON only if px > ma*(1+tol)
-        ON  → OFF only if px < ma*(1-tol)
-        Otherwise retain previous state.
-    """
-
-    px = price.shift(1).values  # delayed price
+    px = price.shift(1).values
     ma_vals = ma.values
 
     n = len(px)
-
-    # Upper and lower bands
     upper = ma_vals * (1 + tol)
     lower = ma_vals * (1 - tol)
 
-    # Initialize signal array
     sig = np.zeros(n, dtype=bool)
 
-    # Start OFF until MA becomes valid (+1 day warm-up)
-    first_valid = np.nanargmin(np.isnan(ma_vals))  # first non-NaN
+    first_valid = np.nanargmin(np.isnan(ma_vals))
     if first_valid == 0:
         first_valid = 1
     start_index = first_valid + 1
 
-    # Vectorized hysteresis via cumulative updates
     for t in range(start_index, n):
         if not sig[t-1]:
-            # OFF → ON
             sig[t] = px[t] > upper[t]
         else:
-            # ON → OFF
             sig[t] = not (px[t] < lower[t])
 
     return pd.Series(sig, index=ma.index).fillna(False)
 
 # ============================================
-# BACKTEST (LOG RETURNS + DAILY REBALANCE)
+# BACKTEST (UNCHANGED)
 # ============================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
@@ -118,7 +100,6 @@ def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
             weights.loc[~signal, a] = w
 
     return weights
-
 
 def compute_performance(log_returns, equity_curve, rf=0.0):
     cagr = np.exp(log_returns.mean() * 252) - 1
@@ -136,13 +117,11 @@ def compute_performance(log_returns, equity_curve, rf=0.0):
         "TotalReturn": total_ret,
     }
 
-
 def backtest(prices, signal, risk_on_weights, risk_off_weights):
     log_prices = np.log(prices)
     log_rets = log_prices.diff().fillna(0)
 
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
-
     strat_log_rets = (weights.shift(1).fillna(0) * log_rets).sum(axis=1)
     eq = np.exp(strat_log_rets.cumsum())
 
@@ -155,7 +134,7 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     }
 
 # ============================================
-# GRID SEARCH — VECTORIZED + OPTIMIZED
+# GRID SEARCH — NOW WITH DELAY
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
@@ -169,44 +148,45 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     lengths = list(range(21, 253))
     types = ["sma", "ema"]
     tolerances = np.arange(0.0, 0.1001, 0.002)
+    delays = list(range(0, 22))  # <<< NEW
 
+    total = len(lengths) * len(types) * len(tolerances) * len(delays)
     progress = st.progress(0.0)
-    total = len(lengths) * len(types) * len(tolerances)
     idx = 0
 
-    # Precompute all MAs for speed
     ma_cache = {t: compute_ma_matrix(btc, lengths, t) for t in types}
 
     for ma_type in types:
-        for length in lengths:
-            ma = ma_cache[ma_type][length]
+        for L in lengths:
+            raw_ma = ma_cache[ma_type][L]
 
-            for tol in tolerances:
-                signal = generate_testfol_signal_vectorized(btc, ma, tol)
+            for delay in delays:
+                delayed_ma = raw_ma.shift(delay).shift(1)
 
-                result = backtest(prices, signal, risk_on_weights, risk_off_weights)
-                sharpe = result["performance"]["Sharpe"]
+                for tol in tolerances:
+                    signal = generate_testfol_signal_vectorized(btc, delayed_ma, tol)
+                    result = backtest(prices, signal, risk_on_weights, risk_off_weights)
 
-                # Count trades
-                sig_arr = result["signal"].astype(int)
-                switches = sig_arr.diff().abs().sum()
-                trades_per_year = switches / (len(sig_arr) / 252)
+                    sharpe = result["performance"]["Sharpe"]
 
-                idx += 1
-                if idx % 200 == 0:
-                    progress.progress(idx / total)
+                    sig_arr = result["signal"].astype(int)
+                    switches = sig_arr.diff().abs().sum()
+                    trades_per_year = switches / (len(sig_arr) / 252)
 
-                # Sharpe → Trades optimization
-                if sharpe > best_sharpe:
-                    best_sharpe = sharpe
-                    best_trades = trades_per_year
-                    best_cfg = (length, ma_type, tol)
-                    best_result = result
+                    idx += 1
+                    if idx % 400 == 0:
+                        progress.progress(idx / total)
 
-                elif sharpe == best_sharpe and trades_per_year < best_trades:
-                    best_trades = trades_per_year
-                    best_cfg = (length, ma_type, tol)
-                    best_result = result
+                    if sharpe > best_sharpe:
+                        best_sharpe = sharpe
+                        best_trades = trades_per_year
+                        best_cfg = (L, ma_type, tol, delay)
+                        best_result = result
+
+                    elif sharpe == best_sharpe and trades_per_year < best_trades:
+                        best_trades = trades_per_year
+                        best_cfg = (L, ma_type, tol, delay)
+                        best_result = result
 
     return best_cfg, best_result
 
@@ -216,15 +196,16 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 
 def main():
     st.set_page_config(page_title="Bitcoin MA Optimized Portfolio", layout="wide")
-    st.title("Bitcoin MA Optimized Portfolio (TestFol-Accurate, Fast Version)")
+    st.title("Bitcoin MA Optimized Portfolio (with Delay Optimization)")
 
     st.write("""
     This model now includes:
-    - Fully vectorized TestFol hysteresis  
-    - Exact 1-day delayed indicators  
-    - Log-return engine  
+    - Delay optimization (0–21 days)
+    - Fully vectorized hysteresis  
+    - Exact 1-day delay  
+    - Log-returns  
     - Daily rebalance  
-    - No lookahead bias  
+    - No lookahead  
     - Sharpe → Trades optimization  
     """)
 
@@ -251,7 +232,6 @@ def main():
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
 
-    # Parse inputs
     risk_on_tickers = [t.strip().upper() for t in risk_on_tickers_str.split(",")]
     risk_on_weights_list = [float(x) for x in risk_on_weights_str.split(",")]
     risk_on_weights = dict(zip(risk_on_tickers, risk_on_weights_list))
@@ -268,15 +248,13 @@ def main():
     prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
 
     best_cfg, best_result = run_grid_search(prices, risk_on_weights, risk_off_weights)
+    best_len, best_type, best_tol, best_delay = best_cfg
 
-    best_len, best_type, best_tol = best_cfg
     perf = best_result["performance"]
     sig = best_result["signal"]
 
-    # Current regime
     latest_day = sig.index[-1]
-    latest_signal = sig.iloc[-1]
-    regime = "RISK-ON" if latest_signal else "RISK-OFF"
+    regime = "RISK-ON" if sig.iloc[-1] else "RISK-OFF"
 
     st.subheader("Current Regime Status")
     st.write(f"**Date:** {latest_day.date()}")
@@ -297,6 +275,7 @@ def main():
     st.write(f"**MA Length:** {best_len}")
     st.write(f"**MA Type:** {best_type.upper()}")
     st.write(f"**Tolerance:** {best_tol:.2%}")
+    st.write(f"**Delay:** {best_delay} days")
     st.write(f"**Trades per year:** {trades_per_year:.2f}")
 
     # Always-on portfolio
@@ -329,4 +308,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
