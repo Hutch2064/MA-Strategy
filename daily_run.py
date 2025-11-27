@@ -252,7 +252,7 @@ def send_email(regime, cfg, perf, perf_on, perf_off):
 # ============================================
 
 if __name__ == "__main__":
-    tickers = ["BTC-USD", "GLD", "TQQQ", "SHY"]
+    tickers = ["BTC-USD", "GLD", "TQQQ", "UUP"]
     prices = load_price_data(tickers, DEFAULT_START_DATE).dropna(how="any")
 
     # Optimized strategy
