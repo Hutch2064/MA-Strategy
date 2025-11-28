@@ -299,6 +299,37 @@ def main():
     st.write(f"**Tolerance:** {best_tol:.2%}")
     st.write(f"**Trades per year:** {trades_per_year:.2f}")
 
+    # ============================================
+    # BITCOIN MA & TOLERANCE BANDS (OPTIMIZED)
+    # ============================================
+    btc = prices["BTC-USD"]
+
+    # Recompute MA for the optimal config (shifted 1 day, same as signal logic)
+    ma_opt_dict = compute_ma_matrix(btc, [best_len], best_type)
+    ma_opt_series = ma_opt_dict[best_len]
+
+    # Use the last valid MA value (the one actually used for the latest signal)
+    ma_opt_series_valid = ma_opt_series.dropna()
+    if not ma_opt_series_valid.empty:
+        ma_date = ma_opt_series_valid.index[-1]
+        current_ma = float(ma_opt_series_valid.iloc[-1])
+        current_price = float(btc.loc[ma_date])
+
+        upper_band = current_ma * (1.0 + best_tol)
+        lower_band = current_ma * (1.0 - best_tol)
+
+        st.subheader("Bitcoin MA & Tolerance Bands (Optimized)")
+        st.write(f"**BTC Date (signal basis):** {ma_date.date()}")
+        st.write(f"**BTC Price (latest close):** ${current_price:,.2f}")
+        st.write(
+            f"**{best_type.upper()}({best_len}) MA (delayed 1 day, used for regime):** "
+            f"${current_ma:,.2f}"
+        )
+        st.write(f"**Upper Band (MA × (1 + tol)):** ${upper_band:,.2f}")
+        st.write(f"**Lower Band (MA × (1 - tol)):** ${lower_band:,.2f}")
+    else:
+        st.warning("MA series has no valid values for the chosen configuration.")
+
     # Always-on portfolio
     log_prices = np.log(prices)
     log_rets = log_prices.diff().fillna(0)
