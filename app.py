@@ -21,7 +21,7 @@ RISK_OFF_WEIGHTS = {
     "UUP": 1.0,
 }
 
-TRANSACTION_COST = 0.001   # <--- NEW: 0.10% cost per regime switch (log-return space)
+TRANSACTION_COST = 0.001   # 0.10% per regime switch
 
 # ============================================
 # DATA LOADING
@@ -42,7 +42,39 @@ def load_price_data(tickers, start_date, end_date=None):
     return px.dropna(how="all")
 
 # ============================================
-# TECHNICALS — VECTORIZED TESTFOL HYSTERESIS
+# GLOBAL SHARPE-OPTIMAL PORTFOLIO (SHORTING + LEVERAGE ALLOWED)
+# ============================================
+
+def compute_sharpe_optimal_weights(prices):
+    """
+    Solve for global Sharpe-optimal weights.
+    Allows short selling and leverage.
+    No sum(weights)=1 constraint.
+    """
+    log_px = np.log(prices)
+    returns = log_px.diff().dropna()
+
+    mu = returns.mean().values          # mean vector
+    cov = returns.cov().values          # covariance matrix
+
+    # If covariance matrix is singular, regularize it slightly
+    cov += np.eye(len(cov)) * 1e-9
+
+    inv_cov = np.linalg.inv(cov)
+
+    # Global minimum-variance direction proportional to inv_cov @ mu
+    w = inv_cov @ mu
+
+    # Do NOT normalize. Leverage is allowed.
+    # But scale to avoid absurd numbers (optional)
+    scale = 1.0 / np.sum(np.abs(w))
+    w = w * scale * 1.0  # final scaling factor
+
+    tickers = list(prices.columns)
+    return dict(zip(tickers, w))
+
+# ============================================
+# TECHNICALS — TESTFOL HYSTERESIS
 # ============================================
 
 def compute_ma_matrix(price, lengths, ma_type):
@@ -59,9 +91,7 @@ def compute_ma_matrix(price, lengths, ma_type):
 
     return ma_dict
 
-
 def generate_testfol_signal_vectorized(price, ma, tol):
-
     px = price.shift(1).values
     ma_vals = ma.values
     n = len(px)
@@ -85,7 +115,7 @@ def generate_testfol_signal_vectorized(price, ma, tol):
     return pd.Series(sig, index=ma.index).fillna(False)
 
 # ============================================
-# BACKTEST (LOG RETURNS + DAILY REBALANCE)
+# BACKTEST
 # ============================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
@@ -100,7 +130,6 @@ def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
             weights.loc[~signal, a] = w
 
     return weights
-
 
 def compute_performance(log_returns, equity_curve, rf=0.0):
     cagr = np.exp(log_returns.mean() * 252) - 1
@@ -118,7 +147,6 @@ def compute_performance(log_returns, equity_curve, rf=0.0):
         "TotalReturn": total_ret,
     }
 
-
 def backtest(prices, signal, risk_on_weights, risk_off_weights):
 
     log_prices = np.log(prices)
@@ -128,12 +156,9 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
 
     strat_log_rets = (weights.shift(1).fillna(0) * log_rets).sum(axis=1)
 
-    # --------------------------------------------
-    # NEW: apply 0.10% transaction cost PER SIGNAL FLIP
-    # --------------------------------------------
+    # --- transaction cost --- #
     flips = signal.astype(int).diff().abs().fillna(0)
     strat_log_rets -= flips * TRANSACTION_COST
-    # --------------------------------------------
 
     eq = np.exp(strat_log_rets.cumsum())
 
@@ -146,7 +171,7 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     }
 
 # ============================================
-# GRID SEARCH — VECTORIZED + OPTIMIZED
+# GRID SEARCH
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
@@ -204,29 +229,25 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 
 def main():
     st.set_page_config(page_title="Bitcoin MA Optimized Portfolio", layout="wide")
-    st.title("Bitcoin MA Optimized Portfolio (TestFol-Accurate, Fast Version)")
+    st.title("Bitcoin MA Optimized Portfolio (Sharpe + MA Hybrid)")
 
     st.write("""
-    This model now includes:
-    - Fully vectorized TestFol hysteresis  
-    - Exact 1-day delayed indicators  
-    - Log-return engine  
-    - Daily rebalance  
-    - No lookahead bias  
-    - Sharpe → Trades optimization  
-    - **0.10% transaction cost applied per regime switch**
+    Now includes:
+    - Global Sharpe-optimal Risk-ON portfolio (short & leverage allowed)
+    - Fully vectorized TestFol hysteresis
+    - 1-day delayed MA values
+    - Daily rebalancing
+    - 0.10% transaction cost per regime switch
+    - Sharpe → Trades optimization
     """)
 
     st.sidebar.header("Backtest Settings")
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
     end = st.sidebar.text_input("End Date (optional)", "")
 
-    st.sidebar.header("Risk-ON Portfolio")
+    st.sidebar.header("Risk-ON Portfolio (User Picks Assets)")
     risk_on_tickers_str = st.sidebar.text_input(
         "Tickers", ",".join(RISK_ON_WEIGHTS.keys())
-    )
-    risk_on_weights_str = st.sidebar.text_input(
-        "Weights", ",".join(str(w) for w in RISK_ON_WEIGHTS.values())
     )
 
     st.sidebar.header("Risk-OFF Portfolio")
@@ -241,9 +262,6 @@ def main():
         st.stop()
 
     risk_on_tickers = [t.strip().upper() for t in risk_on_tickers_str.split(",")]
-    risk_on_weights_list = [float(x) for x in risk_on_weights_str.split(",")]
-    risk_on_weights = dict(zip(risk_on_tickers, risk_on_weights_list))
-
     risk_off_tickers = [t.strip().upper() for t in risk_off_tickers_str.split(",")]
     risk_off_weights_list = [float(x) for x in risk_off_weights_str.split(",")]
     risk_off_weights = dict(zip(risk_off_tickers, risk_off_weights_list))
@@ -255,6 +273,19 @@ def main():
     end_val = end if end.strip() else None
     prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
 
+    # ------------------------------------------------------------
+    # NEW: Compute global Sharpe-optimal portfolio for Risk-ON
+    # ------------------------------------------------------------
+    risk_on_prices = prices[risk_on_tickers]
+    optimized_weights = compute_sharpe_optimal_weights(risk_on_prices)
+    risk_on_weights = optimized_weights  # <-- replaces user weights
+
+    st.subheader("Sharpe-Optimal Risk-ON Weights")
+    st.write(optimized_weights)
+
+    # ------------------------------------------------------------
+    # MA optimization (unchanged)
+    # ------------------------------------------------------------
     best_cfg, best_result = run_grid_search(prices, risk_on_weights, risk_off_weights)
 
     best_len, best_type, best_tol = best_cfg
@@ -286,11 +317,11 @@ def main():
     st.write(f"**Tolerance:** {best_tol:.2%}")
     st.write(f"**Trades per year:** {trades_per_year:.2f}")
 
-    # Always-on portfolio
+    # Always-on
     log_prices = np.log(prices)
     log_rets = log_prices.diff().fillna(0)
-
     user_rets = pd.Series(0, index=log_rets.index)
+
     for a, w in risk_on_weights.items():
         if a in log_rets.columns:
             user_rets += log_rets[a] * w
