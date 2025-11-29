@@ -344,6 +344,32 @@ def main():
     ma_opt_dict = compute_ma_matrix(portfolio_index, [best_len], best_type)
     ma_opt_series = ma_opt_dict[best_len]
 
+    # ==========================================================
+    # DISTANCE TO NEXT SIGNAL
+    # ==========================================================
+
+    # Latest values (signal basis)
+    latest_date = ma_opt_series.dropna().index[-1]
+    P = float(portfolio_index.loc[latest_date])
+    MA = float(ma_opt_series.loc[latest_date])
+    tol = best_tol
+
+    upper = MA * (1 + tol)
+    lower = MA * (1 - tol)
+
+    if latest_signal:  # Currently RISK-ON
+        pct_to_flip = (P - lower) / P
+        st.subheader("Distance to Flip (Risk-ON → Risk-OFF)")
+        st.write(f"**Portfolio Index:** {P:,.2f}")
+        st.write(f"**Lower Band:** {lower:,.2f}")
+        st.write(f"**Drop Required:** {pct_to_flip:.2%}")
+    else:  # Currently RISK-OFF
+        pct_to_flip = (upper - P) / P
+        st.subheader("Distance to Flip (Risk-OFF → Risk-ON)")
+        st.write(f"**Portfolio Index:** {P:,.2f}")
+        st.write(f"**Upper Band:** {upper:,.2f}")
+        st.write(f"**Gain Required:** {pct_to_flip:.2%}")
+        
     # ============================================
     # FINAL PLOT — PORTFOLIO INDEX + OPTIMAL MA
     # ============================================
