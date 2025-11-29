@@ -3,6 +3,7 @@ import pandas as pd
 import yfinance as yf
 import matplotlib.pyplot as plt
 import streamlit as st
+import io
 
 # ============================================
 # CONFIG
@@ -218,16 +219,44 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 
 
 # ============================================
+# AUTO MODE (WIDGET PNG ENDPOINT)
+# ============================================
+
+def render_auto_chart():
+
+    prices = load_price_data(
+        list(RISK_ON_WEIGHTS.keys()) + list(RISK_OFF_WEIGHTS.keys()),
+        DEFAULT_START_DATE
+    )
+
+    best_cfg, best_result = run_grid_search(prices, RISK_ON_WEIGHTS, RISK_OFF_WEIGHTS)
+    best_len, best_type, best_tol = best_cfg
+
+    portfolio_index = build_portfolio_index(prices, RISK_ON_WEIGHTS)
+    ma_opt_series = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(portfolio_index, label="Risk-On Portfolio", color="gray")
+    ax.plot(ma_opt_series, label=f"{best_type.upper()}({best_len})", color="orange")
+    ax.legend()
+    ax.grid(alpha=0.3)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    st.image(buf.getvalue())
+
+
+# ============================================
 # STREAMLIT APP
 # ============================================
 
 def main():
-    
+
     params = st.experimental_get_query_params()
     if "auto" in params:
         render_auto_chart()
         st.stop()
-    
+
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
     st.title("Portfolio MA Optimized Regime Strategy — With Flip-Day Costs")
 
@@ -394,7 +423,7 @@ def main():
     st.dataframe(table, use_container_width=True)
 
     # ============================================
-    # OPTIMAL SIGNAL PARAMETERS (ADDED BACK)
+    # OPTIMAL SIGNAL PARAMETERS
     # ============================================
 
     st.subheader("Optimal Signal Parameters")
@@ -409,8 +438,7 @@ def main():
     st.subheader("Distance Until Next Signal")
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
-    ma_opt_dict = compute_ma_matrix(portfolio_index, [best_len], best_type)
-    ma_opt_series = ma_opt_dict[best_len]
+    ma_opt_series = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
 
     latest_date = ma_opt_series.dropna().index[-1]
     P = float(portfolio_index.loc[latest_date])
@@ -451,29 +479,7 @@ def main():
     ax.grid(alpha=0.3)
 
     st.pyplot(fig)
-    
-    import io
 
-    def render_auto_chart():
-        prices = load_price_data(
-            list(RISK_ON_WEIGHTS.keys()) + list(RISK_OFF_WEIGHTS.keys()),
-            DEFAULT_START_DATE
-        )
-
-        best_cfg, best_result = run_grid_search(prices, RISK_ON_WEIGHTS, RISK_OFF_WEIGHTS)
-        best_len, best_type, best_tol = best_cfg
-
-        portfolio_index = build_portfolio_index(prices, RISK_ON_WEIGHTS)
-        ma_opt_series = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
-
-        fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(portfolio_index, label="Risk-On Portfolio", color="gray")
-        ax.plot(ma_opt_series, label=f"{best_type.upper()}({best_len})", color="orange")
-        ax.legend(); ax.grid(alpha=0.3)
-
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-        st.image(buf.getvalue())
 
 if __name__ == "__main__":
     main()
