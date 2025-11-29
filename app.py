@@ -21,8 +21,8 @@ RISK_OFF_WEIGHTS = {
     "UUP": 1.0,
 }
 
-# Cost applied at flip moments
-FLIP_COST = 0.00875   # 0.65% tax drag + 0.225% slippage
+# Slippage + tax drag applied on flip days
+FLIP_COST = 0.00875
 
 
 # ============================================
@@ -49,9 +49,6 @@ def load_price_data(tickers, start_date, end_date=None):
 # ============================================
 
 def build_portfolio_index(prices, weights_dict):
-    """
-    Construct risk-on portfolio index from weighted log returns.
-    """
     log_px = np.log(prices)
     log_rets = log_px.diff().fillna(0)
 
@@ -65,7 +62,7 @@ def build_portfolio_index(prices, weights_dict):
 
 
 # ============================================
-# TECHNICAL INDICATORS – MA MATRIX
+# MA MATRIX
 # ============================================
 
 def compute_ma_matrix(price_series, lengths, ma_type):
@@ -82,7 +79,7 @@ def compute_ma_matrix(price_series, lengths, ma_type):
 
 
 # ============================================
-# TESTFOL HYSTERESIS (PORTFOLIO SIGNAL)
+# TESTFOL HYSTERESIS
 # ============================================
 
 def generate_testfol_signal_vectorized(price, ma, tol):
@@ -110,7 +107,7 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 
 
 # ============================================
-# BACKTEST ENGINE – WITH FLIP-DAY COST
+# BACKTEST ENGINE — WITH FLIP COST
 # ============================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
@@ -134,13 +131,13 @@ def compute_performance(log_returns, equity_curve, rf=0.0):
     dd = equity_curve / equity_curve.cummax() - 1
     max_dd = dd.min()
     total_ret = equity_curve.iloc[-1] / equity_curve.iloc[0] - 1
-
     return {
         "CAGR": cagr,
         "Volatility": vol,
         "Sharpe": sharpe,
         "MaxDrawdown": max_dd,
         "TotalReturn": total_ret,
+        "DD_Series": dd
     }
 
 
@@ -153,9 +150,6 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
 
     strat_log_rets = (weights.shift(1).fillna(0) * log_rets).sum(axis=1)
 
-    # -------------------------
-    # APPLY FLIP COST ON FLIP DAYS
-    # -------------------------
     sig_arr = signal.astype(int)
     flip_mask = sig_arr.diff().abs() == 1
 
@@ -167,22 +161,23 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     return {
         "returns": strat_log_rets_adj,
         "equity_curve": eq,
-        "weights": weights,
         "signal": signal,
+        "weights": weights,
         "performance": compute_performance(strat_log_rets_adj, eq),
+        "flip_mask": flip_mask,
     }
 
 
 # ============================================
-# GRID SEARCH — PORTFOLIO MA + FLIP COST
+# GRID SEARCH
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
 
     best_sharpe = -1e9
-    best_trades = np.inf
     best_cfg = None
     best_result = None
+    best_trades = np.inf
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
 
@@ -202,7 +197,6 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 
             for tol in tolerances:
                 signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-
                 result = backtest(prices, signal, risk_on_weights, risk_off_weights)
 
                 sig_arr = signal.astype(int)
@@ -215,16 +209,11 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                 if idx % 200 == 0:
                     progress.progress(idx / total)
 
-                if sharpe_adj > best_sharpe:
+                if sharpe_adj > best_sharpe or (sharpe_adj == best_sharpe and trades_per_year < best_trades):
                     best_sharpe = sharpe_adj
                     best_trades = trades_per_year
                     best_cfg = (length, ma_type, tol)
                     best_result = result
-
-                elif sharpe_adj == best_sharpe and trades_per_year < best_trades:
-                    best_cfg = (length, ma_type, tol)
-                    best_result = result
-                    best_trades = trades_per_year
 
     return best_cfg, best_result
 
@@ -234,37 +223,20 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 # ============================================
 
 def main():
-    st.set_page_config(page_title="Portfolio MA Optimized Portfolio", layout="wide")
+    st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
     st.title("Portfolio MA Optimized Regime Strategy — With Flip-Day Costs")
-
-    st.write("""
-    Upgrades included:
-    - Regime signal uses **Risk-On Portfolio MA**  
-    - Slippage + tax friction **applied on flip days**  
-    - Fully vectorized  
-    - Daily rebalance  
-    - Sharpe optimization with implicit turnover penalty  
-    """)
 
     st.sidebar.header("Backtest Settings")
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
     end = st.sidebar.text_input("End Date (optional)", "")
 
     st.sidebar.header("Risk-ON Portfolio")
-    risk_on_tickers_str = st.sidebar.text_input(
-        "Tickers", ",".join(RISK_ON_WEIGHTS.keys())
-    )
-    risk_on_weights_str = st.sidebar.text_input(
-        "Weights", ",".join(str(w) for w in RISK_ON_WEIGHTS.values())
-    )
+    risk_on_tickers_str = st.sidebar.text_input("Tickers", ",".join(RISK_ON_WEIGHTS.keys()))
+    risk_on_weights_str = st.sidebar.text_input("Weights", ",".join(str(w) for w in RISK_ON_WEIGHTS.values()))
 
     st.sidebar.header("Risk-OFF Portfolio")
-    risk_off_tickers_str = st.sidebar.text_input(
-        "Tickers", ",".join(RISK_OFF_WEIGHTS.keys())
-    )
-    risk_off_weights_str = st.sidebar.text_input(
-        "Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values())
-    )
+    risk_off_tickers_str = st.sidebar.text_input("Tickers", ",".join(RISK_OFF_WEIGHTS.keys()))
+    risk_off_weights_str = st.sidebar.text_input("Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values()))
 
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
@@ -283,72 +255,127 @@ def main():
     prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
 
     best_cfg, best_result = run_grid_search(prices, risk_on_weights, risk_off_weights)
-
     best_len, best_type, best_tol = best_cfg
-    perf = best_result["performance"]
+
     sig = best_result["signal"]
+    perf = best_result["performance"]
 
     latest_day = sig.index[-1]
     latest_signal = sig.iloc[-1]
     regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
-    st.subheader("Current Regime Status")
-    st.write(f"**Date:** {latest_day.date()}")
-    st.write(f"**Regime:** {regime}")
-
     switches = sig.astype(int).diff().abs().sum()
     trades_per_year = switches / (len(sig) / 252)
 
-    st.subheader("Strategy Performance (After Flip Costs)")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("CAGR", f"{perf['CAGR']:.2%}")
-    c2.metric("Volatility", f"{perf['Volatility']:.2%}")
-    c3.metric("Sharpe", f"{perf['Sharpe']:.3f}")
-    c4.metric("Max Drawdown", f"{perf['MaxDrawdown']:.2%}")
-    c5.metric("Total Return", f"{perf['TotalReturn']:.2%}")
-
-    st.subheader("Best Parameters")
-    st.write(f"**MA Length:** {best_len}")
-    st.write(f"**MA Type:** {best_type.upper()}")
-    st.write(f"**Tolerance:** {best_tol:.2%}")
-    st.write(f"**Trades per year:** {trades_per_year:.2f}")
-
     # ============================================
-    # RISK-ON PORTFOLIO PERFORMANCE STATS
+    # RISK-ON PORTFOLIO PERFORMANCE
     # ============================================
 
     log_px = np.log(prices)
     log_rets = log_px.diff().fillna(0)
-    risk_on_log_rets = pd.Series(0.0, index=log_rets.index)
+
+    risk_on_log = pd.Series(0.0, index=log_rets.index)
     for a, w in risk_on_weights.items():
         if a in log_rets.columns:
-            risk_on_log_rets += log_rets[a] * w
-    risk_on_eq = np.exp(risk_on_log_rets.cumsum())
-    risk_on_perf = compute_performance(risk_on_log_rets, risk_on_eq)
+            risk_on_log += log_rets[a] * w
 
-    st.subheader("Risk-On Portfolio Performance (Always-On)")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("CAGR", f"{risk_on_perf['CAGR']:.2%}")
-    c2.metric("Volatility", f"{risk_on_perf['Volatility']:.2%}")
-    c3.metric("Sharpe", f"{risk_on_perf['Sharpe']:.3f}")
-    c4.metric("Max Drawdown", f"{risk_on_perf['MaxDrawdown']:.2%}")
-    c5.metric("Total Return", f"{risk_on_perf['TotalReturn']:.2%}")
+    risk_on_eq = np.exp(risk_on_log.cumsum())
+    risk_on_perf = compute_performance(risk_on_log, risk_on_eq)
 
     # ============================================
-    # BUILD PORTFOLIO INDEX & OPTIMAL MA FOR PLOT
+    # ADVANCED METRICS
     # ============================================
+
+    def time_in_drawdown(dd):
+        return (dd < 0).mean()
+
+    def pain_to_gain(dd, cagr):
+        ulcer = np.sqrt((dd**2).mean())
+        return cagr / ulcer if ulcer != 0 else np.nan
+
+    def mar_ratio(cagr, max_dd):
+        return cagr / abs(max_dd) if max_dd != 0 else np.nan
+
+    def pl_per_flip(returns, flip_mask):
+        return float(returns[flip_mask].sum())
+
+    def compute_stats(perf_obj, returns, dd_series, flip_mask, trades_per_year):
+        cagr = perf_obj["CAGR"]
+        vol = perf_obj["Volatility"]
+        sharpe = perf_obj["Sharpe"]
+        maxdd = perf_obj["MaxDrawdown"]
+        total = perf_obj["TotalReturn"]
+
+        return {
+            "CAGR": cagr,
+            "Volatility": vol,
+            "Sharpe": sharpe,
+            "MaxDD": maxdd,
+            "Total": total,
+            "MAR": mar_ratio(cagr, maxdd),
+            "TID": time_in_drawdown(dd_series),
+            "PainGain": pain_to_gain(dd_series, cagr),
+            "Skew": returns.skew(),
+            "Kurtosis": returns.kurt(),
+            "P/L per flip": pl_per_flip(returns, flip_mask),
+            "Trades/year": trades_per_year,
+        }
+
+    strat_stats = compute_stats(
+        perf,
+        best_result["returns"],
+        perf["DD_Series"],
+        best_result["flip_mask"],
+        trades_per_year
+    )
+
+    risk_stats = compute_stats(
+        risk_on_perf,
+        risk_on_log,
+        risk_on_perf["DD_Series"],
+        np.zeros(len(risk_on_log), dtype=bool),
+        0
+    )
+
+    # ============================================
+    # DISPLAY SINGLE METRIC TABLE
+    # ============================================
+
+    st.subheader("Full Strategy Statistics (Strategy vs Always-On Risk-On)")
+
+    rows = [
+        ("CAGR", "CAGR"),
+        ("Volatility", "Volatility"),
+        ("Sharpe", "Sharpe"),
+        ("Max Drawdown", "MaxDD"),
+        ("Total Return", "Total"),
+        ("MAR Ratio", "MAR"),
+        ("Time in Drawdown (%)", "TID"),
+        ("Pain-to-Gain", "PainGain"),
+        ("Skew", "Skew"),
+        ("Kurtosis", "Kurtosis"),
+        ("Trades per year", "Trades/year"),
+        ("P/L per flip", "P/L per flip"),
+    ]
+
+    table = pd.DataFrame({
+        "Metric": [r[0] for r in rows],
+        "Strategy": [strat_stats[r[1]] for r in rows],
+        "Risk-On": [risk_stats[r[1]] if r[1] in risk_stats else "—" for r in rows],
+    })
+
+    st.dataframe(table, use_container_width=True)
+
+    # ============================================
+    # SIGNAL DISTANCE
+    # ============================================
+
+    st.subheader("Distance Until Next Signal")
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
-
-    # Optimal MA series
     ma_opt_dict = compute_ma_matrix(portfolio_index, [best_len], best_type)
     ma_opt_series = ma_opt_dict[best_len]
 
-    # ==========================================================
-    # DISTANCE TO NEXT SIGNAL
-    # ==========================================================
-
-    # Latest values (signal basis)
     latest_date = ma_opt_series.dropna().index[-1]
     P = float(portfolio_index.loc[latest_date])
     MA = float(ma_opt_series.loc[latest_date])
@@ -357,21 +384,23 @@ def main():
     upper = MA * (1 + tol)
     lower = MA * (1 - tol)
 
-    if latest_signal:  # Currently RISK-ON
+    if latest_signal:
         pct_to_flip = (P - lower) / P
-        st.subheader("Distance to Flip (Risk-ON → Risk-OFF)")
-        st.write(f"**Portfolio Index:** {P:,.2f}")
-        st.write(f"**Lower Band:** {lower:,.2f}")
-        st.write(f"**Drop Required:** {pct_to_flip:.2%}")
-    else:  # Currently RISK-OFF
+        direction = "RISK-ON → RISK-OFF"
+        distance_str = f"Drop Required: {pct_to_flip:.2%}"
+    else:
         pct_to_flip = (upper - P) / P
-        st.subheader("Distance to Flip (Risk-OFF → Risk-ON)")
-        st.write(f"**Portfolio Index:** {P:,.2f}")
-        st.write(f"**Upper Band:** {upper:,.2f}")
-        st.write(f"**Gain Required:** {pct_to_flip:.2%}")
-        
+        direction = "RISK-OFF → RISK-ON"
+        distance_str = f"Gain Required: {pct_to_flip:.2%}"
+
+    st.write(f"**Latest Signal Change Direction:** {direction}")
+    st.write(f"**Portfolio Index:** {P:,.2f}")
+    st.write(f"**MA({best_len}) Value:** {MA:,.2f}")
+    st.write(f"**Tolerance Bands:** Lower={lower:,.2f} | Upper={upper:,.2f}")
+    st.write(f"**{distance_str}**")
+
     # ============================================
-    # FINAL PLOT — PORTFOLIO INDEX + OPTIMAL MA
+    # FINAL PLOT
     # ============================================
 
     st.subheader("Portfolio Index + Optimal MA + Strategy Curve")
