@@ -436,7 +436,8 @@ def main():
     st.subheader("Portfolio Index + Optimal MA + Strategy Curve")
 
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(best_result["equity_curve"], label="Optimized Strategy (After Friction)", linewidth=2)
+    color = "green" if latest_signal else "red"
+    ax.plot(best_result["equity_curve"], color=color, label=f"Strategy ({regime})", linewidth=2)
     ax.plot(portfolio_index, label="Portfolio Index (Risk-On Basket)", alpha=0.65)
     ax.plot(ma_opt_series, label=f"Optimal {best_type.upper()}({best_len}) MA", linewidth=2)
 
