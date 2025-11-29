@@ -147,7 +147,6 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     log_rets = log_px.diff().fillna(0)
 
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
-
     strat_log_rets = (weights.shift(1).fillna(0) * log_rets).sum(axis=1)
 
     sig_arr = signal.astype(int)
@@ -268,7 +267,7 @@ def main():
     trades_per_year = switches / (len(sig) / 252)
 
     # ============================================
-    # RISK-ON PORTFOLIO PERFORMANCE
+    # RISK-ON ALWAYS-ON PERFORMANCE
     # ============================================
 
     log_px = np.log(prices)
@@ -338,7 +337,7 @@ def main():
     )
 
     # ============================================
-    # DISPLAY SINGLE METRIC TABLE
+    # CONSOLIDATED METRIC TABLE — FORMATTED
     # ============================================
 
     st.subheader("Full Strategy Statistics (Strategy vs Always-On Risk-On)")
@@ -358,12 +357,39 @@ def main():
         ("P/L per flip", "P/L per flip"),
     ]
 
-    table = pd.DataFrame({
-        "Metric": [r[0] for r in rows],
-        "Strategy": [strat_stats[r[1]] for r in rows],
-        "Risk-On": [risk_stats[r[1]] if r[1] in risk_stats else "—" for r in rows],
-    })
+    def fmt_pct(x):
+        return f"{x:.2%}" if pd.notna(x) else "—"
 
+    def fmt_dec(x):
+        return f"{x:.3f}" if pd.notna(x) else "—"
+
+    def fmt_num(x):
+        return f"{x:,.2f}" if pd.notna(x) else "—"
+
+    formatted_rows = []
+
+    for label, key in rows:
+        sval = strat_stats[key]
+        rval = risk_stats[key] if key in risk_stats else None
+
+        # Percent metrics
+        if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
+            sval_fmt = fmt_pct(sval)
+            rval_fmt = fmt_pct(rval)
+
+        # Decimal metrics
+        elif key in ["Sharpe", "MAR", "PainGain", "Skew", "Kurtosis"]:
+            sval_fmt = fmt_dec(sval)
+            rval_fmt = fmt_dec(rval)
+
+        # Numeric metrics
+        else:
+            sval_fmt = fmt_num(sval)
+            rval_fmt = fmt_num(rval)
+
+        formatted_rows.append([label, sval_fmt, rval_fmt])
+
+    table = pd.DataFrame(formatted_rows, columns=["Metric", "Strategy", "Risk-On"])
     st.dataframe(table, use_container_width=True)
 
     # ============================================
@@ -406,7 +432,6 @@ def main():
     st.subheader("Portfolio Index + Optimal MA + Strategy Curve")
 
     fig, ax = plt.subplots(figsize=(12, 6))
-
     ax.plot(best_result["equity_curve"], label="Optimized Strategy (After Friction)", linewidth=2)
     ax.plot(portfolio_index, label="Portfolio Index (Risk-On Basket)", alpha=0.65)
     ax.plot(ma_opt_series, label=f"Optimal {best_type.upper()}({best_len}) MA", linewidth=2)
@@ -419,4 +444,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
