@@ -260,11 +260,6 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 
 def main():
 
-    # ---- AUTO MODE CHECK (first lines inside main) ----
-    params = st.experimental_get_query_params()
-    if "auto" in params:
-        render_widget_chart()
-        st.stop()
     # ---------------------------------------------------
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
