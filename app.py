@@ -446,50 +446,5 @@ def main():
 
     st.pyplot(fig)
 
-    # ============================================
-    # PNG EXPORT ENDPOINT FOR iPHONE WIDGET
-    # ============================================
-
-    import matplotlib
-    matplotlib.use("Agg")  # headless backend for PNG export
-    import io
-    from fastapi import FastAPI
-    from fastapi.responses import Response
-    from starlette.middleware.wsgi import WSGIMiddleware
-
-    # Create FastAPI server for static PNG
-    png_api = FastAPI()
-
-    @png_api.get("/chart.png")
-    def chart_png():
-        # Recompute portfolio index and MA from current session state
-        portfolio_index = build_portfolio_index(prices, risk_on_weights)
-        ma_opt_dict = compute_ma_matrix(portfolio_index, [best_len], best_type)
-        ma_opt_series = ma_opt_dict[best_len]
-
-        # Use last 30 days
-        last_30 = portfolio_index.index[-30:]
-
-        # Color based on regime
-        color = "green" if latest_signal else "red"
-
-        # Build figure
-        fig, ax = plt.subplots(figsize=(8, 4))
-        ax.plot(best_result["equity_curve"].loc[last_30], color=color, linewidth=3)
-        ax.plot(portfolio_index.loc[last_30], color="black", alpha=0.5)
-        ax.plot(ma_opt_series.loc[last_30], color="blue", linewidth=2)
-        ax.axis("off")
-
-        # Export PNG
-        buf = io.BytesIO()
-        fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        buf.seek(0)
-
-        return Response(content=buf.read(), media_type="image/png")
-
-    # Mount FastAPI endpoint inside Streamlit
-    png_api.mount("/", WSGIMiddleware(st._get_app()))
-
 if __name__ == "__main__":
     main()
