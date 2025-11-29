@@ -184,7 +184,6 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     best_cfg = None
     best_result = None
 
-    # Build risk-on index once
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
 
     lengths = list(range(21, 253))
@@ -240,11 +239,11 @@ def main():
 
     st.write("""
     Upgrades included:
-    - Regime signal uses **Risk-On Portfolio MA**, NOT BTC MA  
-    - Slippage + tax friction **applied exactly on flip days**  
+    - Regime signal uses **Risk-On Portfolio MA**  
+    - Slippage + tax friction **applied on flip days**  
     - Fully vectorized  
     - Daily rebalance  
-    - Sharpe optimization with natural turnover penalty  
+    - Sharpe optimization with implicit turnover penalty  
     """)
 
     st.sidebar.header("Backtest Settings")
@@ -300,7 +299,7 @@ def main():
     switches = sig.astype(int).diff().abs().sum()
     trades_per_year = switches / (len(sig) / 252)
 
-    st.subheader("Performance (After Flip-Day Friction)")
+    st.subheader("Strategy Performance (After Flip Costs)")
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("CAGR", f"{perf['CAGR']:.2%}")
     c2.metric("Volatility", f"{perf['Volatility']:.2%}")
@@ -315,6 +314,27 @@ def main():
     st.write(f"**Trades per year:** {trades_per_year:.2f}")
 
     # ============================================
+    # RISK-ON PORTFOLIO PERFORMANCE STATS
+    # ============================================
+
+    log_px = np.log(prices)
+    log_rets = log_px.diff().fillna(0)
+    risk_on_log_rets = pd.Series(0.0, index=log_rets.index)
+    for a, w in risk_on_weights.items():
+        if a in log_rets.columns:
+            risk_on_log_rets += log_rets[a] * w
+    risk_on_eq = np.exp(risk_on_log_rets.cumsum())
+    risk_on_perf = compute_performance(risk_on_log_rets, risk_on_eq)
+
+    st.subheader("Risk-On Portfolio Performance (Always-On)")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("CAGR", f"{risk_on_perf['CAGR']:.2%}")
+    c2.metric("Volatility", f"{risk_on_perf['Volatility']:.2%}")
+    c3.metric("Sharpe", f"{risk_on_perf['Sharpe']:.3f}")
+    c4.metric("Max Drawdown", f"{risk_on_perf['MaxDrawdown']:.2%}")
+    c5.metric("Total Return", f"{risk_on_perf['TotalReturn']:.2%}")
+
+    # ============================================
     # BUILD PORTFOLIO INDEX & OPTIMAL MA FOR PLOT
     # ============================================
 
@@ -324,26 +344,16 @@ def main():
     ma_opt_dict = compute_ma_matrix(portfolio_index, [best_len], best_type)
     ma_opt_series = ma_opt_dict[best_len]
 
-    # Risk-On portfolio equity curve (always on)
-    log_px = np.log(prices)
-    log_rets = log_px.diff().fillna(0)
-    risk_on_log_rets = pd.Series(0.0, index=log_rets.index)
-    for a, w in risk_on_weights.items():
-        if a in log_rets.columns:
-            risk_on_log_rets += log_rets[a] * w
-    risk_on_eq = np.exp(risk_on_log_rets.cumsum())
-
     # ============================================
-    # FINAL PLOT — EVERYTHING TOGETHER
+    # FINAL PLOT — PORTFOLIO INDEX + OPTIMAL MA
     # ============================================
 
-    st.subheader("Equity Curve + Portfolio MA (Used for Regime Signal)")
+    st.subheader("Portfolio Index + Optimal MA + Strategy Curve")
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
     ax.plot(best_result["equity_curve"], label="Optimized Strategy (After Friction)", linewidth=2)
-    ax.plot(risk_on_eq, label="Risk-On Portfolio (Always-On)", linestyle="--", alpha=0.85)
-    ax.plot(portfolio_index, label="Portfolio Index (Signal Input)", alpha=0.6)
+    ax.plot(portfolio_index, label="Portfolio Index (Risk-On Basket)", alpha=0.65)
     ax.plot(ma_opt_series, label=f"Optimal {best_type.upper()}({best_len}) MA", linewidth=2)
 
     ax.legend()
