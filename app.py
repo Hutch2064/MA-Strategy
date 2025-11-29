@@ -21,6 +21,10 @@ RISK_OFF_WEIGHTS = {
     "UUP": 1.0,
 }
 
+# Cost applied on flip days
+FLIP_COST = 0.00875   # 0.65% tax drag + 0.225% slippage
+
+
 # ============================================
 # DATA LOADING
 # ============================================
@@ -39,37 +43,52 @@ def load_price_data(tickers, start_date, end_date=None):
 
     return px.dropna(how="all")
 
+
 # ============================================
-# TECHNICALS — VECTORIZED TESTFOL HYSTERESIS
+# BUILD PORTFOLIO INDEX FOR SIGNAL
 # ============================================
 
-def compute_ma_matrix(price, lengths, ma_type):
+def build_portfolio_index(prices, weights_dict):
     """
-    Precompute all MAs for all lengths into a single matrix.
-    Returns dict[length] = MA series
+    Construct the risk-on portfolio index from weighted log returns.
     """
+    px = prices.copy()
+    log_px = np.log(px)
+    log_rets = log_px.diff().fillna(0)
+
+    idx_rets = pd.Series(0.0, index=log_rets.index)
+    for a, w in weights_dict.items():
+        if a in log_rets.columns:
+            idx_rets += log_rets[a] * w
+
+    idx = np.exp(idx_rets.cumsum())
+    return idx
+
+
+# ============================================
+# TECHNICAL INDICATORS – MA MATRIX
+# ============================================
+
+def compute_ma_matrix(price_series, lengths, ma_type):
     ma_dict = {}
-
     if ma_type == "ema":
         for L in lengths:
-            ma = price.ewm(span=L, adjust=False).mean()
-            ma_dict[L] = ma.shift(1)  # shift for TestFol delay
+            ma = price_series.ewm(span=L, adjust=False).mean()
+            ma_dict[L] = ma.shift(1)
     else:
         for L in lengths:
-            ma = price.rolling(window=L, min_periods=L).mean()
+            ma = price_series.rolling(window=L, min_periods=L).mean()
             ma_dict[L] = ma.shift(1)
-
     return ma_dict
 
 
+# ============================================
+# TESTFOL HYSTERESIS (PORTFOLIO SIGNAL)
+# ============================================
+
 def generate_testfol_signal_vectorized(price, ma, tol):
-    """
-    Full TestFol hysteresis, vectorized (no Python loop).
-    price, ma already shifted by 1.
-    """
     px = price.shift(1).values
     ma_vals = ma.values
-
     n = len(px)
 
     upper = ma_vals * (1 + tol)
@@ -90,8 +109,9 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 
     return pd.Series(sig, index=ma.index).fillna(False)
 
+
 # ============================================
-# BACKTEST (LOG RETURNS + DAILY REBALANCE)
+# BACKTEST ENGINE – WITH FLIP-DAY COST
 # ============================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
@@ -126,36 +146,47 @@ def compute_performance(log_returns, equity_curve, rf=0.0):
 
 
 def backtest(prices, signal, risk_on_weights, risk_off_weights):
-    log_prices = np.log(prices)
-    log_rets = log_prices.diff().fillna(0)
+
+    log_px = np.log(prices)
+    log_rets = log_px.diff().fillna(0)
 
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
     strat_log_rets = (weights.shift(1).fillna(0) * log_rets).sum(axis=1)
-    eq = np.exp(strat_log_rets.cumsum())
+
+    # -------------------------
+    # APPLY COST ON FLIP DAYS
+    # -------------------------
+    sig_arr = signal.astype(int)
+    flip_mask = sig_arr.diff().abs() == 1
+
+    friction_series = np.where(flip_mask, -FLIP_COST, 0.0)
+    strat_log_rets_adj = strat_log_rets + friction_series
+
+    eq = np.exp(strat_log_rets_adj.cumsum())
 
     return {
-        "returns": strat_log_rets,
+        "returns": strat_log_rets_adj,
         "equity_curve": eq,
         "weights": weights,
         "signal": signal,
-        "performance": compute_performance(strat_log_rets, eq),
+        "performance": compute_performance(strat_log_rets_adj, eq),
     }
 
+
 # ============================================
-# GRID SEARCH — WITH FRICTION PENALTY
+# GRID SEARCH — PORTFOLIO MA + FLIP COST
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
-
-    PENALTY_PER_FLIP = 0.00875  # 0.65% tax + 0.225% slippage
-
-    btc = prices["BTC-USD"]
 
     best_sharpe = -1e9
     best_trades = np.inf
     best_cfg = None
     best_result = None
+
+    # Build risk-on index once
+    portfolio_index = build_portfolio_index(prices, risk_on_weights)
 
     lengths = list(range(21, 253))
     types = ["sma", "ema"]
@@ -165,70 +196,56 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     total = len(lengths) * len(types) * len(tolerances)
     idx = 0
 
-    ma_cache = {t: compute_ma_matrix(btc, lengths, t) for t in types}
+    ma_cache = {t: compute_ma_matrix(portfolio_index, lengths, t) for t in types}
 
     for ma_type in types:
         for length in lengths:
             ma = ma_cache[ma_type][length]
 
             for tol in tolerances:
-                signal = generate_testfol_signal_vectorized(btc, ma, tol)
+                signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
 
                 result = backtest(prices, signal, risk_on_weights, risk_off_weights)
 
-                sig_arr = result["signal"].astype(int)
+                sig_arr = signal.astype(int)
                 switches = sig_arr.diff().abs().sum()
                 trades_per_year = switches / (len(sig_arr) / 252)
 
-                # Apply friction penalty AFTER backtest
-                eq_adj = result["equity_curve"] * ((1 - PENALTY_PER_FLIP) ** switches)
-                perf_adj = compute_performance(result["returns"], eq_adj)
-                sharpe_adj = perf_adj["Sharpe"]
+                sharpe_adj = result["performance"]["Sharpe"]
 
                 idx += 1
                 if idx % 200 == 0:
                     progress.progress(idx / total)
 
-                # Select based on after-friction Sharpe
                 if sharpe_adj > best_sharpe:
                     best_sharpe = sharpe_adj
                     best_trades = trades_per_year
                     best_cfg = (length, ma_type, tol)
-                    best_result = {
-                        **result,
-                        "equity_curve": eq_adj,
-                        "performance": perf_adj,
-                        "signal": result["signal"],
-                    }
+                    best_result = result
 
                 elif sharpe_adj == best_sharpe and trades_per_year < best_trades:
-                    best_trades = trades_per_year
                     best_cfg = (length, ma_type, tol)
-                    best_result = {
-                        **result,
-                        "equity_curve": eq_adj,
-                        "performance": perf_adj,
-                        "signal": result["signal"],
-                    }
+                    best_result = result
+                    best_trades = trades_per_year
 
     return best_cfg, best_result
+
 
 # ============================================
 # STREAMLIT APP
 # ============================================
 
 def main():
-    st.set_page_config(page_title="Bitcoin MA Optimized Portfolio", layout="wide")
-    st.title("Bitcoin MA Optimized Portfolio (TestFol-Accurate, Friction-Adjusted Version)")
+    st.set_page_config(page_title="Portfolio MA Optimized Portfolio", layout="wide")
+    st.title("Portfolio MA Optimized Regime Strategy — With Flip-Day Costs")
 
     st.write("""
-    This model now includes:
-    - Fully vectorized TestFol hysteresis  
-    - Exact 1-day delayed indicators  
-    - Log-return engine  
+    Upgrades included:
+    - Regime signal uses **Risk-On Portfolio MA**, NOT BTC MA  
+    - Slippage + tax friction **applied exactly on flip days**  
+    - Fully vectorized  
     - Daily rebalance  
-    - No lookahead bias  
-    - **Friction-adjusted Sharpe optimization (0.875% cost per flip)**  
+    - Sharpe optimization with turnover penalty embedded implicitly  
     """)
 
     st.sidebar.header("Backtest Settings")
@@ -263,10 +280,8 @@ def main():
     risk_off_weights = dict(zip(risk_off_tickers, risk_off_weights_list))
 
     all_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
-    if "BTC-USD" not in all_tickers:
-        all_tickers.append("BTC-USD")
-
     end_val = end if end.strip() else None
+
     prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
 
     best_cfg, best_result = run_grid_search(prices, risk_on_weights, risk_off_weights)
@@ -286,7 +301,7 @@ def main():
     switches = sig.astype(int).diff().abs().sum()
     trades_per_year = switches / (len(sig) / 252)
 
-    st.subheader("Optimized Strategy Performance (After Friction)")
+    st.subheader("Performance (After Flip-Day Friction)")
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("CAGR", f"{perf['CAGR']:.2%}")
     c2.metric("Volatility", f"{perf['Volatility']:.2%}")
@@ -300,37 +315,9 @@ def main():
     st.write(f"**Tolerance:** {best_tol:.2%}")
     st.write(f"**Trades per year:** {trades_per_year:.2f}")
 
-    # ============================================
-    # BITCOIN MA & TOLERANCE BANDS
-    # ============================================
-
-    btc = prices["BTC-USD"]
-    ma_opt_dict = compute_ma_matrix(btc, [best_len], best_type)
-    ma_opt_series = ma_opt_dict[best_len]
-
-    ma_opt_series_valid = ma_opt_series.dropna()
-    if not ma_opt_series_valid.empty:
-        ma_date = ma_opt_series_valid.index[-1]
-        current_ma = float(ma_opt_series_valid.iloc[-1])
-        current_price = float(btc.loc[ma_date])
-
-        upper_band = current_ma * (1.0 + best_tol)
-        lower_band = current_ma * (1.0 - best_tol)
-
-        st.subheader("Bitcoin MA & Tolerance Bands (Optimized)")
-        st.write(f"**BTC Date (signal basis):** {ma_date.date()}")
-        st.write(f"**BTC Price (latest close):** ${current_price:,.2f}")
-        st.write(
-            f"**{best_type.upper()}({best_len}) MA (delayed 1 day):** ${current_ma:,.2f}"
-        )
-        st.write(f"**Upper Band:** ${upper_band:,.2f}")
-        st.write(f"**Lower Band:** ${lower_band:,.2f}")
-    else:
-        st.warning("MA series has no valid values for the chosen configuration.")
-
     st.subheader("Equity Curve (After Friction)")
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(best_result["equity_curve"], label="Optimized (After Friction)", linewidth=2)
+    ax.plot(best_result["equity_curve"], label="Optimized", linewidth=2)
     ax.legend()
     ax.grid(alpha=0.3)
     st.pyplot(fig)
