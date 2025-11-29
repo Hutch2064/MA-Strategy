@@ -228,30 +228,29 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 # AUTO WIDGET PNG MODE
 # ============================================
 
-def render_widget_chart():
-    tickers = list(RISK_ON_WEIGHTS.keys()) + list(RISK_OFF_WEIGHTS.keys())
-    prices = load_price_data(tickers, DEFAULT_START_DATE)
+    def render_widget_chart():
+        tickers = list(RISK_ON_WEIGHTS.keys()) + list(RISK_OFF_WEIGHTS.keys())
+        prices = load_price_data(tickers, DEFAULT_START_DATE)
 
-    best_cfg, best_result = run_grid_search(prices, RISK_ON_WEIGHTS, RISK_OFF_WEIGHTS)
-    best_len, best_type, best_tol = best_cfg
+        best_cfg, best_result = run_grid_search(prices, RISK_ON_WEIGHTS, RISK_OFF_WEIGHTS)
+        best_len, best_type, best_tol = best_cfg
 
-    portfolio_index = build_portfolio_index(prices, RISK_ON_WEIGHTS)
+        portfolio_index = build_portfolio_index(prices, RISK_ON_WEIGHTS)
 
-    sig = best_result["signal"]
-    latest_signal = bool(sig.iloc[-1])
-    color = "green" if latest_signal else "red"
+        sig = best_result["signal"]
+        latest_signal = bool(sig.iloc[-1])
+        color = "green" if latest_signal else "red"
 
-    # Widget chart (NO MA LINE)
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(best_result["equity_curve"], color=color, linewidth=2, label="Strategy")
-    ax.plot(portfolio_index, color="gray", alpha=0.6, label="Risk-On Index")
-    ax.legend()
-    ax.grid(alpha=0.3)
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.plot(best_result["equity_curve"], color=color, linewidth=2)
+        ax.plot(portfolio_index, color="gray", alpha=0.6)
+        ax.grid(alpha=0.3)
 
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-    st.image(buf.getvalue())
-    return
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+
+        st.image(buf.getvalue(), use_column_width=True)
+        st.stop()
 
 
 
