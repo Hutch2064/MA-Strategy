@@ -372,17 +372,12 @@ def main():
         sval = strat_stats[key]
         rval = risk_stats[key] if key in risk_stats else None
 
-        # Percent metrics
         if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
             sval_fmt = fmt_pct(sval)
             rval_fmt = fmt_pct(rval)
-
-        # Decimal metrics
         elif key in ["Sharpe", "MAR", "PainGain", "Skew", "Kurtosis"]:
             sval_fmt = fmt_dec(sval)
             rval_fmt = fmt_dec(rval)
-
-        # Numeric metrics
         else:
             sval_fmt = fmt_num(sval)
             rval_fmt = fmt_num(rval)
@@ -391,6 +386,15 @@ def main():
 
     table = pd.DataFrame(formatted_rows, columns=["Metric", "Strategy", "Risk-On"])
     st.dataframe(table, use_container_width=True)
+
+    # ============================================
+    # OPTIMAL SIGNAL PARAMETERS (ADDED BACK)
+    # ============================================
+
+    st.subheader("Optimal Signal Parameters")
+    st.write(f"**Moving Average Type:** {best_type.upper()}")
+    st.write(f"**Optimal MA Length:** {best_len} days")
+    st.write(f"**Optimal Tolerance:** {best_tol:.2%}")
 
     # ============================================
     # SIGNAL DISTANCE
