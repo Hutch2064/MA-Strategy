@@ -3,6 +3,7 @@ import pandas as pd
 import yfinance as yf
 import matplotlib.pyplot as plt
 import streamlit as st
+import io
 
 # ============================================
 # CONFIG
@@ -21,8 +22,8 @@ RISK_OFF_WEIGHTS = {
     "UUP": 1.0,
 }
 
-# Slippage + tax drag applied on flip days
 FLIP_COST = 0.00875
+
 
 
 # ============================================
@@ -44,6 +45,7 @@ def load_price_data(tickers, start_date, end_date=None):
     return px.dropna(how="all")
 
 
+
 # ============================================
 # BUILD PORTFOLIO INDEX FOR SIGNAL
 # ============================================
@@ -61,6 +63,7 @@ def build_portfolio_index(prices, weights_dict):
     return idx
 
 
+
 # ============================================
 # MA MATRIX
 # ============================================
@@ -76,6 +79,7 @@ def compute_ma_matrix(price_series, lengths, ma_type):
             ma = price_series.rolling(window=L, min_periods=L).mean()
             ma_dict[L] = ma.shift(1)
     return ma_dict
+
 
 
 # ============================================
@@ -104,6 +108,7 @@ def generate_testfol_signal_vectorized(price, ma, tol):
             sig[t] = not (px[t] < lower[t])
 
     return pd.Series(sig, index=ma.index).fillna(False)
+
 
 
 # ============================================
@@ -167,6 +172,7 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     }
 
 
+
 # ============================================
 # GRID SEARCH
 # ============================================
@@ -217,11 +223,50 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     return best_cfg, best_result
 
 
+
+# ============================================
+# AUTO WIDGET PNG MODE
+# ============================================
+
+def render_widget_chart():
+    tickers = list(RISK_ON_WEIGHTS.keys()) + list(RISK_OFF_WEIGHTS.keys())
+    prices = load_price_data(tickers, DEFAULT_START_DATE)
+
+    best_cfg, best_result = run_grid_search(prices, RISK_ON_WEIGHTS, RISK_OFF_WEIGHTS)
+    best_len, best_type, best_tol = best_cfg
+
+    portfolio_index = build_portfolio_index(prices, RISK_ON_WEIGHTS)
+
+    sig = best_result["signal"]
+    latest_signal = bool(sig.iloc[-1])
+    color = "green" if latest_signal else "red"
+
+    # Widget chart (NO MA LINE)
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(best_result["equity_curve"], color=color, linewidth=2, label="Strategy")
+    ax.plot(portfolio_index, color="gray", alpha=0.6, label="Risk-On Index")
+    ax.legend()
+    ax.grid(alpha=0.3)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    st.image(buf.getvalue())
+    return
+
+
+
 # ============================================
 # STREAMLIT APP
 # ============================================
 
 def main():
+
+    # ---- AUTO MODE CHECK (first lines inside main) ----
+    params = st.experimental_get_query_params()
+    if "auto" in params:
+        return render_widget_chart()
+    # ---------------------------------------------------
+
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
     st.title("Portfolio MA Optimized Regime Strategy — With Flip-Day Costs")
 
@@ -337,7 +382,7 @@ def main():
     )
 
     # ============================================
-    # CONSOLIDATED METRIC TABLE — FORMATTED
+    # CONSOLIDATED METRIC TABLE
     # ============================================
 
     st.subheader("Full Strategy Statistics (Strategy vs Always-On Risk-On)")
@@ -388,7 +433,7 @@ def main():
     st.dataframe(table, use_container_width=True)
 
     # ============================================
-    # OPTIMAL SIGNAL PARAMETERS (ADDED BACK)
+    # OPTIMAL SIGNAL PARAMETERS
     # ============================================
 
     st.subheader("Optimal Signal Parameters")
@@ -430,13 +475,16 @@ def main():
     st.write(f"**{distance_str}**")
 
     # ============================================
-    # FINAL PLOT
+    # FINAL PLOT (UI MODE)
     # ============================================
 
     st.subheader("Portfolio Index + Optimal MA + Strategy Curve")
 
+    # Color the strategy line red/green
+    regime_color = "green" if latest_signal else "red"
+
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(best_result["equity_curve"], label="Optimized Strategy (After Friction)", linewidth=2)
+    ax.plot(best_result["equity_curve"], label=f"Strategy ({regime})", linewidth=2, color=regime_color)
     ax.plot(portfolio_index, label="Portfolio Index (Risk-On Basket)", alpha=0.65)
     ax.plot(ma_opt_series, label=f"Optimal {best_type.upper()}({best_len}) MA", linewidth=2)
 
@@ -445,6 +493,11 @@ def main():
 
     st.pyplot(fig)
 
+
+
+# ============================================
+# LAUNCH APP
+# ============================================
 
 if __name__ == "__main__":
     main()
