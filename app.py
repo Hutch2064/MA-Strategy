@@ -437,6 +437,48 @@ def main():
     st.write(f"**MA({best_len}) Value:** {MA:,.2f}")
     st.write(f"**Tolerance Bands:** Lower={lower:,.2f} | Upper={upper:,.2f}")
     st.write(f"**{distance_str}**")
+    
+    # ============================================
+    # REGIME AGING STATS
+    # ============================================
+
+    st.subheader("Regime Aging Statistics")
+
+    # Convert boolean signal into segments
+    sig_series = sig.astype(int)
+    switch_points = sig_series.diff().fillna(0).ne(0)
+
+    segments = []
+    current_regime = sig_series.iloc[0]
+    start_date = sig_series.index[0]
+
+    for date, sw in switch_points.iloc[1:].items():
+        if sw:
+            end_date = date
+            segments.append((current_regime, start_date, end_date))
+            current_regime = sig_series.loc[date]
+            start_date = date
+
+    # Close final segment
+    segments.append((current_regime, start_date, sig_series.index[-1]))
+
+    # Build stats
+    regime_rows = []
+    for r, s, e in segments:
+        length_days = (e - s).days
+        label = "RISK-ON" if r == 1 else "RISK-OFF"
+        regime_rows.append([label, s.date(), e.date(), length_days])
+
+    regime_df = pd.DataFrame(regime_rows, columns=["Regime", "Start", "End", "Duration (days)"])
+
+    # Summary
+    avg_on = regime_df[regime_df["Regime"] == "RISK-ON"]["Duration (days)"].mean()
+    avg_off = regime_df[regime_df["Regime"] == "RISK-OFF"]["Duration (days)"].mean()
+
+    st.write(f"**Average RISK-ON Duration:** {avg_on:.1f} days")
+    st.write(f"**Average RISK-OFF Duration:** {avg_off:.1f} days")
+
+    st.dataframe(regime_df, use_container_width=True)
 
     # ============================================
     # FINAL PLOT (UI MODE)
