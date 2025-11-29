@@ -26,7 +26,7 @@ RISK_ON_WEIGHTS = {
 }
 
 RISK_OFF_WEIGHTS = {
-    "UUP": 1.0,
+    "SHY": 1.0,
 }
 
 # Slippage + tax drag applied on flip days
