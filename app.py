@@ -21,7 +21,7 @@ RISK_OFF_WEIGHTS = {
     "UUP": 1.0,
 }
 
-# Cost applied on flip days
+# Cost applied at flip moments
 FLIP_COST = 0.00875   # 0.65% tax drag + 0.225% slippage
 
 
@@ -50,10 +50,9 @@ def load_price_data(tickers, start_date, end_date=None):
 
 def build_portfolio_index(prices, weights_dict):
     """
-    Construct the risk-on portfolio index from weighted log returns.
+    Construct risk-on portfolio index from weighted log returns.
     """
-    px = prices.copy()
-    log_px = np.log(px)
+    log_px = np.log(prices)
     log_rets = log_px.diff().fillna(0)
 
     idx_rets = pd.Series(0.0, index=log_rets.index)
@@ -155,7 +154,7 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     strat_log_rets = (weights.shift(1).fillna(0) * log_rets).sum(axis=1)
 
     # -------------------------
-    # APPLY COST ON FLIP DAYS
+    # APPLY FLIP COST ON FLIP DAYS
     # -------------------------
     sig_arr = signal.astype(int)
     flip_mask = sig_arr.diff().abs() == 1
@@ -245,7 +244,7 @@ def main():
     - Slippage + tax friction **applied exactly on flip days**  
     - Fully vectorized  
     - Daily rebalance  
-    - Sharpe optimization with turnover penalty embedded implicitly  
+    - Sharpe optimization with natural turnover penalty  
     """)
 
     st.sidebar.header("Backtest Settings")
@@ -315,11 +314,41 @@ def main():
     st.write(f"**Tolerance:** {best_tol:.2%}")
     st.write(f"**Trades per year:** {trades_per_year:.2f}")
 
-    st.subheader("Equity Curve (After Friction)")
+    # ============================================
+    # BUILD PORTFOLIO INDEX & OPTIMAL MA FOR PLOT
+    # ============================================
+
+    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+
+    # Optimal MA series
+    ma_opt_dict = compute_ma_matrix(portfolio_index, [best_len], best_type)
+    ma_opt_series = ma_opt_dict[best_len]
+
+    # Risk-On portfolio equity curve (always on)
+    log_px = np.log(prices)
+    log_rets = log_px.diff().fillna(0)
+    risk_on_log_rets = pd.Series(0.0, index=log_rets.index)
+    for a, w in risk_on_weights.items():
+        if a in log_rets.columns:
+            risk_on_log_rets += log_rets[a] * w
+    risk_on_eq = np.exp(risk_on_log_rets.cumsum())
+
+    # ============================================
+    # FINAL PLOT — EVERYTHING TOGETHER
+    # ============================================
+
+    st.subheader("Equity Curve + Portfolio MA (Used for Regime Signal)")
+
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(best_result["equity_curve"], label="Optimized", linewidth=2)
+
+    ax.plot(best_result["equity_curve"], label="Optimized Strategy (After Friction)", linewidth=2)
+    ax.plot(risk_on_eq, label="Risk-On Portfolio (Always-On)", linestyle="--", alpha=0.85)
+    ax.plot(portfolio_index, label="Portfolio Index (Signal Input)", alpha=0.6)
+    ax.plot(ma_opt_series, label=f"Optimal {best_type.upper()}({best_len}) MA", linewidth=2)
+
     ax.legend()
     ax.grid(alpha=0.3)
+
     st.pyplot(fig)
 
 
