@@ -263,7 +263,8 @@ def main():
     # ---- AUTO MODE CHECK (first lines inside main) ----
     params = st.experimental_get_query_params()
     if "auto" in params:
-        return render_widget_chart()
+        render_widget_chart()
+        st.stop()
     # ---------------------------------------------------
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
