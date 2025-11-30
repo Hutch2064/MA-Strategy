@@ -260,6 +260,42 @@ def compute_stats(perf_obj, returns, dd_series, flip_mask, trades_per_year):
 
 
 # ============================================
+# REGIME AGING STATS — MATCH STREAMLIT
+# ============================================
+
+def compute_regime_stats(sig):
+    sig_series = sig.astype(int)
+    switch_points = sig_series.diff().fillna(0).ne(0)
+
+    segments = []
+    current_regime = sig_series.iloc[0]
+    start_date = sig_series.index[0]
+
+    for date, sw in switch_points.iloc[1:].items():
+        if sw:
+            end_date = date
+            segments.append((current_regime, start_date, end_date))
+            current_regime = sig_series.loc[date]
+            start_date = date
+
+    # Close final segment
+    segments.append((current_regime, start_date, sig_series.index[-1]))
+
+    regime_rows = []
+    for r, s, e in segments:
+        length_days = (e - s).days
+        label = "RISK-ON" if r == 1 else "RISK-OFF"
+        regime_rows.append([label, s.date(), e.date(), length_days])
+
+    regime_df = pd.DataFrame(regime_rows, columns=["Regime", "Start", "End", "Duration (days)"])
+
+    avg_on = regime_df[regime_df["Regime"] == "RISK-ON"]["Duration (days)"].mean()
+    avg_off = regime_df[regime_df["Regime"] == "RISK-OFF"]["Duration (days)"].mean()
+
+    return regime_df, avg_on, avg_off
+
+
+# ============================================
 # EMAIL HELPERS
 # ============================================
 
@@ -295,6 +331,9 @@ def send_email(
     MA,
     lower,
     upper,
+    regime_df,
+    avg_on,
+    avg_off,
 ):
     EMAIL_USER = os.getenv("EMAIL_USER")
     EMAIL_PASS = os.getenv("EMAIL_PASS")
@@ -343,6 +382,18 @@ def send_email(
 
     direction_str = "Drop Required" if "→ RISK-OFF" in direction else "Gain Required"
 
+    # Regime aging table
+    regime_rows_html = ""
+    for _, row in regime_df.iterrows():
+        regime_rows_html += f"""
+        <tr>
+          <td>{row['Regime']}</td>
+          <td>{row['Start']}</td>
+          <td>{row['End']}</td>
+          <td style="text-align:right;">{row['Duration (days)']}</td>
+        </tr>
+        """
+
     html = f"""
     <html>
       <body>
@@ -380,6 +431,26 @@ def send_email(
           </tbody>
         </table>
 
+        <h3>Regime Aging Statistics</h3>
+        <ul>
+          <li><b>Average RISK-ON Duration:</b> {avg_on:.1f} days</li>
+          <li><b>Average RISK-OFF Duration:</b> {avg_off:.1f} days</li>
+        </ul>
+
+        <table border="1" cellspacing="0" cellpadding="4">
+          <thead>
+            <tr>
+              <th>Regime</th>
+              <th>Start</th>
+              <th>End</th>
+              <th>Duration (days)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {regime_rows_html}
+          </tbody>
+        </table>
+
         <p>The attached chart shows the optimized strategy equity curve
         (colored by current regime), the risk-on portfolio index, and the
         optimal moving average.</p>
@@ -406,7 +477,7 @@ def send_email(
 
 if __name__ == "__main__":
     # Same tickers as Streamlit (risk-on + risk-off universe)
-    tickers = sorted(set(list(RISK_ON_WEIGHTS.keys()) + list(RISK_OFF_WEIGHTS.keys())))
+    tickers = sorted(set(list(RISK_ON_WEIGHTS.keys()) + list(RISK_OFF_WEIGHTS.keys()])))
     prices = load_price_data(tickers, DEFAULT_START_DATE).dropna(how="any")
 
     # Optimized strategy (same grid search as Streamlit)
@@ -474,6 +545,9 @@ if __name__ == "__main__":
         pct_to_flip = (upper - P) / P
         direction = "RISK-OFF → RISK-ON"
 
+    # Regime aging stats (same logic as Streamlit)
+    regime_df, avg_on, avg_off = compute_regime_stats(sig)
+
     # Final plot — match Streamlit visual
     regime_color = "green" if latest_signal else "red"
 
@@ -488,7 +562,7 @@ if __name__ == "__main__":
     plt.savefig("equity_curve.png")
     plt.close()
 
-    # Send email with all stats + chart
+    # Send email with all stats + chart + regime aging
     send_email(
         regime,
         best_cfg,
@@ -500,4 +574,7 @@ if __name__ == "__main__":
         MA,
         lower,
         upper,
+        regime_df,
+        avg_on,
+        avg_off,
     )
