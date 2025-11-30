@@ -477,7 +477,7 @@ def send_email(
 
 if __name__ == "__main__":
     # Same tickers as Streamlit (risk-on + risk-off universe)
-    tickers = sorted(set(list(RISK_ON_WEIGHTS.keys()) + list(RISK_OFF_WEIGHTS.keys()])))
+    tickers = sorted(set(list(RISK_ON_WEIGHTS.keys()) + list(RISK_OFF_WEIGHTS.keys())))
     prices = load_price_data(tickers, DEFAULT_START_DATE).dropna(how="any")
 
     # Optimized strategy (same grid search as Streamlit)
