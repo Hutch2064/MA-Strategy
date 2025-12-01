@@ -397,7 +397,7 @@ def send_email(
     html = f"""
     <html>
       <body>
-        <h2>Portfolio MA Optimized Regime Strategy — Daily Signal</h2>
+        <h2>Portfolio MA Strategy — Daily Signal</h2>
 
         <p><b>Current Regime:</b> {regime}</p>
 
@@ -408,7 +408,7 @@ def send_email(
           <li><b>Optimal Tolerance:</b> {best_tol:.2%}</li>
         </ul>
 
-        <h3>Distance Until Next Signal</h3>
+        <h3>Next Signal Information</h3>
         <ul>
           <li><b>Latest Signal Change Direction:</b> {direction}</li>
           <li><b>Portfolio Index (P):</b> {P:,.2f}</li>
@@ -417,7 +417,7 @@ def send_email(
           <li><b>{direction_str}:</b> {pct_to_flip:.2%}</li>
         </ul>
 
-        <h3>Full Strategy Statistics (Strategy vs Always-On Risk-On)</h3>
+        <h3>Strategy vs. Risk-ON Statistics</h3>
         <table border="1" cellspacing="0" cellpadding="4">
           <thead>
             <tr>
@@ -431,7 +431,7 @@ def send_email(
           </tbody>
         </table>
 
-        <h3>Regime Aging Statistics</h3>
+        <h3>Regime Statistics</h3>
         <ul>
           <li><b>Average RISK-ON Duration:</b> {avg_on:.1f} days</li>
           <li><b>Average RISK-OFF Duration:</b> {avg_off:.1f} days</li>
