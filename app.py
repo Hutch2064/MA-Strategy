@@ -232,7 +232,7 @@ def main():
     # ---------------------------------------------------
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
-    st.title("Portfolio MA Optimized Regime Strategy — With Flip-Day Costs")
+    st.title("Portfolio MA Strategy")
 
     st.sidebar.header("Backtest Settings")
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
@@ -349,7 +349,7 @@ def main():
     # CONSOLIDATED METRIC TABLE
     # ============================================
 
-    st.subheader("Full Strategy Statistics (Strategy vs Always-On Risk-On)")
+    st.subheader("Strategy vs. Risk-On Statistics)")
 
     rows = [
         ("CAGR", "CAGR"),
@@ -409,7 +409,7 @@ def main():
     # SIGNAL DISTANCE
     # ============================================
 
-    st.subheader("Distance Until Next Signal")
+    st.subheader("Next Signal Information")
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     ma_opt_dict = compute_ma_matrix(portfolio_index, [best_len], best_type)
@@ -442,7 +442,7 @@ def main():
     # REGIME AGING STATS
     # ============================================
 
-    st.subheader("Regime Aging Statistics")
+    st.subheader("Regime Statistics")
 
     # Convert boolean signal into segments
     sig_series = sig.astype(int)
@@ -484,7 +484,7 @@ def main():
     # FINAL PLOT (UI MODE)
     # ============================================
 
-    st.subheader("Portfolio Index + Optimal MA + Strategy Curve")
+    st.subheader("Portfolio Strategy vs. Risk-On Graph)
 
     # Color the strategy line red/green
     regime_color = "green" if latest_signal else "red"
