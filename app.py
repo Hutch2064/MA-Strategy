@@ -484,7 +484,7 @@ def main():
     # FINAL PLOT (UI MODE)
     # ============================================
 
-    st.subheader("Portfolio Strategy vs. Risk-On Graph)
+    st.subheader("Portfolio Strategy vs. Risk-On Graph")
 
     # Color the strategy line red/green
     regime_color = "green" if latest_signal else "red"
