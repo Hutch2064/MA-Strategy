@@ -349,7 +349,7 @@ def main():
     # CONSOLIDATED METRIC TABLE
     # ============================================
 
-    st.subheader("Strategy vs. Risk-On Statistics)")
+    st.subheader("Strategy vs. Risk-ON Statistics)")
 
     rows = [
         ("CAGR", "CAGR"),
