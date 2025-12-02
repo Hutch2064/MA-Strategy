@@ -464,9 +464,9 @@ def main():
     link_url = "https://testfol.io/optimizer?s=9y4FBdfW2oO" 
     link_text = "View This Strategy on Testfol.io"
 
-    st.subheader("External Strategy Link 🔗")
+    st.subheader("External Sharpe Optimal Validation Link")
     # This line has the corrected f-string and Markdown syntax:
-    st.markdown(f"**Quick Access:** You can view this specific strategy configuration and optimization parameters here: [{link_text}]({link_url})")
+    st.markdown(f"**Quick Access:** You can view my portfolios Sharpe Optimal weights (with more history on certain assets) here: [{link_text}]({link_url})")
 
     # ============================================
 
