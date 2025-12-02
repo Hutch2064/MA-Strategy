@@ -25,6 +25,8 @@ RISK_OFF_WEIGHTS = {
 
 FLIP_COST = 0.00875
 
+
+
 # ============================================
 # DATA LOADING
 # ============================================
@@ -43,6 +45,8 @@ def load_price_data(tickers, start_date, end_date=None):
 
     return px.dropna(how="all")
 
+
+
 # ============================================
 # BUILD PORTFOLIO INDEX FOR SIGNAL
 # ============================================
@@ -59,6 +63,8 @@ def build_portfolio_index(prices, weights_dict):
     idx = np.exp(idx_rets.cumsum())
     return idx
 
+
+
 # ============================================
 # MA MATRIX
 # ============================================
@@ -74,6 +80,8 @@ def compute_ma_matrix(price_series, lengths, ma_type):
             ma = price_series.rolling(window=L, min_periods=L).mean()
             ma_dict[L] = ma.shift(1)
     return ma_dict
+
+
 
 # ============================================
 # TESTFOL HYSTERESIS
@@ -102,6 +110,8 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 
     return pd.Series(sig, index=ma.index).fillna(False)
 
+
+
 # ============================================
 # BACKTEST ENGINE — WITH FLIP COST
 # ============================================
@@ -119,6 +129,7 @@ def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
 
     return weights
 
+
 def compute_performance(log_returns, equity_curve, rf=0.0):
     cagr = np.exp(log_returns.mean() * 252) - 1
     vol = log_returns.std() * np.sqrt(252)
@@ -134,6 +145,7 @@ def compute_performance(log_returns, equity_curve, rf=0.0):
         "TotalReturn": total_ret,
         "DD_Series": dd
     }
+
 
 def backtest(prices, signal, risk_on_weights, risk_off_weights):
 
@@ -159,6 +171,8 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
         "performance": compute_performance(strat_log_rets_adj, eq),
         "flip_mask": flip_mask,
     }
+
+
 
 # ============================================
 # GRID SEARCH
@@ -209,40 +223,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 
     return best_cfg, best_result
 
-# ============================================
-# SHARPE-OPTIMAL PORTFOLIO  (Integrated Cleanly)
-# ============================================
 
-def compute_sharpe_optimal(prices):
-    rets = prices.pct_change().dropna(how="any")
-
-    mu = rets.mean().values
-    cov = rets.cov().values
-
-    cov += np.eye(cov.shape[0]) * 1e-9  # stabilize
-
-    n = len(mu)
-
-    def neg_sharpe(w):
-        if np.any(w < 0): return 1e6
-        if abs(w.sum() - 1) > 1e-4: return 1e6
-        port_ret = np.dot(w, mu) * 252
-        port_vol = np.sqrt(w @ cov @ w.T * 252)
-        return -port_ret / port_vol if port_vol > 0 else 1e6
-
-    w0 = np.ones(n) / n
-    bounds = [(0,1) for _ in range(n)]
-    cons = {'type':'eq', 'fun':lambda w: w.sum() - 1}
-
-    res = minimize(neg_sharpe, w0, bounds=bounds, constraints=cons, method="SLSQP")
-    w_opt = res.x
-
-    port_daily = (rets * w_opt).sum(axis=1)
-    eq = (1 + port_daily).cumprod()
-
-    perf = compute_performance(np.log(eq/eq.shift(1)).dropna(), eq)
-
-    return w_opt, perf, eq
 
 # ============================================
 # STREAMLIT APP
@@ -279,12 +260,7 @@ def main():
     all_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
     end_val = end if end.strip() else None
 
-    raw = load_price_data(all_tickers, start, end_val)
-
-    # ❗ TRUNCATE TO COMMON START DATE ACROSS RISK-ON TICKERS (Option A)
-    ro_prices = raw[risk_on_tickers]
-    first_valid = max([ro_prices[c].first_valid_index() for c in risk_on_tickers])
-    prices = raw.loc[first_valid:].copy()
+    prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
 
     best_cfg, best_result = run_grid_search(prices, risk_on_weights, risk_off_weights)
     best_len, best_type, best_tol = best_cfg
@@ -292,12 +268,13 @@ def main():
     sig = best_result["signal"]
     perf = best_result["performance"]
 
-    latest_day = sig.index[-1]
     latest_signal = sig.iloc[-1]
     regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
     switches = sig.astype(int).diff().abs().sum()
     trades_per_year = switches / (len(sig) / 252)
+
+
 
     # ============================================
     # RISK-ON ALWAYS-ON PERFORMANCE
@@ -314,14 +291,55 @@ def main():
     risk_on_eq = np.exp(risk_on_log.cumsum())
     risk_on_perf = compute_performance(risk_on_log, risk_on_eq)
 
-    # ============================================
-    # SHARPE OPTIMAL (Integrated)
-    # ============================================
 
-    sharp_w, sharp_perf, sharp_eq = compute_sharpe_optimal(prices[risk_on_tickers])
 
     # ============================================
-    # ADVANCED METRICS
+    # SHARPE-OPTIMAL PORTFOLIO (RISK-ON ONLY)
+    # ============================================
+
+    risk_on_px = prices[[t for t in risk_on_tickers if t in prices.columns]].copy()
+    common_start = risk_on_px.dropna().index[0]
+    risk_on_px = risk_on_px.loc[common_start:]
+
+    risk_on_rets = risk_on_px.pct_change().dropna(how="any")
+
+    mu_vec = risk_on_rets.mean().values
+    cov_mat = risk_on_rets.cov().values
+
+    cov_mat += np.eye(cov_mat.shape[0]) * 1e-10
+
+    def neg_sharpe(w):
+        ret = np.dot(mu_vec, w)
+        vol = np.sqrt(np.dot(w.T, cov_mat @ w))
+        if vol == 0:
+            return 1e9
+        return -(ret / vol)
+
+    n = len(mu_vec)
+    bounds = [(0, 1)] * n
+    constraints = ({"type": "eq", "fun": lambda w: np.sum(w) - 1})
+
+    res = minimize(neg_sharpe, np.ones(n) / n, bounds=bounds, constraints=constraints)
+    w_opt = res.x
+
+    sharp_returns = (risk_on_rets * w_opt).sum(axis=1)
+    sharp_eq = (1 + sharp_returns).cumprod()
+    sharp_perf = compute_performance(np.log(1 + sharp_returns), sharp_eq)
+
+    sharp_stats = {
+        "CAGR": sharp_perf["CAGR"],
+        "Volatility": sharp_perf["Volatility"],
+        "Sharpe": sharp_perf["Sharpe"],
+        "MaxDD": sharp_perf["MaxDrawdown"],
+        "Total": sharp_perf["TotalReturn"]
+    }
+
+    sharp_weights_display = {t: round(w, 4) for t, w in zip(risk_on_px.columns, w_opt)}
+
+
+
+    # ============================================
+    # ADVANCED METRICS & STRATEGY STATS
     # ============================================
 
     def time_in_drawdown(dd):
@@ -375,19 +393,13 @@ def main():
         0
     )
 
-    sharp_stats = compute_stats(
-        sharp_perf,
-        sharp_returns,
-        sharp_perf["DD_Series"],
-        np.zeros(len(sharp_returns), dtype=bool),
-        0
-    )
+
 
     # ============================================
-    # CONSOLIDATED METRIC TABLE
+    # CONSOLIDATED METRIC TABLE (NOW 3-COLUMN)
     # ============================================
 
-    st.subheader("Strategy vs. Sharpe-Optimal vs. Risk-ON")
+    st.subheader("Strategy vs. Sharpe-Optimal vs. Risk-ON Statistics")
 
     rows = [
         ("CAGR", "CAGR"),
@@ -413,38 +425,41 @@ def main():
     def fmt_num(x):
         return f"{x:,.2f}" if pd.notna(x) else "—"
 
-    formatted_rows = []
-
+    table_rows = []
     for label, key in rows:
-        sval = strat_stats[key]
-        rval = risk_stats[key] if key in risk_stats else None
-        oval = sharp_stats[key]
+
+        sv = strat_stats[key]
+        shv = sharp_stats[key] if key in sharp_stats else None
+        rv = risk_stats[key] if key in risk_stats else None
 
         if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
-            sval_fmt = fmt_pct(sval)
-            oval_fmt = fmt_pct(oval)
-            rval_fmt = fmt_pct(rval)
+            sv_fmt = fmt_pct(sv)
+            sh_fmt = fmt_pct(shv)
+            rv_fmt = fmt_pct(rv)
         elif key in ["Sharpe", "MAR", "PainGain", "Skew", "Kurtosis"]:
-            sval_fmt = fmt_dec(sval)
-            oval_fmt = fmt_dec(oval)
-            rval_fmt = fmt_dec(rval)
+            sv_fmt = fmt_dec(sv)
+            sh_fmt = fmt_dec(shv)
+            rv_fmt = fmt_dec(rv)
         else:
-            sval_fmt = fmt_num(sval)
-            oval_fmt = fmt_num(oval)
-            rval_fmt = fmt_num(rval)
+            sv_fmt = fmt_num(sv)
+            sh_fmt = fmt_num(shv)
+            rv_fmt = fmt_num(rv)
 
-        formatted_rows.append([label, sval_fmt, oval_fmt, rval_fmt])
+        table_rows.append([label, sv_fmt, sh_fmt, rv_fmt])
 
-    table = pd.DataFrame(formatted_rows, columns=["Metric", "Strategy", "Sharpe-Opt", "Risk-On"])
+    table = pd.DataFrame(table_rows, columns=["Metric", "Strategy", "Sharpe-Optimal", "Risk-On"])
     st.dataframe(table, use_container_width=True)
 
+
+
     # ============================================
-    # DISPLAY SHARPE OPTIMAL WEIGHTS
+    # SHOW SHARPE-OPTIMAL WEIGHTS
     # ============================================
 
-    st.subheader("Sharpe-Optimal Weights (Long-Only, Sum to 1)")
-    sharp_weight_dict = {ticker: float(f"{w:.4f}") for ticker, w in zip(risk_on_tickers, sharp_w)}
-    st.write(sharp_weight_dict)
+    st.subheader("Sharpe-Optimal Weights (Risk-ON Universe)")
+    st.write(sharp_weights_display)
+
+
 
     # ============================================
     # OPTIMAL SIGNAL PARAMETERS
@@ -454,6 +469,8 @@ def main():
     st.write(f"**Moving Average Type:** {best_type.upper()}")
     st.write(f"**Optimal MA Length:** {best_len} days")
     st.write(f"**Optimal Tolerance:** {best_tol:.2%}")
+
+
 
     # ============================================
     # SIGNAL DISTANCE
@@ -487,6 +504,8 @@ def main():
     st.write(f"**MA({best_len}) Value:** {MA:,.2f}")
     st.write(f"**Tolerance Bands:** Lower={lower:,.2f} | Upper={upper:,.2f}")
     st.write(f"**{distance_str}**")
+
+
 
     # ============================================
     # REGIME AGING STATS
@@ -523,8 +542,9 @@ def main():
 
     st.write(f"**Average RISK-ON Duration:** {avg_on:.1f} days")
     st.write(f"**Average RISK-OFF Duration:** {avg_off:.1f} days")
-
     st.dataframe(regime_df, use_container_width=True)
+
+
 
     # ============================================
     # FINAL PLOT
@@ -538,12 +558,12 @@ def main():
     ax.plot(best_result["equity_curve"], label=f"Strategy ({regime})", linewidth=2, color=regime_color)
     ax.plot(portfolio_index, label="Portfolio Index (Risk-On Basket)", alpha=0.65)
     ax.plot(ma_opt_series, label=f"Optimal {best_type.upper()}({best_len}) MA", linewidth=2)
-    ax.plot(sharp_eq, label="Sharpe-Optimal Portfolio", linewidth=2, color="orange")
 
     ax.legend()
     ax.grid(alpha=0.3)
-
     st.pyplot(fig)
+
+
 
 # ============================================
 # LAUNCH APP
