@@ -457,10 +457,18 @@ def main():
     table = pd.DataFrame(table_rows, columns=["Metric", "Strategy", "Sharpe-Optimal", "Risk-On"])
     st.dataframe(table, use_container_width=True)
 
-    link_url = "https://testfol.io/optimizer?s=9y4FBdfW200"
-    link_text = "View the Sharpe Optimal with longer history"
-    st. subheader ("External Strategy Link O")
-    st. markdown (f"**Quick Access: ** You can view this specific strategy configuration and optimization parameters here: [link_text}] (link_url))")
+    # ============================================
+    # ADD LINK TO OUTPUT
+    # ============================================
+
+    link_url = "https://testfol.io/optimizer?s=9y4FBdfW2oO" 
+    link_text = "View This Strategy on Testfol.io"
+
+    st.subheader("External Strategy Link 🔗")
+    # This line has the corrected f-string and Markdown syntax:
+    st.markdown(f"**Quick Access:** You can view this specific strategy configuration and optimization parameters here: [{link_text}]({link_url})")
+
+    # ============================================
 
     # ============================================
     # SHOW SHARPE-OPTIMAL WEIGHTS
