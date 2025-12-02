@@ -223,13 +223,12 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
     return best_cfg, best_result
 
 
+
 # ============================================
 # STREAMLIT APP
 # ============================================
 
 def main():
-
-    # ---------------------------------------------------
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
     st.title("Portfolio MA Strategy")
@@ -268,7 +267,6 @@ def main():
     sig = best_result["signal"]
     perf = best_result["performance"]
 
-    latest_day = sig.index[-1]
     latest_signal = sig.iloc[-1]
     regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
@@ -289,6 +287,32 @@ def main():
 
     risk_on_eq = np.exp(risk_on_log.cumsum())
     risk_on_perf = compute_performance(risk_on_log, risk_on_eq)
+
+    # ============================================
+    # SHARPE OPTIMAL PORTFOLIO (RISK-ON TICKERS ONLY)
+    # ============================================
+
+    px_risk_on = prices[risk_on_tickers]
+
+    simple_rets = px_risk_on.pct_change().replace([np.inf, -np.inf], np.nan).dropna()
+
+    mu_vec = simple_rets.mean().values
+    cov = simple_rets.cov().values
+
+    cov += np.eye(cov.shape[0]) * 1e-8
+
+    u, s, vh = np.linalg.svd(cov, full_matrices=False)
+    s = np.where(s < 1e-12, 1e-12, s)
+    inv_cov = (vh.T * (1.0 / s)) @ u.T
+
+    w_opt = inv_cov @ mu_vec
+    w_opt = w_opt / w_opt.sum()
+
+    opt_port = (simple_rets * w_opt).sum(axis=1)
+    opt_log = np.log1p(opt_port)
+    opt_eq = np.exp(opt_log.cumsum())
+
+    opt_perf = compute_performance(opt_log, opt_eq)
 
     # ============================================
     # ADVANCED METRICS
@@ -345,11 +369,19 @@ def main():
         0
     )
 
+    opt_stats = compute_stats(
+        opt_perf,
+        opt_log,
+        opt_perf["DD_Series"],
+        np.zeros(len(opt_log), dtype=bool),
+        0
+    )
+
     # ============================================
     # CONSOLIDATED METRIC TABLE
     # ============================================
 
-    st.subheader("Strategy vs. Risk-ON Statistics)")
+    st.subheader("Strategy vs. Sharpe-Optimal vs. Risk-ON Statistics")
 
     rows = [
         ("CAGR", "CAGR"),
@@ -378,23 +410,26 @@ def main():
     formatted_rows = []
 
     for label, key in rows:
-        sval = strat_stats[key]
-        rval = risk_stats[key] if key in risk_stats else None
+        a = strat_stats[key]
+        b = opt_stats[key]
+        c = risk_stats[key]
 
         if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
-            sval_fmt = fmt_pct(sval)
-            rval_fmt = fmt_pct(rval)
+            formatted_rows.append([label, fmt_pct(a), fmt_pct(b), fmt_pct(c)])
         elif key in ["Sharpe", "MAR", "PainGain", "Skew", "Kurtosis"]:
-            sval_fmt = fmt_dec(sval)
-            rval_fmt = fmt_dec(rval)
+            formatted_rows.append([label, fmt_dec(a), fmt_dec(b), fmt_dec(c)])
         else:
-            sval_fmt = fmt_num(sval)
-            rval_fmt = fmt_num(rval)
+            formatted_rows.append([label, fmt_num(a), fmt_num(b), fmt_num(c)])
 
-        formatted_rows.append([label, sval_fmt, rval_fmt])
-
-    table = pd.DataFrame(formatted_rows, columns=["Metric", "Strategy", "Risk-On"])
+    table = pd.DataFrame(formatted_rows, columns=["Metric", "Strategy", "Sharpe-Optimal", "Risk-On"])
     st.dataframe(table, use_container_width=True)
+
+    # ============================================
+    # DISPLAY SHARPE OPTIMAL WEIGHTS
+    # ============================================
+
+    st.subheader("Sharpe-Optimal Weights (Risk-ON Universe)")
+    st.write({t: float(f"{w:.4f}") for t, w in zip(risk_on_tickers, w_opt)})
 
     # ============================================
     # OPTIMAL SIGNAL PARAMETERS
@@ -418,10 +453,9 @@ def main():
     latest_date = ma_opt_series.dropna().index[-1]
     P = float(portfolio_index.loc[latest_date])
     MA = float(ma_opt_series.loc[latest_date])
-    tol = best_tol
 
-    upper = MA * (1 + tol)
-    lower = MA * (1 - tol)
+    upper = MA * (1 + best_tol)
+    lower = MA * (1 - best_tol)
 
     if latest_signal:
         pct_to_flip = (P - lower) / P
@@ -437,61 +471,19 @@ def main():
     st.write(f"**MA({best_len}) Value:** {MA:,.2f}")
     st.write(f"**Tolerance Bands:** Lower={lower:,.2f} | Upper={upper:,.2f}")
     st.write(f"**{distance_str}**")
-    
-    # ============================================
-    # REGIME AGING STATS
-    # ============================================
-
-    st.subheader("Regime Statistics")
-
-    # Convert boolean signal into segments
-    sig_series = sig.astype(int)
-    switch_points = sig_series.diff().fillna(0).ne(0)
-
-    segments = []
-    current_regime = sig_series.iloc[0]
-    start_date = sig_series.index[0]
-
-    for date, sw in switch_points.iloc[1:].items():
-        if sw:
-            end_date = date
-            segments.append((current_regime, start_date, end_date))
-            current_regime = sig_series.loc[date]
-            start_date = date
-
-    # Close final segment
-    segments.append((current_regime, start_date, sig_series.index[-1]))
-
-    # Build stats
-    regime_rows = []
-    for r, s, e in segments:
-        length_days = (e - s).days
-        label = "RISK-ON" if r == 1 else "RISK-OFF"
-        regime_rows.append([label, s.date(), e.date(), length_days])
-
-    regime_df = pd.DataFrame(regime_rows, columns=["Regime", "Start", "End", "Duration (days)"])
-
-    # Summary
-    avg_on = regime_df[regime_df["Regime"] == "RISK-ON"]["Duration (days)"].mean()
-    avg_off = regime_df[regime_df["Regime"] == "RISK-OFF"]["Duration (days)"].mean()
-
-    st.write(f"**Average RISK-ON Duration:** {avg_on:.1f} days")
-    st.write(f"**Average RISK-OFF Duration:** {avg_off:.1f} days")
-
-    st.dataframe(regime_df, use_container_width=True)
 
     # ============================================
-    # FINAL PLOT (UI MODE)
+    # FINAL PLOT
     # ============================================
 
     st.subheader("Portfolio Strategy vs. Risk-On Graph")
 
-    # Color the strategy line red/green
     regime_color = "green" if latest_signal else "red"
 
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(best_result["equity_curve"], label=f"Strategy ({regime})", linewidth=2, color=regime_color)
-    ax.plot(portfolio_index, label="Portfolio Index (Risk-On Basket)", alpha=0.65)
+    ax.plot(opt_eq, label="Sharpe-Optimal Portfolio", linewidth=2, color="magenta")
+    ax.plot(portfolio_index, label="Risk-On Portfolio Index", alpha=0.7)
     ax.plot(ma_opt_series, label=f"Optimal {best_type.upper()}({best_len}) MA", linewidth=2)
 
     ax.legend()
