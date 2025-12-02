@@ -220,7 +220,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 def main():
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
-    st.title("Portfolio MA Strategy (Simple Returns Version)")
+    st.title("Portfolio MA Strategy")
 
     st.sidebar.header("Backtest Settings")
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
