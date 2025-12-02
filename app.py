@@ -459,11 +459,8 @@ def main():
 
     link_url = "https://testfol.io/optimizer?s=9y4FBdfW200"
     link_text = "View the Sharpe Optimal with longer history"
-    st. subheader ("External Strategy
-    Link O")
-    st. markdown (f"**Quick Access: ** You can
-    view
-    this specific strategy configuration and optimization parameters here: [link_text}] (link_url))")
+    st. subheader ("External Strategy Link O")
+    st. markdown (f"**Quick Access: ** You can view this specific strategy configuration and optimization parameters here: [link_text}] (link_url))")
 
     # ============================================
     # SHOW SHARPE-OPTIMAL WEIGHTS
