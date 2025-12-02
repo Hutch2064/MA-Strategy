@@ -220,7 +220,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 def main():
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
-    st.title("Portfolio MA Strategy")
+    st.title("Portfolio MA Strategy (Simple Returns Version)")
 
     st.sidebar.header("Backtest Settings")
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
@@ -426,6 +426,19 @@ def main():
 
     table = pd.DataFrame(table_rows, columns=["Metric", "Strategy", "Sharpe-Optimal", "Risk-On"])
     st.dataframe(table, use_container_width=True)
+    
+    # ============================================
+    # EXTERNAL VALIDATION LINK (Testfol)
+    # ============================================
+
+    link_url = "https://testfol.io/optimizer?s=9y4FBdfW2oO"
+    link_text = "View This Strategy on Testfol.io"
+
+    st.subheader("External Sharpe Optimal Validation Link")
+    st.markdown(
+        f"**Quick Access:** You can view the portfolio’s Sharpe Optimal weights "
+        f"using extended history here: [{link_text}]({link_url})"
+    )
 
     # ============================================
     # DISPLAY SHARPE-OPTIMAL WEIGHTS
