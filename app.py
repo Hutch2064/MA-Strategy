@@ -20,7 +20,7 @@ RISK_ON_WEIGHTS = {
 }
 
 RISK_OFF_WEIGHTS = {
-    "UUP": 1.0,
+    "SHY": 1.0,
 }
 
 FLIP_COST = 0.00875
