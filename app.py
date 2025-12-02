@@ -377,9 +377,9 @@ def main():
 
     sharp_stats = compute_stats(
         sharp_perf,
-        np.log(sharp_eq / sharp_eq.shift(1)).dropna(),
+        sharp_returns,
         sharp_perf["DD_Series"],
-        np.zeros(len(sharp_eq), dtype=bool),
+        np.zeros(len(sharp_returns), dtype=bool),
         0
     )
 
