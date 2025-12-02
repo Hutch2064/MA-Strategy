@@ -457,8 +457,7 @@ def main():
     table = pd.DataFrame(table_rows, columns=["Metric", "Strategy", "Sharpe-Optimal", "Risk-On"])
     st.dataframe(table, use_container_width=True)
 
-    link_url = "https://testfol.io/optimizer?
-s=9y4FBdfW200"
+    link_url = "https://testfol.io/optimizer?s=9y4FBdfW200"
     link_text = "View the Sharpe Optimal with longer history"
     st. subheader ("External Strategy
     Link O")
