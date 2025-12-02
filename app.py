@@ -10,7 +10,7 @@ from scipy.optimize import minimize
 # CONFIG
 # ============================================
 
-DEFAULT_START_DATE = "2011-11-24"
+DEFAULT_START_DATE = "1999-01-01"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
