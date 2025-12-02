@@ -327,12 +327,19 @@ def main():
     sharp_perf = compute_performance(np.log(1 + sharp_returns), sharp_eq)
 
     sharp_stats = {
-        "CAGR": sharp_perf["CAGR"],
-        "Volatility": sharp_perf["Volatility"],
-        "Sharpe": sharp_perf["Sharpe"],
-        "MaxDD": sharp_perf["MaxDrawdown"],
-        "Total": sharp_perf["TotalReturn"]
-    }
+    "CAGR": sharp_perf["CAGR"],
+    "Volatility": sharp_perf["Volatility"],
+    "Sharpe": sharp_perf["Sharpe"],
+    "MaxDD": sharp_perf["MaxDrawdown"],
+    "Total": sharp_perf["TotalReturn"],
+    "MAR": sharp_perf["CAGR"] / abs(sharp_perf["MaxDrawdown"]) if sharp_perf["MaxDrawdown"] != 0 else np.nan,
+    "TID": (sharp_perf["DD_Series"] < 0).mean(),
+    "PainGain": sharp_perf["CAGR"] / np.sqrt((sharp_perf["DD_Series"]**2).mean()) if (sharp_perf["DD_Series"]**2).mean() != 0 else np.nan,
+    "Skew": sharp_returns.skew(),
+    "Kurtosis": sharp_returns.kurt(),
+    "P/L per flip": 0.0,
+    "Trades/year": 0.0,
+}
 
     sharp_weights_display = {t: round(w, 4) for t, w in zip(risk_on_px.columns, w_opt)}
 
@@ -556,6 +563,7 @@ def main():
 
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(best_result["equity_curve"], label=f"Strategy ({regime})", linewidth=2, color=regime_color)
+    ax.plot(sharp_eq, label="Sharpe-Optimal Portfolio", linewidth=2, color="magenta")
     ax.plot(portfolio_index, label="Portfolio Index (Risk-On Basket)", alpha=0.65)
     ax.plot(ma_opt_series, label=f"Optimal {best_type.upper()}({best_len}) MA", linewidth=2)
 
