@@ -6,6 +6,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from scipy.optimize import minimize
+
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -16,20 +18,19 @@ import smtplib
 # CONFIG — MATCH STREAMLIT EXACTLY
 # ============================================
 
-DEFAULT_START_DATE = "2011-11-24"
+DEFAULT_START_DATE = "1999-01-01"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "GLD": 0.9,
-    "TQQQ": 0.3,
-    "BTC-USD": 0.4,
+    "UGL": 0.22,
+    "QLD": 0.39,
+    "BTC-USD": 0.39,
 }
 
 RISK_OFF_WEIGHTS = {
     "SHY": 1.0,
 }
 
-# Slippage + tax drag applied on flip days
 FLIP_COST = 0.00875
 
 
@@ -52,19 +53,18 @@ def load_price_data(tickers, start_date, end_date=None):
 
 
 # ============================================
-# BUILD PORTFOLIO INDEX FOR SIGNAL — MATCH STREAMLIT
+# BUILD PORTFOLIO INDEX — SIMPLE RETURNS
 # ============================================
 
 def build_portfolio_index(prices, weights_dict):
-    log_px = np.log(prices)
-    log_rets = log_px.diff().fillna(0)
+    simple_rets = prices.pct_change().fillna(0)
 
-    idx_rets = pd.Series(0.0, index=log_rets.index)
+    idx_rets = pd.Series(0.0, index=simple_rets.index)
     for a, w in weights_dict.items():
-        if a in log_rets.columns:
-            idx_rets += log_rets[a] * w
+        if a in simple_rets.columns:
+            idx_rets += simple_rets[a] * w
 
-    idx = np.exp(idx_rets.cumsum())
+    idx = (1 + idx_rets).cumprod()
     return idx
 
 
@@ -114,7 +114,7 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 
 
 # ============================================
-# BACKTEST ENGINE — WITH FLIP COST (STREAMLIT)
+# BACKTEST ENGINE — SIMPLE RETURNS + FLIP COST
 # ============================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
@@ -131,50 +131,64 @@ def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
     return weights
 
 
-def compute_performance(log_returns, equity_curve, rf=0.0):
-    cagr = np.exp(log_returns.mean() * 252) - 1
-    vol = log_returns.std() * np.sqrt(252)
-    sharpe = (cagr - rf) / vol if vol > 0 else np.nan
-    dd = equity_curve / equity_curve.cummax() - 1
+def compute_performance(simple_returns, eq_curve, rf=0.0):
+    """
+    Simple-return math, identical to Streamlit main app:
+    - CAGR from equity curve
+    - Vol, Sharpe from simple daily returns
+    """
+    if len(eq_curve) < 2:
+        return {
+            "CAGR": np.nan,
+            "Volatility": np.nan,
+            "Sharpe": np.nan,
+            "MaxDrawdown": np.nan,
+            "TotalReturn": np.nan,
+            "DD_Series": pd.Series(index=eq_curve.index, dtype=float),
+        }
+
+    cagr = (eq_curve.iloc[-1] / eq_curve.iloc[0]) ** (252 / len(eq_curve)) - 1
+    vol = simple_returns.std() * np.sqrt(252)
+    sharpe = (simple_returns.mean() * 252 - rf) / vol if vol > 0 else np.nan
+    dd = eq_curve / eq_curve.cummax() - 1
     max_dd = dd.min()
-    total_ret = equity_curve.iloc[-1] / equity_curve.iloc[0] - 1
+    total_ret = eq_curve.iloc[-1] / eq_curve.iloc[0] - 1
     return {
         "CAGR": cagr,
         "Volatility": vol,
         "Sharpe": sharpe,
         "MaxDrawdown": max_dd,
         "TotalReturn": total_ret,
-        "DD_Series": dd
+        "DD_Series": dd,
     }
 
 
 def backtest(prices, signal, risk_on_weights, risk_off_weights):
-    log_px = np.log(prices)
-    log_rets = log_px.diff().fillna(0)
+    simple = prices.pct_change().fillna(0)
 
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
-    strat_log_rets = (weights.shift(1).fillna(0) * log_rets).sum(axis=1)
+    strategy_simple = (weights.shift(1).fillna(0) * simple).sum(axis=1)
 
     sig_arr = signal.astype(int)
     flip_mask = sig_arr.diff().abs() == 1
+    flip_costs = np.where(flip_mask, -FLIP_COST, 0.0)
 
-    friction_series = np.where(flip_mask, -FLIP_COST, 0.0)
-    strat_log_rets_adj = strat_log_rets + friction_series
+    strat_adj = strategy_simple + flip_costs
 
-    eq = np.exp(strat_log_rets_adj.cumsum())
+    eq = (1 + strat_adj).cumprod()
 
     return {
-        "returns": strat_log_rets_adj,
+        "returns": strat_adj,
         "equity_curve": eq,
         "signal": signal,
         "weights": weights,
-        "performance": compute_performance(strat_log_rets_adj, eq),
+        "performance": compute_performance(strat_adj, eq, rf=RISK_FREE_RATE),
         "flip_mask": flip_mask,
     }
 
 
 # ============================================
-# GRID SEARCH — IDENTICAL TO STREAMLIT
+# GRID SEARCH — IDENTICAL LOGIC TO STREAMLIT
 # ============================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights):
@@ -324,7 +338,9 @@ def send_email(
     regime,
     best_cfg,
     strat_stats,
+    sharp_stats,
     risk_stats,
+    sharp_weights_display,
     direction,
     pct_to_flip,
     P,
@@ -341,7 +357,7 @@ def send_email(
 
     best_len, best_type, best_tol = best_cfg
 
-    # Build HTML for stats table (Strategy vs Risk-On)
+    # 3-column stats table (Strategy vs Sharpe-Optimal vs Risk-On) — match Streamlit
     rows = [
         ("CAGR", "CAGR"),
         ("Volatility", "Volatility"),
@@ -349,7 +365,7 @@ def send_email(
         ("Max Drawdown", "MaxDD"),
         ("Total Return", "Total"),
         ("MAR Ratio", "MAR"),
-        ("Time in Drawdown", "TID"),
+        ("Time in Drawdown (%)", "TID"),
         ("Pain-to-Gain", "PainGain"),
         ("Skew", "Skew"),
         ("Kurtosis", "Kurtosis"),
@@ -360,22 +376,27 @@ def send_email(
     table_rows_html = ""
     for label, key in rows:
         sval = strat_stats.get(key, np.nan)
+        shv = sharp_stats.get(key, np.nan)
         rval = risk_stats.get(key, np.nan)
 
         if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
             sval_fmt = fmt_pct(sval)
+            shv_fmt = fmt_pct(shv)
             rval_fmt = fmt_pct(rval)
         elif key in ["Sharpe", "MAR", "PainGain", "Skew", "Kurtosis"]:
             sval_fmt = fmt_dec(sval)
+            shv_fmt = fmt_dec(shv)
             rval_fmt = fmt_dec(rval)
         else:
             sval_fmt = fmt_num(sval)
+            shv_fmt = fmt_num(shv)
             rval_fmt = fmt_num(rval)
 
         table_rows_html += f"""
         <tr>
           <td>{label}</td>
           <td style="text-align:right;">{sval_fmt}</td>
+          <td style="text-align:right;">{shv_fmt}</td>
           <td style="text-align:right;">{rval_fmt}</td>
         </tr>
         """
@@ -394,6 +415,15 @@ def send_email(
         </tr>
         """
 
+    # Sharpe-optimal weights list
+    sharp_weights_items = ""
+    for t, w in sharp_weights_display.items():
+        sharp_weights_items += f"<li><b>{t}:</b> {w:.2%}</li>"
+
+    # External validation link (Testfol) — same as main app
+    link_url = "https://testfol.io/optimizer?s=9y4FBdfW2oO"
+    link_text = "View the Sharpe Optimal recommended portfolio"
+
     html = f"""
     <html>
       <body>
@@ -401,11 +431,22 @@ def send_email(
 
         <p><b>Current Regime:</b> {regime}</p>
 
+        <h3>External Sharpe-Optimal Validation</h3>
+        <p>
+          <b>Quick Access:</b> You can view the portfolio’s Sharpe-Optimal weights using extended history here:
+          <a href="{link_url}">{link_text}</a>
+        </p>
+
         <h3>Optimal Signal Parameters</h3>
         <ul>
           <li><b>Moving Average Type:</b> {best_type.upper()}</li>
           <li><b>Optimal MA Length:</b> {best_len} days</li>
           <li><b>Optimal Tolerance:</b> {best_tol:.2%}</li>
+        </ul>
+
+        <h3>Sharpe-Optimal Weights (Risk-ON Universe)</h3>
+        <ul>
+          {sharp_weights_items}
         </ul>
 
         <h3>Next Signal Information</h3>
@@ -417,12 +458,13 @@ def send_email(
           <li><b>{direction_str}:</b> {pct_to_flip:.2%}</li>
         </ul>
 
-        <h3>Strategy vs. Risk-ON Statistics</h3>
+        <h3>Strategy vs. Sharpe-Optimal vs. Risk-ON Statistics</h3>
         <table border="1" cellspacing="0" cellpadding="4">
           <thead>
             <tr>
               <th>Metric</th>
               <th>Strategy</th>
+              <th>Sharpe-Optimal</th>
               <th>Risk-On</th>
             </tr>
           </thead>
@@ -452,8 +494,8 @@ def send_email(
         </table>
 
         <p>The attached chart shows the optimized strategy equity curve
-        (colored by current regime), the risk-on portfolio index, and the
-        optimal moving average.</p>
+        (colored by current regime), the Sharpe-Optimal portfolio, the risk-on
+        portfolio index, and the optimal moving average.</p>
       </body>
     </html>
     """
@@ -496,17 +538,64 @@ if __name__ == "__main__":
     switches = sig_arr.diff().abs().sum()
     trades_per_year = switches / (len(sig_arr) / 252)
 
-    # Always-ON Risk-ON performance — identical math
-    log_px = np.log(prices)
-    log_rets = log_px.diff().fillna(0)
+    # Always-ON Risk-ON performance — SIMPLE RETURN MATH (identical to Streamlit)
+    simple_rets = prices.pct_change().fillna(0)
 
-    risk_on_log = pd.Series(0.0, index=log_rets.index)
+    risk_on_simple = pd.Series(0.0, index=simple_rets.index)
     for a, w in RISK_ON_WEIGHTS.items():
-        if a in log_rets.columns:
-            risk_on_log += log_rets[a] * w
+        if a in simple_rets.columns:
+            risk_on_simple += simple_rets[a] * w
 
-    risk_on_eq = np.exp(risk_on_log.cumsum())
-    risk_on_perf = compute_performance(risk_on_log, risk_on_eq)
+    risk_on_eq = (1 + risk_on_simple).cumprod()
+    risk_on_perf = compute_performance(risk_on_simple, risk_on_eq, rf=RISK_FREE_RATE)
+
+    # Sharpe-Optimal portfolio (Simple Return Math) — match Streamlit
+    risk_on_px = prices[[t for t in RISK_ON_WEIGHTS.keys() if t in prices.columns]].copy()
+    risk_on_px = risk_on_px.dropna()
+    risk_on_rets = risk_on_px.pct_change().dropna()
+
+    mu_vec = risk_on_rets.mean().values
+    cov_mat = risk_on_rets.cov().values
+
+    # tiny ridge to ensure positive definite
+    cov_mat += np.eye(cov_mat.shape[0]) * 1e-10
+
+    def neg_sharpe(w):
+        ret = np.dot(mu_vec, w)
+        vol = np.sqrt(np.dot(w.T, cov_mat @ w))
+        if vol == 0:
+            return 1e9
+        return -(ret / vol)
+
+    n = len(mu_vec)
+    bounds = [(0, 1)] * n
+    constraints = ({"type": "eq", "fun": lambda w: np.sum(w) - 1})
+
+    res = minimize(neg_sharpe, np.ones(n) / n, bounds=bounds, constraints=constraints)
+    w_opt = res.x
+
+    sharp_returns = (risk_on_rets * w_opt).sum(axis=1)
+    sharp_eq = (1 + sharp_returns).cumprod()
+    sharp_perf = compute_performance(sharp_returns, sharp_eq, rf=RISK_FREE_RATE)
+
+    sharp_stats = {
+        "CAGR": sharp_perf["CAGR"],
+        "Volatility": sharp_perf["Volatility"],
+        "Sharpe": sharp_perf["Sharpe"],
+        "MaxDD": sharp_perf["MaxDrawdown"],
+        "Total": sharp_perf["TotalReturn"],
+        "MAR": sharp_perf["CAGR"] / abs(sharp_perf["MaxDrawdown"])
+               if sharp_perf["MaxDrawdown"] != 0 else np.nan,
+        "TID": (sharp_perf["DD_Series"] < 0).mean(),
+        "PainGain": sharp_perf["CAGR"] / np.sqrt((sharp_perf["DD_Series"] ** 2).mean())
+                    if (sharp_perf["DD_Series"] ** 2).mean() != 0 else np.nan,
+        "Skew": sharp_returns.skew(),
+        "Kurtosis": sharp_returns.kurt(),
+        "P/L per flip": 0.0,
+        "Trades/year": 0.0,
+    }
+
+    sharp_weights_display = {t: round(w, 4) for t, w in zip(risk_on_px.columns, w_opt)}
 
     # Build stats dicts (same as Streamlit)
     strat_stats = compute_stats(
@@ -519,9 +608,9 @@ if __name__ == "__main__":
 
     risk_stats = compute_stats(
         risk_on_perf,
-        risk_on_log,
+        risk_on_simple,
         risk_on_perf["DD_Series"],
-        np.zeros(len(risk_on_log), dtype=bool),
+        np.zeros(len(risk_on_simple), dtype=bool),
         0
     )
 
@@ -553,6 +642,7 @@ if __name__ == "__main__":
 
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(eq, label=f"Strategy ({regime})", linewidth=2, color=regime_color)
+    ax.plot(sharp_eq, label="Sharpe-Optimal Portfolio", linewidth=2, color="magenta")
     ax.plot(portfolio_index, label="Portfolio Index (Risk-On Basket)", alpha=0.65)
     ax.plot(ma_opt_series, label=f"Optimal {best_type.upper()}({best_len}) MA", linewidth=2)
 
@@ -567,7 +657,9 @@ if __name__ == "__main__":
         regime,
         best_cfg,
         strat_stats,
+        sharp_stats,
         risk_stats,
+        sharp_weights_display,
         direction,
         pct_to_flip,
         P,
