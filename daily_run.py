@@ -451,7 +451,7 @@ def send_email(
 
         <h3>Next Signal Information</h3>
         <ul>
-          <li><b>Latest Signal Change Direction:</b> {direction}</li>
+        
           <li><b>Portfolio Index (P):</b> {P:,.2f}</li>
           <li><b>MA({best_len}) Value:</b> {MA:,.2f}</li>
           <li><b>Tolerance Bands:</b> Lower = {lower:,.2f}, Upper = {upper:,.2f}</li>
