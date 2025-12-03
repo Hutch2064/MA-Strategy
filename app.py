@@ -482,7 +482,6 @@ def main():
         direction = "RISK-OFF → RISK-ON"
         distance_str = f"Gain Required: {pct_to_flip:.2%}"
 
-    st.write(f"**Latest Signal Change Direction:** {direction}")
     st.write(f"**Portfolio Index:** {P:,.2f}")
     st.write(f"**MA({best_len}) Value:** {MA:,.2f}")
     st.write(f"**Tolerance Bands:** Lower={lower:,.2f} | Upper={upper:,.2f}")
