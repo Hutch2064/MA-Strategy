@@ -4,12 +4,12 @@ on:
   schedule:
     # Runs at 7 PM CST (01:00 UTC next day)
     - cron: "0 1 * * *"
-  workflow_dispatch:       # Allows manual runs
+  workflow_dispatch:     # Allows manual runs
 
 jobs:
   run-strategy:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout repo
       uses: actions/checkout@v3
@@ -21,7 +21,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        pip install yfinance pandas numpy matplotlib
+        pip install --upgrade pip
+        pip install numpy pandas yfinance matplotlib scipy
 
     - name: Run daily script
       env:
