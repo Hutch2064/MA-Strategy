@@ -490,6 +490,24 @@ def main():
         }
 
     # ============================================
+    # TURNOVER CALCULATOR
+    # ============================================
+
+    def compute_turnover(weights_df):
+        """
+        Academic turnover definition:
+        Turnover_t = 0.5 * sum(|w_t – w_{t-1}|),
+        Annualized by multiplying by 252.
+        """
+        w = weights_df.fillna(0).values
+        if len(w) < 2:
+            return 0.0
+        diffs = np.abs(w[1:] - w[:-1]).sum(axis=1)
+        daily_turnover = 0.5 * diffs
+        annual_turnover = daily_turnover.mean() * 252
+        return float(annual_turnover)
+
+    # ============================================
     # PURE SIG STRATEGY (NO MA FILTER)
     # ============================================
 
@@ -512,7 +530,41 @@ def main():
         np.zeros(len(pure_sig_simple), dtype=bool),
         0
     )
+    
+    # ======================================================
+    # TURNOVER FOR EACH STRATEGY
+    # ======================================================
 
+    # MA Strategy turnover
+    strat_turnover = compute_turnover(best_result["weights"])
+
+    # Sharpe-Optimal has no turnover (weights fixed)
+    sharp_turnover = 0.0
+
+    # Risk-On B&H also has no turnover
+    risk_on_turnover = 0.0
+
+    # Hybrid SIG turnover — build weight df
+    hybrid_weights_df = pd.DataFrame({
+        "RiskOn": hybrid_rw,
+        "RiskOff": hybrid_sw
+    })
+    hybrid_turnover = compute_turnover(hybrid_weights_df)
+
+    # Pure SIG turnover — build weight df
+    pure_sig_weights_df = pd.DataFrame({
+        "RiskOn": pure_sig_rw,
+        "RiskOff": pure_sig_sw
+    })
+    pure_sig_turnover = compute_turnover(pure_sig_weights_df)
+
+    # Attach turnovers to stats dicts
+    strat_stats["Turnover"] = strat_turnover
+    sharp_stats["Turnover"] = sharp_turnover
+    risk_stats["Turnover"] = risk_on_turnover
+    hybrid_stats["Turnover"] = hybrid_turnover
+    pure_sig_stats["Turnover"] = pure_sig_turnover
+    
     pure_sig_stats["QuarterlyTarget"] = quarterly_target
 
     strat_stats = compute_stats(
@@ -559,6 +611,7 @@ def main():
         ("Kurtosis", "Kurtosis"),
         ("Trades per year", "Trades/year"),
         ("P/L per flip", "P/L per flip"),
+        ("Turnover / Year", "Turnover"),
     ]
 
     def fmt_pct(x): return f"{x:.2%}" if pd.notna(x) else "—"
