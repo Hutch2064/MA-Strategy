@@ -307,7 +307,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
 
             for tol in tolerances:
                 signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-                result = backtest(prices, signal, risk_on_weights, risk_off_weights, effective_flip_cost)
+                result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
 
                 sig_arr = signal.astype(int)
                 switches = sig_arr.diff().abs().sum()
