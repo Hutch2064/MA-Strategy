@@ -314,7 +314,9 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                     best_result = result
 
     return best_cfg, best_result
-
+    
+def normalize(eq):
+    return eq / eq.iloc[0] * 10000
 
 # ============================================
 # STREAMLIT APP
@@ -639,11 +641,16 @@ def main():
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
-    ax.plot(best_result["equity_curve"], label="MA Strategy", linewidth=2)
-    ax.plot(sharp_eq, label="Sharpe-Optimal", linewidth=2, color="magenta")
-    ax.plot(portfolio_index, label="Risk-On Portfolio", alpha=0.65)
-    ax.plot(hybrid_eq, label="Hybrid SIG Strategy", linewidth=2, color="blue")
-    ax.plot(opt_ma, label=f"{best_type.upper()}({best_len}) MA", linestyle="--")
+    # Normalize all curves so they start at the same value (10,000)
+    strat_eq_norm  = normalize(best_result["equity_curve"])
+    sharp_eq_norm  = normalize(sharp_eq)
+    risk_on_norm   = normalize(portfolio_index)
+    hybrid_eq_norm = normalize(hybrid_eq)
+
+    ax.plot(strat_eq_norm,  label="MA Strategy", linewidth=2)
+    ax.plot(sharp_eq_norm,  label="Sharpe-Optimal", linewidth=2, color="magenta")
+    ax.plot(risk_on_norm,   label="Risk-On Portfolio", alpha=0.65)
+    ax.plot(hybrid_eq_norm, label="Hybrid SIG Strategy", linewidth=2, color="blue")
 
     ax.legend()
     ax.grid(alpha=0.3)
