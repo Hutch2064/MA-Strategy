@@ -219,7 +219,9 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
             risky_w = 0.0
             safe_w  = 1.0
 
-        # Save outputs
+        # Always compute new total value at end of day
+        total = risky_val + safe_val
+
         equity_curve.append(total)
         risky_w_series.append(risky_w)
         safe_w_series.append(safe_w)
