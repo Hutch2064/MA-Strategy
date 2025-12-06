@@ -458,7 +458,9 @@ def main():
     # ============================================
     # HYBRID SIG STRATEGY
     # ============================================
-
+    pure_sig_rw = None
+    pure_sig_sw = None
+    
     risk_off_daily = pd.Series(0.0, index=simple_rets.index)
     for a, w in risk_off_weights.items():
         if a in simple_rets.columns:
