@@ -123,6 +123,10 @@ def run_sig_engine(
 ):
     dates = risk_on_returns.index
     n = len(dates)
+    
+    # === Flip detection identical to MA strategy ===
+    sig_arr = ma_signal.astype(int)
+    flip_mask = sig_arr.diff().abs() == 1
 
     eq = 10000.0
     risky_val = eq * START_RISKY
@@ -178,10 +182,18 @@ def run_sig_engine(
                     safe_val  -= move
                     risky_val += move
                     rebalance_events += 1
+                    
+                 # === Quarterly drag fee (NEW STEP 3) ===
+                 quarter_fee = FLIP_COST * target_quarter
+                 eq *= (1 - quarter_fee)
 
             eq = risky_val + safe_val
             risky_w = risky_val / eq if eq > 0 else 0
             safe_w  = safe_val  / eq if eq > 0 else 0
+            
+            # === Hybrid flip cost identical to MA strategy ===
+            if flip_mask.iloc[i]:
+                eq *= (1 - FLIP_COST)
 
         else:
             if frozen_risky is None:
