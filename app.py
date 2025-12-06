@@ -362,20 +362,6 @@ def main():
         step=100.0
     )
     
-    # Taxable or non-taxable toggle
-    taxable_account = st.sidebar.selectbox(
-        "Tax-Sheltered?",
-        ["No", "Yes"]
-    )
-
-    # Set effective flip fee
-    if taxable_account == "Yes":
-        effective_flip_cost = 0.0015   # 0.15%
-    else:
-        effective_flip_cost = FLIP_COST  # default 0.875%
-    
-    flip_cost_for_optimization = FLIP_COST
-    
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
 
@@ -398,7 +384,7 @@ def main():
         prices,
         risk_on_weights,
         risk_off_weights,
-        flip_cost_for_optimization
+        FLIP_COST
     )
     best_len, best_type, best_tol = best_cfg
 
@@ -490,7 +476,7 @@ def main():
         sig,
         pure_sig_rw=pure_sig_rw,
         pure_sig_sw=pure_sig_sw,
-        flip_cost=effective_flip_cost
+        flip_cost=FLIP_COST
     )
 
     hybrid_simple = hybrid_eq.pct_change().fillna(0)
@@ -532,7 +518,7 @@ def main():
         risk_off_daily,
         quarterly_target,
         pure_sig_signal,
-        flip_cost=effective_flip_cost
+        flip_cost=FLIP_COST
     )
 
     pure_sig_simple = pure_sig_eq.pct_change().fillna(0)
