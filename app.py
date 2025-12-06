@@ -146,23 +146,17 @@ def run_sig_engine(
         if ma_on:
 
             if frozen_risky is not None:
-                 if pure_sig_rw is not None and pure_sig_sw is not None:
-                     w_r = pure_sig_rw.iloc[i]
-                     w_s = pure_sig_sw.iloc[i]
-                 else:
-                     w_r = START_RISKY
-                     w_s = START_SAFE
+                if pure_sig_rw is not None and pure_sig_sw is not None:
+                    w_r = pure_sig_rw.iloc[i]
+                    w_s = pure_sig_sw.iloc[i]
+                else:
+                    w_r = START_RISKY
+                    w_s = START_SAFE
 
-                 # target risky amount when returning to ON
-                 target_risky_val = eq * w_r
-                 current_risky_val = frozen_risky   # we exited risk when MA turned OFF
-
-                 traded = abs(target_risky_val - current_risky_val)
-                 flip_cost_amount = traded * FLIP_COST
-                 eq -= flip_cost_amount
-
-                 risky_val = eq * w_r
-                 safe_val  = eq * w_s
+                risky_val = eq * w_r
+                safe_val  = eq * w_s
+                frozen_risky = None
+                frozen_safe  = None
 
             risky_val *= (1 + r_on)
             safe_val  *= (1 + r_off)
@@ -190,18 +184,9 @@ def run_sig_engine(
             safe_w  = safe_val  / eq if eq > 0 else 0
 
         else:
-            # MA just turned OFF → sell risky portion
             if frozen_risky is None:
-                traded = risky_val     # amount being sold
-                flip_cost_amount = traded * FLIP_COST
-                eq -= flip_cost_amount
-
                 frozen_risky = risky_val
                 frozen_safe  = safe_val
-
-            # once MA is OFF, portfolio is fully defensive
-            risky_val = 0.0
-            safe_val  = eq
 
             eq *= (1 + r_off)
             risky_w = 0.0
