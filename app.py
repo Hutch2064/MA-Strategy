@@ -531,6 +531,15 @@ def main():
         0
     )
     
+    # MA Strategy stats (missing before — required for metric table)
+    strat_stats = compute_stats(
+        perf,
+        best_result["returns"],
+        perf["DD_Series"],
+        best_result["flip_mask"],
+        trades_per_year
+    )
+
     risk_stats = compute_stats(
         risk_on_perf,
         risk_on_simple,
@@ -575,13 +584,6 @@ def main():
         "RiskOff": pure_sig_sw
     })
     pure_sig_turnover = compute_turnover(pure_sig_weights_df)
-
-    # Attach turnovers now that ALL stats dicts already exist
-    strat_stats["Turnover"] = strat_turnover
-    sharp_stats["Turnover"] = sharp_turnover
-    risk_stats["Turnover"] = risk_on_turnover
-    hybrid_stats["Turnover"] = hybrid_turnover
-    pure_sig_stats["Turnover"] = pure_sig_turnover
 
     # ============================================
     # METRIC TABLE — 4 COLUMNS
