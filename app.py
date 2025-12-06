@@ -652,47 +652,74 @@ def main():
     pure_w_r_q = float(pure_sig_rw.loc[q_start])
     pure_w_s_q = float(pure_sig_sw.loc[q_start])
 
-    # ---- user input starting capital ----
-    start_cap = st.number_input("Starting Capital for Quarter-Start Allocation", value=10000.0)
+    # =====================================================
+    # QUARTERLY PROGRESS TRACKER — EXACT VALUES TODAY
+    # =====================================================
 
-    # ---- capital allocation at quarter start ----
-    hyb_r_cap = start_cap * hyb_w_r_q
-    hyb_s_cap = start_cap * hyb_w_s_q
+    # Risky/safe weights at quarter start
+    hyb_w_r_q = float(hybrid_rw.loc[q_start])
+    hyb_w_s_q = float(hybrid_sw.loc[q_start])
 
-    pure_r_cap = start_cap * pure_w_r_q
-    pure_s_cap = start_cap * pure_w_s_q
+    pure_w_r_q = float(pure_sig_rw.loc[q_start])
+    pure_w_s_q = float(pure_sig_sw.loc[q_start])
 
-    # ---- percent progress toward quarterly target ----
-    past_risky = hyb_r_cap                           # risky bucket at quarter start
-    goal_risky = past_risky * (1 + quarterly_target) # SIG target line for quarter
+    # User-defined starting capital for quarter
+    start_cap = st.number_input(
+        "Quarter-Start Capital (Used for SIG Progress Calculations)",
+        min_value=1.0,
+        value=10000.0,
+        step=100.0
+    )
 
-    # today's risky bucket (scaled proportionally using today's weights)
-    current_risky_today = float(hybrid_rw.iloc[-1] * (hyb_r_cap + hyb_s_cap))
+    # ----- HYBRID -----
+    hyb_risky_start = start_cap * hyb_w_r_q
+    hyb_safe_start  = start_cap * hyb_w_s_q
 
-    pct_to_target = (current_risky_today / goal_risky) - 1
+    hyb_risky_today = start_cap * float(hybrid_rw.iloc[-1])
 
-    # ---- DISPLAY ----
-    st.write("**Hybrid SIG — Quarter-Start Weights**")
-    st.write({"Risk-On": hyb_w_r_q, "Risk-Off": hyb_w_s_q})
+    hyb_gain_dollars = hyb_risky_today - hyb_risky_start
+    hyb_gain_pct = hyb_gain_dollars / hyb_risky_start if hyb_risky_start > 0 else 0
 
-    st.write("**Hybrid SIG — Quarter-Start Capital Allocation**")
+    hyb_target = hyb_risky_start * (1 + quarterly_target)
+    hyb_gap_dollars = hyb_target - hyb_risky_today
+    hyb_gap_pct = hyb_gap_dollars / hyb_risky_today if hyb_risky_today > 0 else 0
+
+    st.write("### Hybrid SIG — Quarter Progress")
     st.write({
-        "Risk-On ($)": hyb_r_cap,
-        "Risk-Off ($)": hyb_s_cap,
+        "Risky Start ($)": hyb_risky_start,
+        "Risky Today ($)": hyb_risky_today,
+        "Gain ($)": hyb_gain_dollars,
+        "Gain (%)": hyb_gain_pct,
+        "Quarterly Target ($)": hyb_target,
+        "More Needed ($)": hyb_gap_dollars,
+        "More Needed (%)": hyb_gap_pct,
     })
-
-    st.write(f"**Hybrid — % Change Required Until Quarterly Target Hit:** {pct_to_target:.2%}")
-
+    
     st.write("---")
 
-    st.write("**Pure SIG — Quarter-Start Weights**")
-    st.write({"Risk-On": pure_w_r_q, "Risk-Off": pure_w_s_q})
+# ----- PURE SIG -----
+pure_risky_start = start_cap * pure_w_r_q
+pure_safe_start  = start_cap * pure_w_s_q
 
-    st.write("**Pure SIG — Quarter-Start Capital Allocation**")
-    st.write({
-        "Risk-On ($)": pure_r_cap,
-        "Risk-Off ($)": pure_s_cap,
-    })
+pure_risky_today = start_cap * float(pure_sig_rw.iloc[-1])
+
+pure_gain_dollars = pure_risky_today - pure_risky_start
+pure_gain_pct = pure_gain_dollars / pure_risky_start if pure_risky_start > 0 else 0
+
+pure_target = pure_risky_start * (1 + quarterly_target)
+pure_gap_dollars = pure_target - pure_risky_today
+pure_gap_pct = pure_gap_dollars / pure_risky_today if pure_risky_today > 0 else 0
+
+st.write("### Pure SIG — Quarter Progress")
+st.write({
+    "Risky Start ($)": pure_risky_start,
+    "Risky Today ($)": pure_risky_today,
+    "Gain ($)": pure_gain_dollars,
+    "Gain (%)": pure_gain_pct,
+    "Quarterly Target ($)": pure_target,
+    "More Needed ($)": pure_gap_dollars,
+    "More Needed (%)": pure_gap_pct,
+})
 
     # ================================
     # CURRENT WEIGHTS
