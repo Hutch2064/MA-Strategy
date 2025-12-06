@@ -450,6 +450,34 @@ def main():
     hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
 
     # ============================================
+    # PURE SIG STRATEGY — NO MA FILTER
+    # ============================================
+
+    # Signal stays TRUE every day
+    pure_sig_signal = pd.Series(True, index=risk_on_simple.index)
+
+    # Run SIG engine in always-on mode
+    pure_sig_eq, pure_sig_rw, pure_sig_sw, pure_sig_rebals = run_sig_engine(
+        risk_on_simple,
+        risk_off_daily,
+        quarterly_target,
+        pure_sig_signal
+    )
+
+    # Compute Pure SIG performance
+    pure_sig_simple = pure_sig_eq.pct_change().fillna(0)
+    pure_sig_perf = compute_performance(pure_sig_simple, pure_sig_eq)
+
+    pure_sig_stats = compute_stats(
+        pure_sig_perf,
+        pure_sig_simple,
+        pure_sig_perf["DD_Series"],
+        np.zeros(len(pure_sig_simple), dtype=bool),
+        0
+    )
+
+
+    # ============================================
     # ADVANCED METRICS
     # ============================================
 
@@ -531,19 +559,20 @@ def main():
         sh = sharp_stats[key]
         rv = risk_stats[key]
         hv = hybrid_stats[key]
+        ps = pure_sig_stats[key]
 
         if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
-            row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(rv), fmt_pct(hv)]
+            row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(rv), fmt_pct(hv), fmt_pct(ps)]
         elif key in ["Sharpe", "MAR", "PainGain", "Skew", "Kurtosis"]:
-            row = [label, fmt_dec(sv), fmt_dec(sh), fmt_dec(rv), fmt_dec(hv)]
+            row = [label, fmt_dec(sv), fmt_dec(sh), fmt_dec(rv), fmt_dec(hv), fmt_dec(ps)]
         else:
-            row = [label, fmt_num(sv), fmt_num(sh), fmt_num(rv), fmt_num(hv)]
+            row = [label, fmt_num(sv), fmt_num(sh), fmt_num(rv), fmt_num(hv), fmt_num(ps)]
 
         table_data.append(row)
 
     stat_table = pd.DataFrame(
         table_data,
-        columns=["Metric", "Strategy", "Sharpe-Optimal", "Risk-On", "Hybrid"]
+        columns=["Metric", "Strategy", "Sharpe-Optimal", "Risk-On", "Hybrid","Pure-SIG"]
     )
 
     st.dataframe(stat_table, use_container_width=True)
@@ -651,7 +680,9 @@ def main():
     ax.plot(sharp_eq_norm,  label="Sharpe-Optimal", linewidth=2, color="magenta")
     ax.plot(risk_on_norm,   label="Risk-On Portfolio", alpha=0.65)
     ax.plot(hybrid_eq_norm, label="Hybrid SIG Strategy", linewidth=2, color="blue")
-
+    pure_sig_norm = normalize(pure_sig_eq)
+    ax.plot(pure_sig_norm, label="Pure SIG (No MA Filter)", linewidth=2, color="orange")
+    
     ax.legend()
     ax.grid(alpha=0.3)
     st.pyplot(fig)
