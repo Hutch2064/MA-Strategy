@@ -155,17 +155,11 @@ def run_sig_engine(
 
                  # target risky amount when returning to ON
                  target_risky_val = eq * w_r
-                 current_risky_val = 0.0   # we exited risk when MA turned OFF
+                 current_risky_val = frozen_risky   # we exited risk when MA turned OFF
 
                  traded = abs(target_risky_val - current_risky_val)
                  flip_cost_amount = traded * FLIP_COST
                  eq -= flip_cost_amount
-
-                 risky_val = eq * w_r
-                 safe_val  = eq * w_s
-
-                 frozen_risky = None
-                 frozen_safe  = None
 
                  risky_val = eq * w_r
                  safe_val  = eq * w_s
