@@ -183,26 +183,26 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
             # ------------------------------
             if i >= QUARTER_DAYS and (i % QUARTER_DAYS == 0):
 
-            # Actual past dollar bucket values from 63 days ago
-            past_risky_val = risky_val_series[i - QUARTER_DAYS]
+                # Actual past dollar bucket values from 63 days ago
+                past_risky_val = risky_val_series[i - QUARTER_DAYS]
 
-            # Target risky bucket based on signal line
-            goal_risky = past_risky_val * (1 + target_quarter)
+                # Target risky bucket based on signal line
+                goal_risky = past_risky_val * (1 + target_quarter)
 
             # SELL HIGH (risky above target)
-            if risky_val > goal_risky:
-                excess = risky_val - goal_risky
-                risky_val -= excess
-                safe_val  += excess
-                rebalance_events += 1
+                if risky_val > goal_risky:
+                    excess = risky_val - goal_risky
+                    risky_val -= excess
+                    safe_val  += excess
+                    rebalance_events += 1
 
             # BUY LOW (risky below target)
-            elif risky_val < goal_risky:
-                needed = goal_risky - risky_val
-                move = min(needed, safe_val)
-                safe_val  -= move
-                risky_val += move
-                rebalance_events += 1
+                elif risky_val < goal_risky:
+                    needed = goal_risky - risky_val
+                    move = min(needed, safe_val)
+                    safe_val  -= move
+                    risky_val += move
+                    rebalance_events += 1
             
             # Actual portfolio follows SIG buckets while MA=ON
             eq = risky_val + safe_val
