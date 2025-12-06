@@ -120,6 +120,7 @@ def run_sig_engine(
     ma_signal,
     pure_sig_rw=None,
     pure_sig_sw=None
+    flip_cost=FLIP_COST
 ):
     dates = risk_on_returns.index
     n = len(dates)
@@ -184,7 +185,7 @@ def run_sig_engine(
                     rebalance_events += 1
                     
                 # === Quarterly drag fee (NEW STEP 3) ===
-                quarter_fee = FLIP_COST * target_quarter
+                quarter_fee = flip_cost * target_quarter
                 eq *= (1 - quarter_fee)
 
             eq = risky_val + safe_val
@@ -193,7 +194,7 @@ def run_sig_engine(
             
             # === Hybrid flip cost identical to MA strategy ===
             if flip_mask.iloc[i]:
-                eq *= (1 - FLIP_COST)
+                eq *= (1 - flip_cost)
 
         else:
             if frozen_risky is None:
@@ -254,7 +255,7 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
     }
 
 
-def backtest(prices, signal, risk_on_weights, risk_off_weights):
+def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
     simple = prices.pct_change().fillna(0)
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
@@ -262,7 +263,7 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights):
     sig_arr = signal.astype(int)
 
     flip_mask = sig_arr.diff().abs() == 1
-    flip_costs = np.where(flip_mask, -FLIP_COST, 0.0)
+    flip_costs = np.where(flip_mask, -flip_cost, 0.0)
 
     strat_adj = strategy_simple + flip_costs
     eq = (1 + strat_adj).cumprod()
@@ -306,7 +307,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
 
             for tol in tolerances:
                 signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-                result = backtest(prices, signal, risk_on_weights, risk_off_weights)
+                result = backtest(prices, signal, risk_on_weights, risk_off_weights, effective_flip_cost)
 
                 sig_arr = signal.astype(int)
                 switches = sig_arr.diff().abs().sum()
@@ -361,6 +362,17 @@ def main():
         step=100.0
     )
     
+    # Taxable or non-taxable toggle
+    taxable_account = st.sidebar.selectbox(
+        "Taxable Account?",
+        ["No", "Yes"]
+    )
+
+    # Set effective flip fee
+    if taxable_account == "Yes":
+        effective_flip_cost = 0.0015   # 0.15%
+    else:
+        effective_flip_cost = FLIP_COST  # default 0.875%
     
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
@@ -471,6 +483,7 @@ def main():
         sig,
         pure_sig_rw=pure_sig_rw,
         pure_sig_sw=pure_sig_sw
+        flip_cost=effective_flip_cost
     )
 
     hybrid_simple = hybrid_eq.pct_change().fillna(0)
@@ -512,6 +525,7 @@ def main():
         risk_off_daily,
         quarterly_target,
         pure_sig_signal
+        flip_cost=effective_flip_cost
     )
 
     pure_sig_simple = pure_sig_eq.pct_change().fillna(0)
