@@ -555,11 +555,11 @@ def main():
 
     table_data = []
     for label, key in rows:
-        sv = strat_stats[key]
-        sh = sharp_stats[key]
-        rv = risk_stats[key]
-        hv = hybrid_stats[key]
-        ps = pure_sig_stats[key]
+        sv = strat_stats.get(key, np.nan)
+        sh = sharp_stats.get(key, np.nan)
+        rv = risk_stats.get(key, np.nan)
+        hv = hybrid_stats.get(key, np.nan)
+        ps = pure_sig_stats.get(key, np.nan)
 
         if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
             row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(rv), fmt_pct(hv), fmt_pct(ps)]
