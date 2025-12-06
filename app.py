@@ -450,6 +450,31 @@ def main():
     hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
 
     # ============================================
+    # ADVANCED METRICS (moved here)
+    # ============================================
+
+    def time_in_drawdown(dd):     return (dd < 0).mean()
+    def mar(c, dd):              return c / abs(dd) if dd != 0 else np.nan
+    def ulcer(dd):               return np.sqrt((dd**2).mean()) if (dd**2).mean() != 0 else np.nan
+    def pain_gain(c, dd):        return c / ulcer(dd) if ulcer(dd) != 0 else np.nan
+
+    def compute_stats(perf, returns, dd, flips, tpy):
+        return {
+            "CAGR": perf["CAGR"],
+            "Volatility": perf["Volatility"],
+            "Sharpe": perf["Sharpe"],
+            "MaxDD": perf["MaxDrawdown"],
+            "Total": perf["TotalReturn"],
+            "MAR": mar(perf["CAGR"], perf["MaxDrawdown"]),
+            "TID": time_in_drawdown(dd),
+            "PainGain": pain_gain(perf["CAGR"], dd),
+            "Skew": returns.skew(),
+            "Kurtosis": returns.kurt(),
+            "P/L per flip": float(returns[flips].sum()),
+            "Trades/year": tpy,
+        }
+    
+    # ============================================
     # PURE SIG STRATEGY — NO MA FILTER
     # ============================================
 
@@ -475,32 +500,6 @@ def main():
         np.zeros(len(pure_sig_simple), dtype=bool),
         0
     )
-
-
-    # ============================================
-    # ADVANCED METRICS
-    # ============================================
-
-    def time_in_drawdown(dd):     return (dd < 0).mean()
-    def mar(c, dd):              return c / abs(dd) if dd != 0 else np.nan
-    def ulcer(dd):               return np.sqrt((dd**2).mean()) if (dd**2).mean() != 0 else np.nan
-    def pain_gain(c, dd):        return c / ulcer(dd) if ulcer(dd) != 0 else np.nan
-
-    def compute_stats(perf, returns, dd, flips, tpy):
-        return {
-            "CAGR": perf["CAGR"],
-            "Volatility": perf["Volatility"],
-            "Sharpe": perf["Sharpe"],
-            "MaxDD": perf["MaxDrawdown"],
-            "Total": perf["TotalReturn"],
-            "MAR": mar(perf["CAGR"], perf["MaxDrawdown"]),
-            "TID": time_in_drawdown(dd),
-            "PainGain": pain_gain(perf["CAGR"], dd),
-            "Skew": returns.skew(),
-            "Kurtosis": returns.kurt(),
-            "P/L per flip": float(returns[flips].sum()),
-            "Trades/year": tpy,
-        }
 
     strat_stats = compute_stats(
         perf,
