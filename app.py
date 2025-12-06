@@ -482,7 +482,7 @@ def main():
         quarterly_target,
         sig,
         pure_sig_rw=pure_sig_rw,
-        pure_sig_sw=pure_sig_sw
+        pure_sig_sw=pure_sig_sw,
         flip_cost=effective_flip_cost
     )
 
