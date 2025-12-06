@@ -374,6 +374,8 @@ def main():
     else:
         effective_flip_cost = FLIP_COST  # default 0.875%
     
+    flip_cost_for_optimization = FLIP_COST
+    
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
 
@@ -396,7 +398,7 @@ def main():
         prices,
         risk_on_weights,
         risk_off_weights,
-        FLIP_COST
+        flip_cost_for_optimization
     )
     best_len, best_type, best_tol = best_cfg
 
