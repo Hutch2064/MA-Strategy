@@ -109,119 +109,117 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 
     return pd.Series(sig, index=ma.index).fillna(False)
 
-
 # ============================================================
 # NEW: SIG ENGINE — TRUE JASON KELLY LOGIC
 # ============================================================
 
 def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal):
     """
-    Jason Kelly 3Sig mechanics
-    - Risky bucket grows daily using risk-on returns
-    - Safe bucket grows using risk-off returns
-    - Every quarter:
-         If risky bucket growth > target:
-             Move excess into safe bucket
-    - When MA says risk-off:
-         Freeze risky/safe values, move 100% into risk-off portfolio
+    Hybrid SIG engine:
+
+    - When MA is ON:
+        * Portfolio follows SIG buckets (risky vs safe).
+        * Both buckets grow with their respective returns.
+        * Quarterly, we rebalance the risky bucket toward the target "signal line".
+    - When MA is OFF:
+        * Actual portfolio goes 100% risk-off.
+        * SIG buckets are FROZEN (no growth).
+        * When MA turns back ON, we restore the same risky/safe WEIGHTS
+          we had right before MA turned OFF, scaled to the new equity level.
     """
 
     dates = risk_on_returns.index
     n = len(dates)
 
-    # Starting state
-    risky_val = 6000.0
-    safe_val = 4000.0
+    # Start with 10000 just for nicer scale
+    eq = 10000.0
+    risky_val = eq * START_RISKY
+    safe_val  = eq * START_SAFE
 
-    risky_w = START_RISKY
-    safe_w = START_SAFE
-
-    frozen_risky_val = None
-    frozen_safe_val = None
+    # These store the SIG buckets at the moment MA flips OFF
+    frozen_risky = None
+    frozen_safe  = None
 
     equity_curve = []
     risky_w_series = []
     safe_w_series = []
     rebalance_events = 0
 
-    for i in range(n):
+    for i, date in enumerate(dates):
+        r_on  = risk_on_returns.iloc[i]
+        r_off = risk_off_returns.iloc[i]
+        ma_on = bool(ma_signal.iloc[i])
 
-        # ====================================================
-        # CASE 1: MA = RISK-ON → SIG ENGINE ACTIVE
-        # ====================================================
-        if ma_signal.iloc[i]:
+        # ============================================
+        # CASE 1: MA = RISK-ON  → SIG ACTIVE
+        # ============================================
+        if ma_on:
+            # If we are coming BACK from a risk-off period,
+            # restore the same risky/safe WEIGHTS we had
+            # right before MA flipped OFF, scaled to current eq.
+            if frozen_risky is not None:
+                total_frozen = frozen_risky + frozen_safe
+                if total_frozen > 0:
+                    w_r = frozen_risky / total_frozen
+                    w_s = frozen_safe  / total_frozen
+                else:
+                    w_r = START_RISKY
+                    w_s = START_SAFE
 
-            # Resume SIG state after risk-off
-            if frozen_risky_val is not None:
-                risky_val = frozen_risky_val
-                safe_val = frozen_safe_val
-                frozen_risky_val = None
-                frozen_safe_val = None
+                risky_val = eq * w_r
+                safe_val  = eq * w_s
 
-            # Apply daily returns
-            risky_val *= (1 + risk_on_returns.iloc[i])
-            safe_val  *= (1 + risk_off_returns.iloc[i])
-            # Compute total portfolio value during RISK-ON
-            total = risky_val + safe_val
+                frozen_risky = None
+                frozen_safe  = None
 
-            risky_w = risky_val / total if total > 0 else 0
-            safe_w  = safe_val  / total if total > 0 else 0
+            # Grow buckets with their respective returns
+            risky_val *= (1 + r_on)
+            safe_val  *= (1 + r_off)
+
             # ------------------------------
             # TRUE 3SIG QUARTERLY REBALANCE
             # ------------------------------
             if i >= QUARTER_DAYS and (i % QUARTER_DAYS == 0):
+                past_eq       = equity_curve[i - QUARTER_DAYS]
+                past_risky_w  = risky_w_series[i - QUARTER_DAYS]
+                past_risky_val = past_eq * past_risky_w
 
-                past_total = equity_curve[i - QUARTER_DAYS]
-                past_risky = past_total * risky_w_series[i - QUARTER_DAYS]
+                goal_risky = past_risky_val * (1 + target_quarter)
 
-                goal_risky = past_risky * (1 + target_quarter)
-
-                # SELL DOWN if above the signal line
                 if risky_val > goal_risky:
                     excess = risky_val - goal_risky
                     risky_val -= excess
                     safe_val  += excess
                     rebalance_events += 1
-
-                # BUY UP if below the signal line
                 elif risky_val < goal_risky:
                     needed = goal_risky - risky_val
-
-                    if safe_val >= needed:
-                        safe_val  -= needed
-                        risky_val += needed
-                    else:
-                        risky_val += safe_val
-                        safe_val = 0
-
+                    move = min(needed, safe_val)
+                    safe_val  -= move
+                    risky_val += move
                     rebalance_events += 1
-                    
-            # Compute daily total + weights (RISK-ON)
-            total = risky_val + safe_val
-            risky_w = risky_val / total
-            safe_w  = safe_val / total
-        
-        # ====================================================
-        # CASE 2: MA = RISK-OFF → FREEZE SIG ENGINE
-        # ====================================================
+
+            # Actual portfolio follows SIG buckets while MA=ON
+            eq = risky_val + safe_val
+            risky_w = risky_val / eq if eq > 0 else 0.0
+            safe_w  = safe_val  / eq if eq > 0 else 0.0
+
+        # ============================================
+        # CASE 2: MA = RISK-OFF → 100% SAFE
+        # ============================================
         else:
-             # Freeze values only the first day MA turns OFF
-             if frozen_risky_val is None:
-                 frozen_risky_val = risky_val
-                 frozen_safe_val  = safe_val
+            # First day MA flips OFF: freeze buckets
+            if frozen_risky is None:
+                frozen_risky = risky_val
+                frozen_safe  = safe_val
 
-             # Risky bucket stays frozen
-             risky_val = frozen_risky_val
+            # Actual portfolio: 100% risk-off asset
+            eq *= (1 + r_off)
+            risky_w = 0.0
+            safe_w  = 1.0
 
-             # Safe bucket compounds with risk-off returns
-             frozen_safe_val *= (1 + risk_off_returns.iloc[i])
-             safe_val = frozen_safe_val
+            # Buckets stay frozen until MA turns back ON
 
-             total = risky_val + safe_val
-             risky_w = 0.0
-             safe_w  = 1.0
-
-        equity_curve.append(total)
+        equity_curve.append(eq)
         risky_w_series.append(risky_w)
         safe_w_series.append(safe_w)
 
