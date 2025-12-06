@@ -364,7 +364,7 @@ def main():
     
     # Taxable or non-taxable toggle
     taxable_account = st.sidebar.selectbox(
-        "Taxable Account?",
+        "Tax-Sheltered?",
         ["No", "Yes"]
     )
 
