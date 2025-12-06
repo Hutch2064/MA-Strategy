@@ -449,7 +449,6 @@ def main():
         "Skew": sharp_returns.skew(),
         "Kurtosis": sharp_returns.kurt(),
         "Trades/year": 0.0,
-        "P/L per flip": 0.0,
     }
 
     sharp_weights_display = {t: round(w, 4) for t, w in zip(risk_on_px.columns, w_opt)}
@@ -503,7 +502,6 @@ def main():
             "PainGain": pain_gain(perf["CAGR"], dd),
             "Skew": returns.skew(),
             "Kurtosis": returns.kurt(),
-            "P/L per flip": float(returns[flips].sum()),
             "Trades/year": tpy,
         }
 
@@ -577,7 +575,6 @@ def main():
         ("Skew", "Skew"),
         ("Kurtosis", "Kurtosis"),
         ("Trades per year", "Trades/year"),
-        ("P/L per flip", "P/L per flip"),
     ]
 
     def fmt_pct(x): return f"{x:.2%}" if pd.notna(x) else "—"
