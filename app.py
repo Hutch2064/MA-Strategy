@@ -282,7 +282,7 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
 # GRID SEARCH (unchanged)
 # ============================================
 
-def run_grid_search(prices, risk_on_weights, risk_off_weights):
+def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
 
     best_sharpe = -1e9
     best_cfg = None
@@ -392,7 +392,12 @@ def main():
     prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
 
     # Run MA optimization
-    best_cfg, best_result = run_grid_search(prices, risk_on_weights, risk_off_weights)
+    best_cfg, best_result = run_grid_search(
+        prices,
+        risk_on_weights,
+        risk_off_weights,
+        effective_flip_cost
+    )
     best_len, best_type, best_tol = best_cfg
 
     sig = best_result["signal"]
