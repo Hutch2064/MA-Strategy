@@ -108,9 +108,8 @@ def generate_testfol_signal_vectorized(price, ma, tol):
             sig[t] = not (px[t] < lower[t])
 
     return pd.Series(sig, index=ma.index).fillna(False)
-
 # ============================================================
-# NEW: SIG ENGINE — TRUE JASON KELLY LOGIC
+# NEW: SIG ENGINE — TRUE JASON KELLY LOGIC (Enhanced)
 # ============================================================
 
 def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal):
@@ -131,12 +130,10 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
     dates = risk_on_returns.index
     n = len(dates)
 
-    # Start with 10000 just for nicer scale
     eq = 10000.0
     risky_val = eq * START_RISKY
     safe_val  = eq * START_SAFE
 
-    # These store the SIG buckets at the moment MA flips OFF
     frozen_risky = None
     frozen_safe  = None
 
@@ -153,12 +150,11 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
         ma_on = bool(ma_signal.iloc[i])
 
         # ============================================
-        # CASE 1: MA = RISK-ON  → SIG ACTIVE
+        # CASE 1 — MA = ON → SIG ACTIVE
         # ============================================
         if ma_on:
-            # If we are coming BACK from a risk-off period,
-            # restore the same risky/safe WEIGHTS we had
-            # right before MA flipped OFF, scaled to current eq.
+
+            # Restore the frozen weights when MA turns back on
             if frozen_risky is not None:
                 total_frozen = frozen_risky + frozen_safe
                 if total_frozen > 0:
@@ -174,56 +170,51 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
                 frozen_risky = None
                 frozen_safe  = None
 
-            # Grow buckets with their respective returns
+            # Grow buckets normally
             risky_val *= (1 + r_on)
             safe_val  *= (1 + r_off)
 
-            # ------------------------------
+            # -----------------------------------------
             # TRUE 3SIG QUARTERLY REBALANCE
-            # ------------------------------
+            # -----------------------------------------
             if i >= QUARTER_DAYS and (i % QUARTER_DAYS == 0):
 
-                # Actual past dollar bucket values from 63 days ago
                 past_risky_val = risky_val_series[i - QUARTER_DAYS]
-
-                # Target risky bucket based on signal line
                 goal_risky = past_risky_val * (1 + target_quarter)
 
-            # SELL HIGH (risky above target)
+                # SELL HIGH
                 if risky_val > goal_risky:
                     excess = risky_val - goal_risky
                     risky_val -= excess
                     safe_val  += excess
                     rebalance_events += 1
 
-            # BUY LOW (risky below target)
+                # BUY LOW
                 elif risky_val < goal_risky:
                     needed = goal_risky - risky_val
                     move = min(needed, safe_val)
                     safe_val  -= move
                     risky_val += move
                     rebalance_events += 1
-            
-            # Actual portfolio follows SIG buckets while MA=ON
+
+            # Update actual portfolio equity
             eq = risky_val + safe_val
-            risky_w = risky_val / eq if eq > 0 else 0.0
-            safe_w  = safe_val  / eq if eq > 0 else 0.0
+            risky_w = risky_val / eq if eq > 0 else 0
+            safe_w  = safe_val  / eq if eq > 0 else 0
 
         # ============================================
-        # CASE 2: MA = RISK-OFF → 100% SAFE
+        # CASE 2 — MA = OFF → FULL RISK-OFF
         # ============================================
         else:
-            # First day MA flips OFF: freeze buckets
+
+            # Freeze internal SIG buckets the moment MA flips off
             if frozen_risky is None:
                 frozen_risky = risky_val
                 frozen_safe  = safe_val
 
-            # Actual portfolio: 100% risk-off asset
             eq *= (1 + r_off)
             risky_w = 0.0
             safe_w  = 1.0
-
-            # Buckets stay frozen until MA turns back ON
 
         equity_curve.append(eq)
         risky_w_series.append(risky_w)
@@ -240,7 +231,7 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
 
 
 # ============================================
-# BACKTEST ENGINE (unchanged from original)
+# BACKTEST ENGINE (unchanged)
 # ============================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
@@ -264,6 +255,7 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
     dd = eq_curve / eq_curve.cummax() - 1
     max_dd = dd.min()
     total_ret = eq_curve.iloc[-1] / eq_curve.iloc[0] - 1
+
     return {
         "CAGR": cagr,
         "Volatility": vol,
@@ -345,7 +337,6 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                     best_result = result
 
     return best_cfg, best_result
-    
 def normalize(eq):
     return eq / eq.iloc[0] * 10000
 
@@ -481,7 +472,7 @@ def main():
     hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
 
     # ============================================
-    # ADVANCED METRICS (moved here)
+    # ADVANCED METRICS
     # ============================================
 
     def time_in_drawdown(dd):     return (dd < 0).mean()
@@ -504,15 +495,13 @@ def main():
             "P/L per flip": float(returns[flips].sum()),
             "Trades/year": tpy,
         }
-    
+
     # ============================================
-    # PURE SIG STRATEGY — NO MA FILTER
+    # PURE SIG STRATEGY (NO MA FILTER)
     # ============================================
 
-    # Signal stays TRUE every day
     pure_sig_signal = pd.Series(True, index=risk_on_simple.index)
 
-    # Run SIG engine in always-on mode
     pure_sig_eq, pure_sig_rw, pure_sig_sw, pure_sig_rebals = run_sig_engine(
         risk_on_simple,
         risk_off_daily,
@@ -520,7 +509,6 @@ def main():
         pure_sig_signal
     )
 
-    # Compute Pure SIG performance
     pure_sig_simple = pure_sig_eq.pct_change().fillna(0)
     pure_sig_perf = compute_performance(pure_sig_simple, pure_sig_eq)
 
@@ -531,9 +519,8 @@ def main():
         np.zeros(len(pure_sig_simple), dtype=bool),
         0
     )
-    # Add SIG quarterly target to stats
+
     pure_sig_stats["QuarterlyTarget"] = quarterly_target
-    
     strat_stats = compute_stats(
         perf,
         best_result["returns"],
@@ -564,7 +551,7 @@ def main():
     # METRIC TABLE — 4 COLUMNS
     # ============================================
 
-    st.subheader("Strategy vs. Sharpe-Optimal vs. Risk-ON vs. Hybrid")
+    st.subheader("Strategy vs. Sharpe-Optimal vs. Risk-ON vs. Hybrid vs. Pure SIG")
 
     rows = [
         ("CAGR", "CAGR"),
@@ -604,19 +591,39 @@ def main():
 
     stat_table = pd.DataFrame(
         table_data,
-        columns=["Metric", "Strategy", "Sharpe-Optimal", "Risk-On", "Hybrid","Pure-SIG"]
+        columns=["Metric", "Strategy", "Sharpe-Optimal", "Risk-On", "Hybrid", "Pure-SIG"]
     )
 
     st.dataframe(stat_table, use_container_width=True)
-    
+
     # ============================================
-    # SIG STRATEGIES (HYBRID + PURE)
+    # SIG STRATEGIES (PURE + HYBRID TOGETHER)
     # ============================================
 
     st.subheader("SIG Strategies (Hybrid + Pure)")
 
-    # Quarterly target
+    # Core numbers needed for implementation
     st.write(f"**Quarterly Target (Based on Buy & Hold CAGR):** {quarterly_target:.2%}")
+
+    # Next quarterly rebalance date (fiscal calendar)
+    last_date = prices.index[-1]
+    year = last_date.year
+    q1 = pd.Timestamp(year, 3, 31)
+    q2 = pd.Timestamp(year, 6, 30)
+    q3 = pd.Timestamp(year, 9, 30)
+    q4 = pd.Timestamp(year, 12, 31)
+
+    if last_date <= q1:
+        next_q = q1
+    elif last_date <= q2:
+        next_q = q2
+    elif last_date <= q3:
+        next_q = q3;
+    else:
+        next_q = pd.Timestamp(year + 1, 3, 31)
+
+    days_to_next_q = (next_q - last_date).days
+    st.write(f"**Next Quarterly SIG Rebalance:** {next_q.date()}  ({days_to_next_q} days from now)")
 
     # Current weights
     st.write("### Current Allocations")
@@ -627,6 +634,10 @@ def main():
     st.write("**Pure SIG Weights (today)**")
     st.write({"Risk-On": pure_sig_rw.iloc[-1], "Risk-Off": pure_sig_sw.iloc[-1]})
 
+    # Diagnostic summary
+    st.write(f"**Hybrid — Average Safe Allocation:** {avg_safe:.2%}")
+    st.write(f"**Hybrid — Rebalance Events:** {hybrid_rebals}")
+    st.write(f"**Pure SIG — Rebalance Events:** {pure_sig_rebals}")
 
     # ============================================
     # EXTERNAL VALIDATION LINK
@@ -636,15 +647,6 @@ def main():
     st.markdown(
         f"**Quick Access:** [View the Sharpe Optimal recommended portfolio](https://testfol.io/optimizer?s=9y4FBdfW2oO)"
     )
-
-    # ============================================
-    # HYBRID DIAGNOSTICS
-    # ============================================
-
-    st.write(f"**Quarterly Target (based on Buy & Hold CAGR):** {quarterly_target:.2%}")
-    st.write(f"**Average Safe Allocation:** {avg_safe:.2%}")
-    st.write("**Final Risk-On Allocation:**")
-    st.write(hybrid_rw.iloc[-1])
 
     # ============================================
     # OPTIMAL SIGNAL PARAMETERS
@@ -721,19 +723,18 @@ def main():
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
-    # Normalize all curves so they start at the same value (10,000)
     strat_eq_norm  = normalize(best_result["equity_curve"])
     sharp_eq_norm  = normalize(sharp_eq)
     risk_on_norm   = normalize(portfolio_index)
     hybrid_eq_norm = normalize(hybrid_eq)
+    pure_sig_norm  = normalize(pure_sig_eq)
 
     ax.plot(strat_eq_norm,  label="MA Strategy", linewidth=2)
     ax.plot(sharp_eq_norm,  label="Sharpe-Optimal", linewidth=2, color="magenta")
     ax.plot(risk_on_norm,   label="Risk-On Portfolio", alpha=0.65)
     ax.plot(hybrid_eq_norm, label="Hybrid SIG Strategy", linewidth=2, color="blue")
-    pure_sig_norm = normalize(pure_sig_eq)
-    ax.plot(pure_sig_norm, label="Pure SIG (No MA Filter)", linewidth=2, color="orange")
-    
+    ax.plot(pure_sig_norm,  label="Pure SIG (No MA Filter)", linewidth=2, color="orange")
+
     ax.legend()
     ax.grid(alpha=0.3)
     st.pyplot(fig)
