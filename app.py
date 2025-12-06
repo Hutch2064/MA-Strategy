@@ -396,7 +396,7 @@ def main():
         prices,
         risk_on_weights,
         risk_off_weights,
-        effective_flip_cost
+        FLIP_COST
     )
     best_len, best_type, best_tol = best_cfg
 
