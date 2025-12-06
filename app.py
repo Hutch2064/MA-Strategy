@@ -640,10 +640,59 @@ def main():
 
     pct_gap = dollar_gap / current_risky_val if current_risky_val > 0 else 0
 
-    st.write("### Progress Toward Quarterly Target")
-    st.write(f"**Current Risky Value (scaled):** ${current_risky_val:,.2f}")
-    st.write(f"**Quarter-End Target:** ${quarter_goal:,.2f}")
-    st.write(f"**Gap:** ${dollar_gap:,.2f} ({pct_gap:.2%})")
+    # ================================
+    # CURRENT QUARTER ALLOCATION VIEW
+    # ================================
+    st.write("### Current Allocations (Quarter-Start Basis)")
+
+    # ---- quarter-start weights ----
+    hyb_w_r_q = float(hybrid_rw.loc[q_start])
+    hyb_w_s_q = float(hybrid_sw.loc[q_start])
+
+    pure_w_r_q = float(pure_sig_rw.loc[q_start])
+    pure_w_s_q = float(pure_sig_sw.loc[q_start])
+
+    # ---- user input starting capital ----
+    start_cap = st.number_input("Starting Capital for Quarter-Start Allocation", value=10000.0)
+
+    # ---- capital allocation at quarter start ----
+    hyb_r_cap = start_cap * hyb_w_r_q
+    hyb_s_cap = start_cap * hyb_w_s_q
+
+    pure_r_cap = start_cap * pure_w_r_q
+    pure_s_cap = start_cap * pure_w_s_q
+
+    # ---- percent progress toward quarterly target ----
+    past_risky = hyb_r_cap                           # risky bucket at quarter start
+    goal_risky = past_risky * (1 + quarterly_target) # SIG target line for quarter
+
+    # today's risky bucket (scaled proportionally using today's weights)
+    current_risky_today = float(hybrid_rw.iloc[-1] * (hyb_r_cap + hyb_s_cap))
+
+    pct_to_target = (current_risky_today / goal_risky) - 1
+
+    # ---- DISPLAY ----
+    st.write("**Hybrid SIG — Quarter-Start Weights**")
+    st.write({"Risk-On": hyb_w_r_q, "Risk-Off": hyb_w_s_q})
+
+    st.write("**Hybrid SIG — Quarter-Start Capital Allocation**")
+    st.write({
+        "Risk-On ($)": hyb_r_cap,
+        "Risk-Off ($)": hyb_s_cap,
+    })
+
+    st.write(f"**Hybrid — % Change Required Until Quarterly Target Hit:** {pct_to_target:.2%}")
+
+    st.write("---")
+
+    st.write("**Pure SIG — Quarter-Start Weights**")
+    st.write({"Risk-On": pure_w_r_q, "Risk-Off": pure_w_s_q})
+
+    st.write("**Pure SIG — Quarter-Start Capital Allocation**")
+    st.write({
+        "Risk-On ($)": pure_r_cap,
+        "Risk-Off ($)": pure_s_cap,
+    })
 
     # ================================
     # CURRENT WEIGHTS
