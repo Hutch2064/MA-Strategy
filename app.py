@@ -725,6 +725,10 @@ def main():
 
     # Diagnostics
     st.write(f"**Hybrid — Average Safe Allocation:** {avg_safe:.2%}")
+    # NEW LINE: Pure SIG average safe allocation
+    pure_avg_safe = pure_sig_sw.mean()
+    st.write(f"**Pure SIG — Average Safe Allocation:** {pure_avg_safe:.2%}")
+
     st.write(f"**Hybrid — Rebalance Events:** {hybrid_rebals}")
     st.write(f"**Pure SIG — Rebalance Events:** {pure_sig_rebals}")
 
