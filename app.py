@@ -163,23 +163,36 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
             safe_val  *= (1 + risk_off_returns.iloc[i])
 
             # ------------------------------
-            # QUARTERLY REBALANCE (TRUE 3Sig)
+            # TRUE 3SIG QUARTERLY REBALANCE
             # ------------------------------
             if i >= QUARTER_DAYS and (i % QUARTER_DAYS == 0):
 
-                past_risky = equity_curve[i - QUARTER_DAYS] * risky_w_series[i - QUARTER_DAYS]
-                risky_growth = (risky_val / past_risky) - 1 if past_risky > 0 else 0
+                past_total = equity_curve[i - QUARTER_DAYS]
+                past_risky = past_total * risky_w_series[i - QUARTER_DAYS]
 
-                if risky_growth > target_quarter:
-                    excess = (risky_growth - target_quarter) * past_risky
+                goal_risky = past_risky * (1 + target_quarter)
+
+                # SELL DOWN if above the signal line
+                if risky_val > goal_risky:
+                    excess = risky_val - goal_risky
                     risky_val -= excess
-                    safe_val += excess
+                    safe_val  += excess
                     rebalance_events += 1
 
-            total = risky_val + safe_val
-            risky_w = risky_val / total
-            safe_w  = safe_val  / total
+                # BUY UP if below the signal line
+                elif risky_val < goal_risky:
+                    needed = goal_risky - risky_val
 
+                    if safe_val >= needed:
+                        safe_val  -= needed
+                        risky_val += needed
+                    else:
+                        risky_val += safe_val
+                        safe_val = 0
+
+                    rebalance_events += 1
+            
+        
         # ====================================================
         # CASE 2: MA = RISK-OFF → FREEZE SIG ENGINE
         # ====================================================
