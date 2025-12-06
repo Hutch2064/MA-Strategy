@@ -170,9 +170,6 @@ def run_sig_engine(
                  risky_val = eq * w_r
                  safe_val  = eq * w_s
 
-                 frozen_risky = None
-                 frozen_safe  = None
-
             risky_val *= (1 + r_on)
             safe_val  *= (1 + r_off)
 
@@ -208,9 +205,9 @@ def run_sig_engine(
                 frozen_risky = risky_val
                 frozen_safe  = safe_val
 
-             # once MA is OFF, portfolio is fully defensive
-             risky_val = 0.0
-             safe_val  = eq
+            # once MA is OFF, portfolio is fully defensive
+            risky_val = 0.0
+            safe_val  = eq
 
             eq *= (1 + r_off)
             risky_w = 0.0
