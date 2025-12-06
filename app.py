@@ -608,6 +608,25 @@ def main():
     )
 
     st.dataframe(stat_table, use_container_width=True)
+    
+    # ============================================
+    # SIG STRATEGIES (HYBRID + PURE)
+    # ============================================
+
+    st.subheader("SIG Strategies (Hybrid + Pure)")
+
+    # Quarterly target
+    st.write(f"**Quarterly Target (Based on Buy & Hold CAGR):** {quarterly_target:.2%}")
+
+    # Current weights
+    st.write("### Current Allocations")
+
+    st.write("**Hybrid SIG Weights (today)**")
+    st.write({"Risk-On": hybrid_rw.iloc[-1], "Risk-Off": hybrid_sw.iloc[-1]})
+
+    st.write("**Pure SIG Weights (today)**")
+    st.write({"Risk-On": pure_sig_rw.iloc[-1], "Risk-Off": pure_sig_sw.iloc[-1]})
+
 
     # ============================================
     # EXTERNAL VALIDATION LINK
