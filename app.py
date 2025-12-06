@@ -205,22 +205,21 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
         # CASE 2: MA = RISK-OFF → FREEZE SIG ENGINE
         # ====================================================
         else:
-            # Save freeze only once
-            if frozen_risky_val is None:
-                frozen_risky_val = risky_val
-                frozen_safe_val = safe_val
+             # Freeze values only the first day MA turns OFF
+             if frozen_risky_val is None:
+                 frozen_risky_val = risky_val
+                 frozen_safe_val  = safe_val
 
-            # Entire portfolio follows risk-off returns
-            # Grow frozen values during RISK-OFF
-            frozen_risky_val *= (1 + risk_off_returns.iloc[i])
-            frozen_safe_val  *= (1 + risk_off_returns.iloc[i])
+             # Risky bucket stays frozen
+             risky_val = frozen_risky_val
 
-            total = frozen_risky_val + frozen_safe_val
-            risky_w = 0.0
-            safe_w  = 1.0
+             # Safe bucket compounds with risk-off returns
+             frozen_safe_val *= (1 + risk_off_returns.iloc[i])
+             safe_val = frozen_safe_val
 
-        # Always compute new total value at end of day
-        total = risky_val + safe_val
+             total = risky_val + safe_val
+             risky_w = 0.0
+             safe_w  = 1.0
 
         equity_curve.append(total)
         risky_w_series.append(risky_w)
