@@ -144,6 +144,8 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
     risky_w_series = []
     safe_w_series = []
     rebalance_events = 0
+    risky_val_series = []
+    safe_val_series = []
 
     for i, date in enumerate(dates):
         r_on  = risk_on_returns.iloc[i]
@@ -176,30 +178,31 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
             risky_val *= (1 + r_on)
             safe_val  *= (1 + r_off)
 
-            # TRUE 3SIG QUARTERLY REBALANCE (corrected)
-            if i > 0 and (i % QUARTER_DAYS == 0):
-                # Look back at SIG buckets only — NOT equity curve
-                past_risky = risky_w_series[i - QUARTER_DAYS]
-                past_safe  = safe_w_series[i - QUARTER_DAYS]
+            # ------------------------------
+            # TRUE 3SIG QUARTERLY REBALANCE
+            # ------------------------------
+            if i >= QUARTER_DAYS and (i % QUARTER_DAYS == 0):
 
-                past_total = (risky_val + safe_val) / ((1 + r_on) * (1 + r_off))
+            # Actual past dollar bucket values from 63 days ago
+            past_risky_val = risky_val_series[i - QUARTER_DAYS]
 
-                past_risky_val = past_total * past_risky
+            # Target risky bucket based on signal line
+            goal_risky = past_risky_val * (1 + target_quarter)
 
-                goal_risky = past_risky_val * (1 + target_quarter)
+            # SELL HIGH (risky above target)
+            if risky_val > goal_risky:
+                excess = risky_val - goal_risky
+                risky_val -= excess
+                safe_val  += excess
+                rebalance_events += 1
 
-                if risky_val > goal_risky:
-                    excess = risky_val - goal_risky
-                    risky_val -= excess
-                    safe_val  += excess
-                    rebalance_events += 1
-
-                elif risky_val < goal_risky:
-                    needed = goal_risky - risky_val
-                    move = min(needed, safe_val)
-                    safe_val  -= move
-                    risky_val += move
-                    rebalance_events += 1
+            # BUY LOW (risky below target)
+            elif risky_val < goal_risky:
+                needed = goal_risky - risky_val
+                move = min(needed, safe_val)
+                safe_val  -= move
+                risky_val += move
+                rebalance_events += 1
             
             # Actual portfolio follows SIG buckets while MA=ON
             eq = risky_val + safe_val
@@ -225,6 +228,8 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
         equity_curve.append(eq)
         risky_w_series.append(risky_w)
         safe_w_series.append(safe_w)
+        risky_val_series.append(risky_val)
+        safe_val_series.append(safe_val)
 
     return (
         pd.Series(equity_curve, index=dates),
