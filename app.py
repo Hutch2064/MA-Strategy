@@ -629,7 +629,7 @@ def main():
     st.write(f"**Days Until Rebalance:** {days_to_next_q}")
 
     # Current risky bucket value implied by % weights today:
-    current_risky_val = start_cap * pure_sig_rw.iloc[-1]
+    current_risky_val = quarter_start_cap * pure_sig_rw.iloc[-1]
 
     # Expected risky value at quarter-end:
     quarter_goal = current_risky_val * (1 + quarterly_target)
@@ -663,10 +663,10 @@ def main():
     pure_w_s_q = float(pure_sig_sw.loc[q_start])
     
     # ----- HYBRID -----
-    hyb_risky_start = start_cap * hyb_w_r_q
-    hyb_safe_start  = start_cap * hyb_w_s_q
+    hyb_risky_start = quarter_start_cap * hyb_w_r_q
+    hyb_safe_start  = quarter_start_cap * hyb_w_s_q
 
-    hyb_risky_today = start_cap * float(hybrid_rw.iloc[-1])
+    hyb_risky_today = quarter_start_cap * float(hybrid_rw.iloc[-1])
 
     hyb_gain_dollars = hyb_risky_today - hyb_risky_start
     hyb_gain_pct = hyb_gain_dollars / hyb_risky_start if hyb_risky_start > 0 else 0
@@ -689,10 +689,10 @@ def main():
     st.write("---")
 
     # ----- PURE SIG -----
-    pure_risky_start = start_cap * pure_w_r_q
-    pure_safe_start  = start_cap * pure_w_s_q
+    pure_risky_start = quarter_start_cap * pure_w_r_q
+    pure_safe_start  = quarter_start_cap * pure_w_s_q
 
-    pure_risky_today = start_cap * float(pure_sig_rw.iloc[-1])
+    pure_risky_today = quarter_start_cap * float(pure_sig_rw.iloc[-1])
 
     pure_gain_dollars = pure_risky_today - pure_risky_start
     pure_gain_pct = pure_gain_dollars / pure_risky_start if pure_risky_start > 0 else 0
