@@ -112,7 +112,14 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 # NEW: SIG ENGINE — TRUE JASON KELLY LOGIC (Enhanced)
 # ============================================================
 
-def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal):
+def run_sig_engine(
+    risk_on_returns,
+    risk_off_returns,
+    target_quarter,
+    ma_signal,
+    pure_sig_rw=None,
+    pure_sig_sw=None
+):
     """
     Hybrid SIG engine:
 
@@ -154,12 +161,11 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
         # ============================================
         if ma_on:
 
-            # Restore the frozen weights when MA turns back on
             if frozen_risky is not None:
-                total_frozen = frozen_risky + frozen_safe
-                if total_frozen > 0:
-                    w_r = frozen_risky / total_frozen
-                    w_s = frozen_safe  / total_frozen
+                # Instead of restoring frozen weights, sync to PURE SIG weights
+                if pure_sig_rw is not None and pure_sig_sw is not None:
+                    w_r = pure_sig_rw.iloc[i]
+                    w_s = pure_sig_sw.iloc[i]
                 else:
                     w_r = START_RISKY
                     w_s = START_SAFE
@@ -465,7 +471,9 @@ def main():
         risk_on_simple,
         risk_off_daily,
         quarterly_target,
-        sig
+        sig,
+        pure_sig_rw=pure_sig_rw,
+        pure_sig_sw=pure_sig_sw
     )
 
     hybrid_simple = hybrid_eq.pct_change().fillna(0)
