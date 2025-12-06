@@ -524,7 +524,7 @@ def main():
         risk_on_simple,
         risk_off_daily,
         quarterly_target,
-        pure_sig_signal
+        pure_sig_signal,
         flip_cost=effective_flip_cost
     )
 
