@@ -531,6 +531,24 @@ def main():
         0
     )
     
+    risk_stats = compute_stats(
+        risk_on_perf,
+        risk_on_simple,
+        risk_on_perf["DD_Series"],
+        np.zeros(len(risk_on_simple), dtype=bool),
+        0
+    )
+
+    hybrid_stats = compute_stats(
+        hybrid_perf,
+        hybrid_simple,
+        hybrid_perf["DD_Series"],
+        np.zeros(len(hybrid_simple), dtype=bool),
+        0
+    )
+
+    avg_safe = hybrid_sw.mean()
+    
     # ======================================================
     # TURNOVER FOR EACH STRATEGY
     # ======================================================
@@ -564,34 +582,7 @@ def main():
     risk_stats["Turnover"] = risk_on_turnover
     hybrid_stats["Turnover"] = hybrid_turnover
     pure_sig_stats["Turnover"] = pure_sig_turnover
-    
-    pure_sig_stats["QuarterlyTarget"] = quarterly_target
 
-    strat_stats = compute_stats(
-        perf,
-        best_result["returns"],
-        perf["DD_Series"],
-        best_result["flip_mask"],
-        trades_per_year
-    )
-
-    risk_stats = compute_stats(
-        risk_on_perf,
-        risk_on_simple,
-        risk_on_perf["DD_Series"],
-        np.zeros(len(risk_on_simple), dtype=bool),
-        0
-    )
-
-    hybrid_stats = compute_stats(
-        hybrid_perf,
-        hybrid_simple,
-        hybrid_perf["DD_Series"],
-        np.zeros(len(hybrid_simple), dtype=bool),
-        0
-    )
-
-    avg_safe = hybrid_sw.mean()
     # ============================================
     # METRIC TABLE — 4 COLUMNS
     # ============================================
