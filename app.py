@@ -183,9 +183,9 @@ def run_sig_engine(
                     risky_val += move
                     rebalance_events += 1
                     
-                 # === Quarterly drag fee (NEW STEP 3) ===
-                 quarter_fee = FLIP_COST * target_quarter
-                 eq *= (1 - quarter_fee)
+                # === Quarterly drag fee (NEW STEP 3) ===
+                quarter_fee = FLIP_COST * target_quarter
+                eq *= (1 - quarter_fee)
 
             eq = risky_val + safe_val
             risky_w = risky_val / eq if eq > 0 else 0
