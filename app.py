@@ -697,29 +697,29 @@ def main():
     
     st.write("---")
 
-# ----- PURE SIG -----
-pure_risky_start = start_cap * pure_w_r_q
-pure_safe_start  = start_cap * pure_w_s_q
+    # ----- PURE SIG -----
+    pure_risky_start = start_cap * pure_w_r_q
+    pure_safe_start  = start_cap * pure_w_s_q
 
-pure_risky_today = start_cap * float(pure_sig_rw.iloc[-1])
+    pure_risky_today = start_cap * float(pure_sig_rw.iloc[-1])
 
-pure_gain_dollars = pure_risky_today - pure_risky_start
-pure_gain_pct = pure_gain_dollars / pure_risky_start if pure_risky_start > 0 else 0
+    pure_gain_dollars = pure_risky_today - pure_risky_start
+    pure_gain_pct = pure_gain_dollars / pure_risky_start if pure_risky_start > 0 else 0
 
-pure_target = pure_risky_start * (1 + quarterly_target)
-pure_gap_dollars = pure_target - pure_risky_today
-pure_gap_pct = pure_gap_dollars / pure_risky_today if pure_risky_today > 0 else 0
+    pure_target = pure_risky_start * (1 + quarterly_target)
+    pure_gap_dollars = pure_target - pure_risky_today
+    pure_gap_pct = pure_gap_dollars / pure_risky_today if pure_risky_today > 0 else 0
 
-st.write("### Pure SIG — Quarter Progress")
-st.write({
-    "Risky Start ($)": pure_risky_start,
-    "Risky Today ($)": pure_risky_today,
-    "Gain ($)": pure_gain_dollars,
-    "Gain (%)": pure_gain_pct,
-    "Quarterly Target ($)": pure_target,
-    "More Needed ($)": pure_gap_dollars,
-    "More Needed (%)": pure_gap_pct,
-})
+    st.write("### Pure SIG — Quarter Progress")
+    st.write({
+        "Risky Start ($)": pure_risky_start,
+        "Risky Today ($)": pure_risky_today,
+        "Gain ($)": pure_gain_dollars,
+        "Gain (%)": pure_gain_pct,
+        "Quarterly Target ($)": pure_target,
+        "More Needed ($)": pure_gap_dollars,
+        "More Needed (%)": pure_gap_pct,
+    })
 
     # ================================
     # CURRENT WEIGHTS
