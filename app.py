@@ -556,27 +556,27 @@ def main():
     # MA Strategy turnover
     strat_turnover = compute_turnover(best_result["weights"])
 
-    # Sharpe-Optimal has no turnover (weights fixed)
+    # Sharpe-Optimal has no turnover
     sharp_turnover = 0.0
 
-    # Risk-On B&H also has no turnover
+    # Risk-On B&H has no turnover
     risk_on_turnover = 0.0
 
-    # Hybrid SIG turnover — build weight df
+    # Hybrid SIG turnover
     hybrid_weights_df = pd.DataFrame({
         "RiskOn": hybrid_rw,
         "RiskOff": hybrid_sw
     })
     hybrid_turnover = compute_turnover(hybrid_weights_df)
 
-    # Pure SIG turnover — build weight df
+    # Pure SIG turnover
     pure_sig_weights_df = pd.DataFrame({
         "RiskOn": pure_sig_rw,
         "RiskOff": pure_sig_sw
     })
     pure_sig_turnover = compute_turnover(pure_sig_weights_df)
 
-    # Attach turnovers to stats dicts
+    # Attach turnovers now that ALL stats dicts already exist
     strat_stats["Turnover"] = strat_turnover
     sharp_stats["Turnover"] = sharp_turnover
     risk_stats["Turnover"] = risk_on_turnover
