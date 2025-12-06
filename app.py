@@ -163,11 +163,26 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
 
             total_val = risky_val + safe_val
 
-            # Quarterly rebalance check
+            # Quarterly rebalance — only once we have enough history
             if i % QUARTER_DAYS == 0 and i > 0:
-                # Quarterly realized growth of risky bucket
-                # Approx: (value now / value 63 days ago) - 1
-                start_val = equity_curve[i-QUARTER_DAYS]
+
+                # Not enough data yet for a quarterly comparison
+                if i - QUARTER_DAYS < 0:
+                    pass
+                else:
+                    start_val = equity_curve[i - QUARTER_DAYS]
+                    quarter_growth = (total_val / start_val) - 1
+
+                    if quarter_growth > target_quarter:
+                    excess = (quarter_growth - target_quarter) * total_val
+                    safe_val += excess
+                    risky_val -= excess
+                    rebalance_events += 1
+
+                total_val = risky_val + safe_val
+                risky_w = risky_val / total_val
+                safe_w = safe_val / total_val
+                
                 quarter_growth = (total_val / start_val) - 1
 
                 if quarter_growth > target_quarter:
