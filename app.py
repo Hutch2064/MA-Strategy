@@ -490,24 +490,6 @@ def main():
         }
 
     # ============================================
-    # TURNOVER CALCULATOR
-    # ============================================
-
-    def compute_turnover(weights_df):
-        """
-        Academic turnover definition:
-        Turnover_t = 0.5 * sum(|w_t – w_{t-1}|),
-        Annualized by multiplying by 252.
-        """
-        w = weights_df.fillna(0).values
-        if len(w) < 2:
-            return 0.0
-        diffs = np.abs(w[1:] - w[:-1]).sum(axis=1)
-        daily_turnover = 0.5 * diffs
-        annual_turnover = daily_turnover.mean() * 252
-        return float(annual_turnover)
-
-    # ============================================
     # PURE SIG STRATEGY (NO MA FILTER)
     # ============================================
 
@@ -530,8 +512,9 @@ def main():
         np.zeros(len(pure_sig_simple), dtype=bool),
         0
     )
-    
-    # MA Strategy stats (missing before — required for metric table)
+
+    pure_sig_stats["QuarterlyTarget"] = quarterly_target
+
     strat_stats = compute_stats(
         perf,
         best_result["returns"],
@@ -557,34 +540,6 @@ def main():
     )
 
     avg_safe = hybrid_sw.mean()
-    
-    # ======================================================
-    # TURNOVER FOR EACH STRATEGY
-    # ======================================================
-
-    # MA Strategy turnover
-    strat_turnover = compute_turnover(best_result["weights"])
-
-    # Sharpe-Optimal has no turnover
-    sharp_turnover = 0.0
-
-    # Risk-On B&H has no turnover
-    risk_on_turnover = 0.0
-
-    # Hybrid SIG turnover
-    hybrid_weights_df = pd.DataFrame({
-        "RiskOn": hybrid_rw,
-        "RiskOff": hybrid_sw
-    })
-    hybrid_turnover = compute_turnover(hybrid_weights_df)
-
-    # Pure SIG turnover
-    pure_sig_weights_df = pd.DataFrame({
-        "RiskOn": pure_sig_rw,
-        "RiskOff": pure_sig_sw
-    })
-    pure_sig_turnover = compute_turnover(pure_sig_weights_df)
-
     # ============================================
     # METRIC TABLE — 4 COLUMNS
     # ============================================
@@ -604,7 +559,6 @@ def main():
         ("Kurtosis", "Kurtosis"),
         ("Trades per year", "Trades/year"),
         ("P/L per flip", "P/L per flip"),
-        ("Turnover / Year", "Turnover"),
     ]
 
     def fmt_pct(x): return f"{x:.2%}" if pd.notna(x) else "—"
