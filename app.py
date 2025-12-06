@@ -153,11 +153,19 @@ def run_sig_engine(
                      w_r = START_RISKY
                      w_s = START_SAFE
 
-                 # amount of risk being re-entered
+                 # target risky amount when returning to ON
                  target_risky_val = eq * w_r
-                 traded = abs(target_risky_val - frozen_safe)   # only the delta is traded
+                 current_risky_val = 0.0   # we exited risk when MA turned OFF
+
+                 traded = abs(target_risky_val - current_risky_val)
                  flip_cost_amount = traded * FLIP_COST
                  eq -= flip_cost_amount
+
+                 risky_val = eq * w_r
+                 safe_val  = eq * w_s
+
+                 frozen_risky = None
+                 frozen_safe  = None
 
                  risky_val = eq * w_r
                  safe_val  = eq * w_s
@@ -193,16 +201,20 @@ def run_sig_engine(
         else:
             # MA just turned OFF → sell risky portion
             if frozen_risky is None:
-            traded = risky_val     # amount being sold
-            flip_cost_amount = traded * FLIP_COST
-            eq -= flip_cost_amount
+                traded = risky_val     # amount being sold
+                flip_cost_amount = traded * FLIP_COST
+                eq -= flip_cost_amount
 
-            frozen_risky = risky_val
-            frozen_safe  = safe_val
+                frozen_risky = risky_val
+                frozen_safe  = safe_val
 
-    eq *= (1 + r_off)
-    risky_w = 0.0
-    safe_w  = 1.0
+             # once MA is OFF, portfolio is fully defensive
+             risky_val = 0.0
+             safe_val  = eq
+
+            eq *= (1 + r_off)
+            risky_w = 0.0
+            safe_w  = 1.0
 
         equity_curve.append(eq)
         risky_w_series.append(risky_w)
