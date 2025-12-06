@@ -119,7 +119,7 @@ def run_sig_engine(
     target_quarter,
     ma_signal,
     pure_sig_rw=None,
-    pure_sig_sw=None
+    pure_sig_sw=None,
     flip_cost=FLIP_COST
 ):
     dates = risk_on_returns.index
