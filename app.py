@@ -191,7 +191,11 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
                         safe_val = 0
 
                     rebalance_events += 1
-            
+                    
+            # Compute daily total + weights (RISK-ON)
+            total = risky_val + safe_val
+            risky_w = risky_val / total
+            safe_w  = safe_val / total
         
         # ====================================================
         # CASE 2: MA = RISK-OFF → FREEZE SIG ENGINE
