@@ -207,8 +207,11 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
                 frozen_safe_val = safe_val
 
             # Entire portfolio follows risk-off returns
-            total = (frozen_risky_val + frozen_safe_val) * (1 + risk_off_returns.iloc[i])
+            # Grow frozen values during RISK-OFF
+            frozen_risky_val *= (1 + risk_off_returns.iloc[i])
+            frozen_safe_val  *= (1 + risk_off_returns.iloc[i])
 
+            total = frozen_risky_val + frozen_safe_val
             risky_w = 0.0
             safe_w  = 1.0
 
