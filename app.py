@@ -25,9 +25,9 @@ RISK_OFF_WEIGHTS = {
 
 FLIP_COST = 0.00875
 
-QUARTER_DAYS = 63       # trading days per quarter
-START_RISKY = 0.60      # SIG initial risky allocation
-START_SAFE = 0.40       # SIG initial safe allocation
+QUARTER_DAYS = 63
+START_RISKY = 0.60
+START_SAFE = 0.40
 
 
 # ============================================
@@ -61,8 +61,7 @@ def build_portfolio_index(prices, weights_dict):
         if a in simple_rets.columns:
             idx_rets += simple_rets[a] * w
 
-    idx = (1 + idx_rets).cumprod()
-    return idx
+    return (1 + idx_rets).cumprod()
 
 
 # ============================================
@@ -108,6 +107,8 @@ def generate_testfol_signal_vectorized(price, ma, tol):
             sig[t] = not (px[t] < lower[t])
 
     return pd.Series(sig, index=ma.index).fillna(False)
+
+
 # ============================================================
 # NEW: SIG ENGINE — TRUE JASON KELLY LOGIC (Enhanced)
 # ============================================================
@@ -120,20 +121,6 @@ def run_sig_engine(
     pure_sig_rw=None,
     pure_sig_sw=None
 ):
-    """
-    Hybrid SIG engine:
-
-    - When MA is ON:
-        * Portfolio follows SIG buckets (risky vs safe).
-        * Both buckets grow with their respective returns.
-        * Quarterly, we rebalance the risky bucket toward the target "signal line".
-    - When MA is OFF:
-        * Actual portfolio goes 100% risk-off.
-        * SIG buckets are FROZEN (no growth).
-        * When MA turns back ON, we restore the same risky/safe WEIGHTS
-          we had right before MA turned OFF, scaled to the new equity level.
-    """
-
     dates = risk_on_returns.index
     n = len(dates)
 
@@ -156,13 +143,9 @@ def run_sig_engine(
         r_off = risk_off_returns.iloc[i]
         ma_on = bool(ma_signal.iloc[i])
 
-        # ============================================
-        # CASE 1 — MA = ON → SIG ACTIVE
-        # ============================================
         if ma_on:
 
             if frozen_risky is not None:
-                # Instead of restoring frozen weights, sync to PURE SIG weights
                 if pure_sig_rw is not None and pure_sig_sw is not None:
                     w_r = pure_sig_rw.iloc[i]
                     w_s = pure_sig_sw.iloc[i]
@@ -172,30 +155,23 @@ def run_sig_engine(
 
                 risky_val = eq * w_r
                 safe_val  = eq * w_s
-
                 frozen_risky = None
                 frozen_safe  = None
 
-            # Grow buckets normally
             risky_val *= (1 + r_on)
             safe_val  *= (1 + r_off)
 
-            # -----------------------------------------
-            # TRUE 3SIG QUARTERLY REBALANCE
-            # -----------------------------------------
             if i >= QUARTER_DAYS and (i % QUARTER_DAYS == 0):
 
                 past_risky_val = risky_val_series[i - QUARTER_DAYS]
                 goal_risky = past_risky_val * (1 + target_quarter)
 
-                # SELL HIGH
                 if risky_val > goal_risky:
                     excess = risky_val - goal_risky
                     risky_val -= excess
                     safe_val  += excess
                     rebalance_events += 1
 
-                # BUY LOW
                 elif risky_val < goal_risky:
                     needed = goal_risky - risky_val
                     move = min(needed, safe_val)
@@ -203,17 +179,11 @@ def run_sig_engine(
                     risky_val += move
                     rebalance_events += 1
 
-            # Update actual portfolio equity
             eq = risky_val + safe_val
             risky_w = risky_val / eq if eq > 0 else 0
             safe_w  = safe_val  / eq if eq > 0 else 0
 
-        # ============================================
-        # CASE 2 — MA = OFF → FULL RISK-OFF
-        # ============================================
         else:
-
-            # Freeze internal SIG buckets the moment MA flips off
             if frozen_risky is None:
                 frozen_risky = risky_val
                 frozen_safe  = safe_val
@@ -234,8 +204,6 @@ def run_sig_engine(
         pd.Series(safe_w_series, index=dates),
         rebalance_events
     )
-
-
 # ============================================
 # BACKTEST ENGINE (unchanged)
 # ============================================
@@ -258,8 +226,10 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
     cagr = (eq_curve.iloc[-1] / eq_curve.iloc[0]) ** (252 / len(eq_curve)) - 1
     vol = simple_returns.std() * np.sqrt(252)
     sharpe = (simple_returns.mean() * 252 - rf) / vol if vol > 0 else np.nan
+
     dd = eq_curve / eq_curve.cummax() - 1
     max_dd = dd.min()
+
     total_ret = eq_curve.iloc[-1] / eq_curve.iloc[0] - 1
 
     return {
@@ -336,16 +306,20 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights):
                 if idx % 200 == 0:
                     progress.progress(idx / total)
 
-                if sharpe_adj > best_sharpe or (sharpe_adj == best_sharpe and trades_per_year < best_trades):
+                if (
+                    sharpe_adj > best_sharpe or
+                    (sharpe_adj == best_sharpe and trades_per_year < best_trades)
+                ):
                     best_sharpe = sharpe_adj
                     best_trades = trades_per_year
                     best_cfg = (length, ma_type, tol)
                     best_result = result
 
     return best_cfg, best_result
+
+
 def normalize(eq):
     return eq / eq.iloc[0] * 10000
-
 # ============================================
 # STREAMLIT APP
 # ============================================
@@ -445,8 +419,7 @@ def main():
         "Total": sharp_perf["TotalReturn"],
         "MAR": sharp_perf["CAGR"] / abs(sharp_perf["MaxDrawdown"]) if sharp_perf["MaxDrawdown"] != 0 else np.nan,
         "TID": (sharp_perf["DD_Series"] < 0).mean(),
-        "PainGain": sharp_perf["CAGR"] / np.sqrt((sharp_perf["DD_Series"]**2).mean())
-                    if (sharp_perf["DD_Series"]**2).mean() != 0 else np.nan,
+        "PainGain": sharp_perf["CAGR"] / np.sqrt((sharp_perf["DD_Series"]**2).mean()) if (sharp_perf["DD_Series"]**2).mean() != 0 else np.nan,
         "Skew": sharp_returns.skew(),
         "Kurtosis": sharp_returns.kurt(),
         "Trades/year": 0.0,
@@ -458,9 +431,10 @@ def main():
     # ============================================
     # HYBRID SIG STRATEGY
     # ============================================
-    pure_sig_rw = None
+
+    pure_sig_rw = None   # placeholder: pure SIG weights will be computed later
     pure_sig_sw = None
-    
+
     risk_off_daily = pd.Series(0.0, index=simple_rets.index)
     for a, w in risk_off_weights.items():
         if a in simple_rets.columns:
@@ -485,10 +459,10 @@ def main():
     # ADVANCED METRICS
     # ============================================
 
-    def time_in_drawdown(dd):     return (dd < 0).mean()
-    def mar(c, dd):              return c / abs(dd) if dd != 0 else np.nan
-    def ulcer(dd):               return np.sqrt((dd**2).mean()) if (dd**2).mean() != 0 else np.nan
-    def pain_gain(c, dd):        return c / ulcer(dd) if ulcer(dd) != 0 else np.nan
+    def time_in_drawdown(dd): return (dd < 0).mean()
+    def mar(c, dd): return c / abs(dd) if dd != 0 else np.nan
+    def ulcer(dd): return np.sqrt((dd**2).mean()) if (dd**2).mean() != 0 else np.nan
+    def pain_gain(c, dd): return c / ulcer(dd) if ulcer(dd) != 0 else np.nan
 
     def compute_stats(perf, returns, dd, flips, tpy):
         return {
@@ -531,6 +505,7 @@ def main():
     )
 
     pure_sig_stats["QuarterlyTarget"] = quarterly_target
+
     strat_stats = compute_stats(
         perf,
         best_result["returns"],
@@ -556,7 +531,6 @@ def main():
     )
 
     avg_safe = hybrid_sw.mean()
-
     # ============================================
     # METRIC TABLE — 4 COLUMNS
     # ============================================
@@ -612,10 +586,9 @@ def main():
 
     st.subheader("SIG Strategies (Hybrid + Pure)")
 
-    # Core numbers needed for implementation
     st.write(f"**Quarterly Target (Based on Buy & Hold CAGR):** {quarterly_target:.2%}")
 
-    # Next quarterly rebalance date (fiscal calendar)
+    # Next quarterly rebalance date
     last_date = prices.index[-1]
     year = last_date.year
     q1 = pd.Timestamp(year, 3, 31)
@@ -628,14 +601,42 @@ def main():
     elif last_date <= q2:
         next_q = q2
     elif last_date <= q3:
-        next_q = q3;
+        next_q = q3
     else:
         next_q = pd.Timestamp(year + 1, 3, 31)
 
     days_to_next_q = (next_q - last_date).days
     st.write(f"**Next Quarterly SIG Rebalance:** {next_q.date()}  ({days_to_next_q} days from now)")
 
-    # Current weights
+    # ================================
+    # USER INPUT STARTING CAPITAL
+    # ================================
+    start_cap = st.number_input(
+        "Enter starting capital for SIG target progress calculation:",
+        min_value=1.0,
+        value=10000.0,
+        step=100.0
+    )
+
+    # Current risky bucket value implied by % weights today:
+    current_risky_val = start_cap * pure_sig_rw.iloc[-1]
+
+    # Expected risky value at quarter-end:
+    quarter_goal = current_risky_val * (1 + quarterly_target)
+
+    # Dollar distance to target:
+    dollar_gap = quarter_goal - current_risky_val
+
+    pct_gap = dollar_gap / current_risky_val if current_risky_val > 0 else 0
+
+    st.write("### Progress Toward Quarterly Target")
+    st.write(f"**Current Risky Value (scaled):** ${current_risky_val:,.2f}")
+    st.write(f"**Quarter-End Target:** ${quarter_goal:,.2f}")
+    st.write(f"**Gap:** ${dollar_gap:,.2f} ({pct_gap:.2%})")
+
+    # ================================
+    # CURRENT WEIGHTS
+    # ================================
     st.write("### Current Allocations")
 
     st.write("**Hybrid SIG Weights (today)**")
@@ -644,7 +645,7 @@ def main():
     st.write("**Pure SIG Weights (today)**")
     st.write({"Risk-On": pure_sig_rw.iloc[-1], "Risk-Off": pure_sig_sw.iloc[-1]})
 
-    # Diagnostic summary
+    # Diagnostics
     st.write(f"**Hybrid — Average Safe Allocation:** {avg_safe:.2%}")
     st.write(f"**Hybrid — Rebalance Events:** {hybrid_rebals}")
     st.write(f"**Pure SIG — Rebalance Events:** {pure_sig_rebals}")
@@ -652,7 +653,6 @@ def main():
     # ============================================
     # EXTERNAL VALIDATION LINK
     # ============================================
-
     st.subheader("External Sharpe Optimal Validation Link")
     st.markdown(
         f"**Quick Access:** [View the Sharpe Optimal recommended portfolio](https://testfol.io/optimizer?s=9y4FBdfW2oO)"
