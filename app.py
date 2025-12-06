@@ -340,7 +340,16 @@ def main():
     st.sidebar.header("Risk-OFF Portfolio")
     risk_off_tickers_str = st.sidebar.text_input("Tickers", ",".join(RISK_OFF_WEIGHTS.keys()))
     risk_off_weights_str = st.sidebar.text_input("Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values()))
-
+    
+    st.sidebar.header("SIG Settings")
+    quarter_start_cap = st.sidebar.number_input(
+        "Quarter-Start Capital",
+        min_value=1.0,
+        value=10000.0,
+        step=100.0
+    )
+    
+    
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
 
@@ -619,16 +628,6 @@ def main():
     st.write(f"**Quarter End (SIG Rebalance Date):** {q_end.date()}")
     st.write(f"**Days Until Rebalance:** {days_to_next_q}")
 
-    # ================================
-    # USER INPUT STARTING CAPITAL
-    # ================================
-    start_cap = st.number_input(
-        "Enter starting capital for SIG target progress calculation:",
-        min_value=1.0,
-        value=10000.0,
-        step=100.0
-    )
-
     # Current risky bucket value implied by % weights today:
     current_risky_val = start_cap * pure_sig_rw.iloc[-1]
 
@@ -662,15 +661,7 @@ def main():
 
     pure_w_r_q = float(pure_sig_rw.loc[q_start])
     pure_w_s_q = float(pure_sig_sw.loc[q_start])
-
-    # User-defined starting capital for quarter
-    start_cap = st.number_input(
-        "Quarter-Start Capital (Used for SIG Progress Calculations)",
-        min_value=1.0,
-        value=10000.0,
-        step=100.0
-    )
-
+    
     # ----- HYBRID -----
     hyb_risky_start = start_cap * hyb_w_r_q
     hyb_safe_start  = start_cap * hyb_w_s_q
