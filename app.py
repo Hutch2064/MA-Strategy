@@ -176,13 +176,15 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
             risky_val *= (1 + r_on)
             safe_val  *= (1 + r_off)
 
-            # ------------------------------
-            # TRUE 3SIG QUARTERLY REBALANCE
-            # ------------------------------
-            if i >= QUARTER_DAYS and (i % QUARTER_DAYS == 0):
-                past_eq       = equity_curve[i - QUARTER_DAYS]
-                past_risky_w  = risky_w_series[i - QUARTER_DAYS]
-                past_risky_val = past_eq * past_risky_w
+            # TRUE 3SIG QUARTERLY REBALANCE (corrected)
+            if i > 0 and (i % QUARTER_DAYS == 0):
+                # Look back at SIG buckets only — NOT equity curve
+                past_risky = risky_w_series[i - QUARTER_DAYS]
+                past_safe  = safe_w_series[i - QUARTER_DAYS]
+
+                past_total = (risky_val + safe_val) / ((1 + r_on) * (1 + r_off))
+
+                past_risky_val = past_total * past_risky
 
                 goal_risky = past_risky_val * (1 + target_quarter)
 
@@ -191,13 +193,14 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
                     risky_val -= excess
                     safe_val  += excess
                     rebalance_events += 1
+
                 elif risky_val < goal_risky:
                     needed = goal_risky - risky_val
                     move = min(needed, safe_val)
                     safe_val  -= move
                     risky_val += move
                     rebalance_events += 1
-
+            
             # Actual portfolio follows SIG buckets while MA=ON
             eq = risky_val + safe_val
             risky_w = risky_val / eq if eq > 0 else 0.0
