@@ -161,7 +161,11 @@ def run_sig_engine(risk_on_returns, risk_off_returns, target_quarter, ma_signal)
             # Apply daily returns
             risky_val *= (1 + risk_on_returns.iloc[i])
             safe_val  *= (1 + risk_off_returns.iloc[i])
+            # Compute total portfolio value during RISK-ON
+            total = risky_val + safe_val
 
+            risky_w = risky_val / total if total > 0 else 0
+            safe_w  = safe_val  / total if total > 0 else 0
             # ------------------------------
             # TRUE 3SIG QUARTERLY REBALANCE
             # ------------------------------
