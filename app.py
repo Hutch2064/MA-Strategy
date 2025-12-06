@@ -500,7 +500,9 @@ def main():
         np.zeros(len(pure_sig_simple), dtype=bool),
         0
     )
-
+    # Add SIG quarterly target to stats
+    pure_sig_stats["QuarterlyTarget"] = quarterly_target
+    
     strat_stats = compute_stats(
         perf,
         best_result["returns"],
@@ -589,7 +591,7 @@ def main():
     # HYBRID DIAGNOSTICS
     # ============================================
 
-    st.subheader("Hybrid SIG Engine Diagnostics")
+    st.write(f"**Quarterly Target (based on Buy & Hold CAGR):** {quarterly_target:.2%}")
     st.write(f"**Average Safe Allocation:** {avg_safe:.2%}")
     st.write("**Final Risk-On Allocation:**")
     st.write(hybrid_rw.iloc[-1])
