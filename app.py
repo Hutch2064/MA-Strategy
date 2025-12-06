@@ -588,25 +588,36 @@ def main():
 
     st.write(f"**Quarterly Target (Based on Buy & Hold CAGR):** {quarterly_target:.2%}")
 
-    # Next quarterly rebalance date
-    last_date = prices.index[-1]
-    year = last_date.year
-    q1 = pd.Timestamp(year, 3, 31)
-    q2 = pd.Timestamp(year, 6, 30)
-    q3 = pd.Timestamp(year, 9, 30)
-    q4 = pd.Timestamp(year, 12, 31)
+    # =====================================================
+    # TRUE QUARTERLY REBALANCE LOGIC BASED ON LAST DATA DATE
+    # =====================================================
 
-    if last_date <= q1:
-        next_q = q1
-    elif last_date <= q2:
-        next_q = q2
-    elif last_date <= q3:
-        next_q = q3
+    last_date = prices.index[-1].to_pydatetime()
+
+    # Determine the quarter for last_date
+    m = last_date.month
+
+    if m in [1, 2, 3]:
+        q_start = pd.Timestamp(last_date.year, 1, 1)
+        q_end   = pd.Timestamp(last_date.year, 3, 31)
+    elif m in [4, 5, 6]:
+        q_start = pd.Timestamp(last_date.year, 4, 1)
+        q_end   = pd.Timestamp(last_date.year, 6, 30)
+    elif m in [7, 8, 9]:
+        q_start = pd.Timestamp(last_date.year, 7, 1)
+        q_end   = pd.Timestamp(last_date.year, 9, 30)
     else:
-        next_q = pd.Timestamp(year + 1, 3, 31)
+        q_start = pd.Timestamp(last_date.year, 10, 1)
+        q_end   = pd.Timestamp(last_date.year, 12, 31)
+
+    # Next SIG rebalance = end of the quarter you are currently in
+    next_q = q_end
 
     days_to_next_q = (next_q - last_date).days
-    st.write(f"**Next Quarterly SIG Rebalance:** {next_q.date()}  ({days_to_next_q} days from now)")
+
+    st.write(f"**Quarter Start:** {q_start.date()}")
+    st.write(f"**Quarter End (SIG Rebalance Date):** {q_end.date()}")
+    st.write(f"**Days Until Rebalance:** {days_to_next_q}")
 
     # ================================
     # USER INPUT STARTING CAPITAL
