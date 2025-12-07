@@ -448,60 +448,6 @@ def main():
     sig = best_result["signal"]
     perf = best_result["performance"]
 
-    # ============================================================
-    # AUTOMATED HYBRID STRATEGY DECISION BLOCK
-    # ============================================================
-
-    st.subheader("Automated Hybrid Strategy Decision")
-
-    # 1. MA Regime Today
-    latest_signal = sig.iloc[-1]
-    regime = "RISK-ON" if latest_signal else "RISK-OFF"
-    st.write(f"### Current MA Regime: **{regime}**")
-
-    # 2. Recommended Hybrid Allocation TODAY
-    hyb_risk_today = START_RISKY if latest_signal else 0.0
-    hyb_safe_today = 1 - hyb_risk_today
-    st.write(f"**Hybrid Allocation Today → Risky: {hyb_risk_today:.0%}, Safe: {hyb_safe_today:.0%}**")
-
-    # 3. Quarterly Target Check
-    st.write("### SIG Quarterly Target Check")
-    st.write(f"**Quarterly Target Growth:** {quarterly_target:.2%}")
-
-    # Compute gap for each account
-    prog_auto_1 = compute_quarter_progress(risky_start_1, risky_today_1, quarterly_target)
-    prog_auto_2 = compute_quarter_progress(risky_start_2, risky_today_2, quarterly_target)
-    prog_auto_3 = compute_quarter_progress(risky_start_3, risky_today_3, quarterly_target)
-
-    auto_prog = pd.concat([
-        pd.DataFrame.from_dict(prog_auto_1, orient='index', columns=['Account 1']),
-        pd.DataFrame.from_dict(prog_auto_2, orient='index', columns=['Account 2']),
-        pd.DataFrame.from_dict(prog_auto_3, orient='index', columns=['Account 3']),
-    ], axis=1)
-
-    auto_prog.loc["Gap (%)"] = auto_prog.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
-    st.dataframe(auto_prog)
-
-    # 4. AUTOMATED REBALANCE RECOMMENDATION
-    def rebalance_text(gap):
-        if gap > 0:
-            return f"Increase risky sleeve by **${gap:,.2f}**"
-        elif gap < 0:
-            return f"Decrease risky sleeve by **${abs(gap):,.2f}**"
-        return "No rebalance needed."
-
-    st.write("### Automated Rebalance Recommendation")
-
-    st.write(f"**Account 1:** {rebalance_text(prog_auto_1['Gap ($)'])}")
-    st.write(f"**Account 2:** {rebalance_text(prog_auto_2['Gap ($)'])}")
-    st.write(f"**Account 3:** {rebalance_text(prog_auto_3['Gap ($)'])}")
-    
-    # 5. Print actual MA signal history for transparency
-    st.write("### Full MA Signal History")
-    st.write(sig.astype(int).to_frame("Signal"))
-
-    # ============================================================
-
     # ============================================
     # ALWAYS-ON RISK-ON PERFORMANCE
     # ============================================
@@ -572,7 +518,59 @@ def main():
 
     bh_cagr = (risk_on_eq.iloc[-1] / risk_on_eq.iloc[0]) ** (252/len(risk_on_eq)) - 1
     quarterly_target = (1 + bh_cagr)**(1/4) - 1
+    
+    quarterly_target = (1 + bh_cagr)**(1/4) - 1
 
+    # ============================================================
+    # AUTOMATED HYBRID STRATEGY DECISION BLOCK
+    # ============================================================
+
+    st.subheader("Automated Hybrid Strategy Decision")
+
+    # 1. MA Regime Today
+    latest_signal = sig.iloc[-1]
+    regime = "RISK-ON" if latest_signal else "RISK-OFF"
+    st.write(f"### Current MA Regime: **{regime}**")
+
+    # 2. Recommended Hybrid Allocation TODAY
+    hyb_risk_today = START_RISKY if latest_signal else 0.0
+    hyb_safe_today = 1 - hyb_risk_today
+    st.write(f"**Hybrid Allocation Today → Risky: {hyb_risk_today:.0%}, Safe: {hyb_safe_today:.0%}**")
+
+    # 3. Quarterly Target Check
+    st.write("### SIG Quarterly Target Check")
+    st.write(f"**Quarterly Target Growth:** {quarterly_target:.2%}")
+
+    prog_auto_1 = compute_quarter_progress(risky_start_1, risky_today_1, quarterly_target)
+    prog_auto_2 = compute_quarter_progress(risky_start_2, risky_today_2, quarterly_target)
+    prog_auto_3 = compute_quarter_progress(risky_start_3, risky_today_3, quarterly_target)
+
+    auto_prog = pd.concat([
+        pd.DataFrame.from_dict(prog_auto_1, orient='index', columns=['Account 1']),
+        pd.DataFrame.from_dict(prog_auto_2, orient='index', columns=['Account 2']),
+        pd.DataFrame.from_dict(prog_auto_3, orient='index', columns=['Account 3']),
+    ], axis=1)
+
+    auto_prog.loc["Gap (%)"] = auto_prog.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
+    st.dataframe(auto_prog)
+
+    def rebalance_text(gap):
+        if gap > 0:
+            return f"Increase risky sleeve by **${gap:,.2f}**"
+        elif gap < 0:
+            return f"Decrease risky sleeve by **${abs(gap):,.2f}**"
+        return "No rebalance needed."
+
+    st.write("### Automated Rebalance Recommendation")
+    st.write(f"**Account 1:** {rebalance_text(prog_auto_1['Gap ($)'])}")
+    st.write(f"**Account 2:** {rebalance_text(prog_auto_2['Gap ($)'])}")
+    st.write(f"**Account 3:** {rebalance_text(prog_auto_3['Gap ($)'])}")
+
+    st.write("### Full MA Signal History")
+    st.write(sig.astype(int).to_frame("Signal"))
+
+# ============================================================
+    
     hybrid_eq, hybrid_rw, hybrid_sw, hybrid_rebals = run_sig_engine(
         risk_on_simple,
         risk_off_daily,
