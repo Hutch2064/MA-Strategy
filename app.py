@@ -601,6 +601,13 @@ def main():
             alloc[t] = start_cap * w
         return alloc
 
+
+    def compute_ma_allocations(start_cap, weight_row):
+        alloc = {}
+        for ticker, w in weight_row.items():
+            alloc[ticker] = start_cap * w
+        return alloc
+
     def add_percentage_column(alloc_dict):
         df = pd.DataFrame.from_dict(alloc_dict, orient="index", columns=["$"])
 
@@ -660,7 +667,14 @@ def main():
     sharpe_alloc_1 = compute_sharpe_opt_alloc(current_cap_1, risk_on_px.columns, w_opt)
     sharpe_alloc_2 = compute_sharpe_opt_alloc(current_cap_2, risk_on_px.columns, w_opt)
     sharpe_alloc_3 = compute_sharpe_opt_alloc(current_cap_3, risk_on_px.columns, w_opt)
-        
+
+    # NEW: Strategy 5 – MA Strategy Allocation (today's MA weights)
+    ma_w_today = best_result["weights"].iloc[-1]  # last row = today's weights
+
+    ma_alloc_1 = compute_ma_allocations(current_cap_1, ma_w_today)
+    ma_alloc_2 = compute_ma_allocations(current_cap_2, ma_w_today)
+    ma_alloc_3 = compute_ma_allocations(current_cap_3, ma_w_today)
+    
     # ============================================
     # METRIC TABLE — 4 COLUMNS
     # ============================================
@@ -840,6 +854,11 @@ def main():
 
         st.write("### Sharpe-Optimal Allocation")
         st.dataframe(add_percentage_column(sharpe_alloc_1))
+        
+        st.write("### MA Strategy Allocation")
+        st.dataframe(add_percentage_column(ma_alloc_1))
+
+
 
 
     with tab2:
@@ -855,6 +874,8 @@ def main():
         st.write("### Sharpe-Optimal Allocation")
         st.dataframe(add_percentage_column(sharpe_alloc_2))
 
+        st.write("### MA Strategy Allocation")
+        st.dataframe(add_percentage_column(ma_alloc_2))
 
     with tab3:
         st.write("### Hybrid SIG Allocation")
@@ -868,6 +889,9 @@ def main():
 
         st.write("### Sharpe-Optimal Allocation")
         st.dataframe(add_percentage_column(sharpe_alloc_3))
+
+        st.write("### MA Strategy Allocation")
+        st.dataframe(add_percentage_column(ma_alloc_3))
 
         st.write(f"**Hybrid — Rebalance Events:** {hybrid_rebals}")
 
