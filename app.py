@@ -335,15 +335,24 @@ def normalize(eq):
     return eq / eq.iloc[0] * 10000
 
 # ===== NEW: Quarter Progress Helper =====
-def compute_quarter_progress(q_start, q_today, quarterly_target):
-    target_value = q_start * (1 + quarterly_target)
-    gap = target_value - q_today
-    pct_gap = gap / q_start if q_start > 0 else 0
+def compute_quarter_progress(q_start, q_today, w_r_start, w_r_today, quarterly_target):
+    # risky bucket at start based on SIG weight at quarter start
+    risky_start = q_start * w_r_start
+
+    # risky bucket today based on current SIG weight
+    risky_today = q_today * w_r_today
+
+    # SIG target applies only to risky bucket
+    risky_target = risky_start * (1 + quarterly_target)
+
+    # gap vs target
+    gap = risky_target - risky_today
+    pct_gap = gap / risky_start if risky_start > 0 else 0
 
     return {
-        "Quarter Start ($)": q_start,
-        "Today ($)": q_today,
-        "Quarterly Target ($)": target_value,
+        "Risky Start ($)": risky_start,
+        "Risky Today ($)": risky_today,
+        "Quarterly Target ($)": risky_target,
         "Gap ($)": gap,
         "Gap (%)": pct_gap
     }
@@ -814,23 +823,26 @@ def main():
     q_start_idx = pure_sig_rw.index[(abs(pure_sig_rw.index - q_start)).argmin()]
 
     prog1 = compute_quarter_progress(
-        q_start_1,
-        q_today_1,
-        quarterly_target
+        q_start_1, q_today_1,
+        w_r_start=float(pure_sig_rw.loc[q_start_idx]),
+        w_r_today=float(pure_sig_rw.iloc[-1]),
+        quarterly_target=quarterly_target
     )
-    
+
     prog2 = compute_quarter_progress(
-        q_start_2,
-        q_today_2,
-        quarterly_target
+        q_start_2, q_today_2,
+        w_r_start=float(pure_sig_rw.loc[q_start_idx]),
+        w_r_today=float(pure_sig_rw.iloc[-1]),
+        quarterly_target=quarterly_target
     )
 
     prog3 = compute_quarter_progress(
-        q_start_3,
-        q_today_3,
-        quarterly_target
-    )
-
+        q_start_3, q_today_3,
+        w_r_start=float(pure_sig_rw.loc[q_start_idx]),
+        w_r_today=float(pure_sig_rw.iloc[-1]),
+        quarterly_target=quarterly_target
+    )    
+    
     df1 = pd.DataFrame.from_dict(prog1, orient="index", columns=["Account 1"])
     df2 = pd.DataFrame.from_dict(prog2, orient="index", columns=["Account 2"])
     df3 = pd.DataFrame.from_dict(prog3, orient="index", columns=["Account 3"])
