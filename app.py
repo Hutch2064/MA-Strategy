@@ -333,6 +333,21 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
 
 def normalize(eq):
     return eq / eq.iloc[0] * 10000
+
+# ===== NEW: Quarter Progress Helper =====
+def compute_quarter_progress(q_start, q_today, quarterly_target):
+    target_value = q_start * (1 + quarterly_target)
+    gap = target_value - q_today
+    pct_gap = gap / q_start if q_start > 0 else 0
+
+    return {
+        "Quarter Start ($)": q_start,
+        "Today ($)": q_today,
+        "Quarterly Target ($)": target_value,
+        "Gap ($)": gap,
+        "Gap (%)": pct_gap
+    }
+
 # ============================================
 # STREAMLIT APP
 # ============================================
@@ -772,6 +787,25 @@ def main():
     # ============================================
 
     st.subheader("SIG Metrics & Rebalancing")
+
+    # ===== NEW: Quarter Progress Table =====
+    st.write("### Quarter Progress — SIG Tracking")
+
+    prog1 = compute_quarter_progress(q_start_1, q_today_1, quarterly_target)
+    prog2 = compute_quarter_progress(q_start_2, q_today_2, quarterly_target)
+    prog3 = compute_quarter_progress(q_start_3, q_today_3, quarterly_target)
+
+    df1 = pd.DataFrame.from_dict(prog1, orient="index", columns=["Account 1"])
+    df2 = pd.DataFrame.from_dict(prog2, orient="index", columns=["Account 2"])
+    df3 = pd.DataFrame.from_dict(prog3, orient="index", columns=["Account 3"])
+
+    progress_table = pd.concat([df1, df2, df3], axis=1)
+
+    progress_table.loc["Gap (%)"] = progress_table.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
+
+    st.dataframe(progress_table, use_container_width=True)
+    st.write("---")
+    # ===== END NEW TABLE =====
 
     st.write(f"**Quarterly Target (Based on Buy & Hold CAGR):** {quarterly_target:.2%}")
 
