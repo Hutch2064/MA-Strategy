@@ -829,46 +829,33 @@ def main():
     # ============================================
 
     # =====================================================
-    # QUARTERLY REBALANCE LOGIC USING USER'S START DATE
+    # ROLLING 63-DAY REBALANCE LOGIC — STARTS FROM USER DATE
     # =====================================================
 
-    st.subheader("Quarterly Rebalance Timing")
+    st.subheader("Rebalance Timing (Every 63 Days from Start)")
 
     strategy_start_date = pd.Timestamp(strategy_start_date)
+    today = prices.index[-1]   # use market's latest available date
 
-    # Determine quarter of user's start date
-    start_month = strategy_start_date.month
+    # First scheduled rebalance is 63 days after start
+    next_rebal = strategy_start_date + pd.Timedelta(days=QUARTER_DAYS)
 
-    if start_month in [1, 2, 3]:
-        q_start = pd.Timestamp(strategy_start_date.year, 1, 1)
-        q_end   = pd.Timestamp(strategy_start_date.year, 3, 31)
-    elif start_month in [4, 5, 6]:
-        q_start = pd.Timestamp(strategy_start_date.year, 4, 1)
-        q_end   = pd.Timestamp(strategy_start_date.year, 6, 30)
-    elif start_month in [7, 8, 9]:
-        q_start = pd.Timestamp(strategy_start_date.year, 7, 1)
-        q_end   = pd.Timestamp(strategy_start_date.year, 9, 30)
+    # If that date is already in the past, keep stepping forward by 63-day blocks
+    while next_rebal <= today:
+        next_rebal += pd.Timedelta(days=QUARTER_DAYS)
+
+    # Days until next rebalance
+    days_to_rebal = (next_rebal - today).days
+
+    st.write(f"**Next Rebalance Date:** {next_rebal.date()}")
+
+    if days_to_rebal > 0:
+        st.write(f"**Days Remaining:** {days_to_rebal} days")
+    elif days_to_rebal == 0:
+        st.write("**Rebalance TODAY.**")
     else:
-        q_start = pd.Timestamp(strategy_start_date.year, 10, 1)
-        q_end   = pd.Timestamp(strategy_start_date.year, 12, 31)
-
-    # If user started mid-quarter, rebalance at the NEXT quarter boundary
-    if strategy_start_date > q_start:
-        next_q = q_end
-    else:
-        # user started before quarter, first rebalance occurs at q_end
-        next_q = q_end
-
-    # Compute days remaining until next rebalance
-    today = prices.index[-1]   # or pd.Timestamp.today() if you want real-time
-    days_to_next_q = (next_q - today).days
-
-    st.write(f"**Next Quarterly Rebalance Date:** {next_q.date()}")
-
-    if days_to_next_q >= 0:
-        st.write(f"**Days Until Next Rebalance:** {days_to_next_q} days")
-    else:
-        st.write("**Quarter has ended — next rebalance should occur now.**")
+        # Should not happen due to while loop, but included for robustness
+        st.write("**Rebalance overdue — perform immediately.**")
     
     
     st.subheader("SIG Metrics & Rebalancing")
