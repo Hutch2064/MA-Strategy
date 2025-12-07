@@ -702,10 +702,10 @@ def main():
     # TODAY-BASED ALLOCATION TABLES
     # ============================================
 
-    # Reinterpret user inputs as today's actual account values
-    current_cap_1 = quarter_start_cap_1
-    current_cap_2 = quarter_start_cap_2
-    current_cap_3 = quarter_start_cap_3
+    # TODAY-BASED ALLOCATION TABLES (use SIG 'Value Today' inputs)
+    current_cap_1 = q_today_1
+    current_cap_2 = q_today_2
+    current_cap_3 = q_today_3
 
     # Strategy 1: Hybrid SIG (uses today's hyb_risk / hyb_safe)
     hyb_alloc_1 = compute_allocations(current_cap_1, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
