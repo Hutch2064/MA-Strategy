@@ -604,28 +604,10 @@ def main():
     def add_percentage_column(alloc_dict):
         df = pd.DataFrame.from_dict(alloc_dict, orient="index", columns=["$"])
 
-        total_cap = df["$"].sum()
+        total_portfolio = df["$"].sum()
 
-        # ------ % of total portfolio ------
-        df["% Total"] = df["$"] / total_cap if total_cap > 0 else 0
-
-        # ------ % of each bucket ------
-        risky_total = df.loc["Total Risky $", "$"]
-        safe_total  = df.loc["Total Safe $", "$"]
-
-        df["% Bucket"] = ""
-
-        # Risky tickers
-        for ticker in RISK_ON_WEIGHTS.keys():
-            df.loc[ticker, "% Bucket"] = df.loc[ticker, "$"] / risky_total if risky_total > 0 else 0
-
-        # Safe tickers
-        for ticker in RISK_OFF_WEIGHTS.keys():
-            df.loc[ticker, "% Bucket"] = df.loc[ticker, "$"] / safe_total if safe_total > 0 else 0
-
-        # Totals = 100% bucket
-        df.loc["Total Risky $", "% Bucket"] = 1.0
-        df.loc["Total Safe $", "% Bucket"] = 1.0
+        # Every row gets its % of total portfolio
+        df["% TotalPortfolio"] = df["$"] / total_portfolio if total_portfolio > 0 else 0
 
         return df
     
