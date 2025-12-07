@@ -536,11 +536,6 @@ def main():
     regime = "RISK-ON" if latest_signal else "RISK-OFF"
     st.write(f"### Current MA Regime: **{regime}**")
 
-    # 2. Recommended Hybrid Allocation TODAY
-    hyb_risk_today = START_RISKY if latest_signal else 0.0
-    hyb_safe_today = 1 - hyb_risk_today
-    st.write(f"**Hybrid Allocation Today → Risky: {hyb_risk_today:.0%}, Safe: {hyb_safe_today:.0%}**")
-
     # 3. Quarterly Target Check
     st.write("### SIG Quarterly Target Check")
     st.write(f"**Quarterly Target Growth:** {quarterly_target:.2%}")
@@ -560,12 +555,12 @@ def main():
 
     def rebalance_text(gap):
         if gap > 0:
-            return f"Increase risky sleeve by **${gap:,.2f}**"
+            return f"Increase Deployed sleeve by **${gap:,.2f}**"
         elif gap < 0:
-            return f"Decrease risky sleeve by **${abs(gap):,.2f}**"
+            return f"Decrease Deployed sleeve by **${abs(gap):,.2f}**"
         return "No rebalance needed."
 
-    st.write("### Automated Rebalance Recommendation")
+    st.write("###Rebalance Recommendation")
     st.write(f"**Taxable:** {rebalance_text(prog_auto_1['Gap ($)'])}")
     st.write(f"**Tax-Sheltered:** {rebalance_text(prog_auto_2['Gap ($)'])}")
     st.write(f"**Joint (Taxable):** {rebalance_text(prog_auto_3['Gap ($)'])}")
@@ -786,7 +781,7 @@ def main():
     # METRIC TABLE — 4 COLUMNS
     # ============================================
 
-    st.subheader("Strategy vs. Sharpe-Optimal vs. Risk-ON vs. Hybrid vs. Pure SIG")
+    st.subheader("Ma Strategy vs. Sharpe-Opt B&H (Limited 9/17/2014) vs. Buy & Hold vs. Hybrid MA/SIG vs. Pure SIG")
 
     rows = [
         ("CAGR", "CAGR"),
