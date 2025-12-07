@@ -781,37 +781,12 @@ def main():
     # SIG STRATEGIES (PURE + HYBRID TOGETHER)
     # ============================================
 
-    st.subheader("SIG Metrics & Rebalancing")
-
-    # ===== NEW: Quarter Progress Table =====
-    st.write("### Quarter Progress — SIG Tracking")
-
-    prog1 = compute_quarter_progress(q_start_1, q_today_1, quarterly_target)
-    prog2 = compute_quarter_progress(q_start_2, q_today_2, quarterly_target)
-    prog3 = compute_quarter_progress(q_start_3, q_today_3, quarterly_target)
-
-    df1 = pd.DataFrame.from_dict(prog1, orient="index", columns=["Account 1"])
-    df2 = pd.DataFrame.from_dict(prog2, orient="index", columns=["Account 2"])
-    df3 = pd.DataFrame.from_dict(prog3, orient="index", columns=["Account 3"])
-
-    progress_table = pd.concat([df1, df2, df3], axis=1)
-
-    progress_table_fmt = progress_table.copy()
-    progress_table_fmt.loc["Gap (%)"] = progress_table.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
-    st.dataframe(progress_table_fmt, width="stretch")
-
-    st.write("---")
-    # ===== END NEW TABLE =====
-
-    st.write(f"**Quarterly Target (Based on Buy & Hold CAGR):** {quarterly_target:.2%}")
 
     # =====================================================
     # TRUE QUARTERLY REBALANCE LOGIC BASED ON LAST DATA DATE
     # =====================================================
 
     last_date = prices.index[-1].to_pydatetime()
-
-    # Determine the quarter for last_date
     m = last_date.month
 
     if m in [1, 2, 3]:
@@ -827,25 +802,51 @@ def main():
         q_start = pd.Timestamp(last_date.year, 10, 1)
         q_end   = pd.Timestamp(last_date.year, 12, 31)
 
-    # Next SIG rebalance = end of the quarter you are currently in
     next_q = q_end
-
     days_to_next_q = (next_q - last_date).days
+    
+    st.subheader("SIG Metrics & Rebalancing")
 
-    st.write(f"**Quarter Start:** {q_start.date()}")
-    st.write(f"**Quarter End (Rebalance Date):** {q_end.date()}")
-    st.write(f"**Days Until Rebalance:** {days_to_next_q}")
+    # ===== NEW: Quarter Progress Table =====
+    st.write("### Quarter Progress — SIG Tracking")
 
-    # Current risky bucket value implied by % weights today:
-    current_risky_val = q_today_1 * pure_sig_rw.iloc[-1]
+    # Convert quarter start date to nearest index in SIG weights
+    q_start_idx = pure_sig_rw.index[(abs(pure_sig_rw.index - q_start)).argmin()]
 
-    # Expected risky value at quarter-end:
-    quarter_goal = current_risky_val * (1 + quarterly_target)
+    prog1 = compute_quarter_progress(
+        q_start_1, q_today_1,
+        w_r_start=float(pure_sig_rw.loc[q_start_idx]),
+        w_r_today=float(pure_sig_rw.iloc[-1]),
+        quarterly_target=quarterly_target
+    )
+    prog2 = compute_quarter_progress(
+        q_start_2, q_today_2,
+        w_r_start=float(pure_sig_rw.loc[q_start_idx]),
+        w_r_today=float(pure_sig_rw.iloc[-1]),
+        quarterly_target=quarterly_target
+    )
 
-    # Dollar distance to target:
-    dollar_gap = quarter_goal - current_risky_val
+    prog3 = compute_quarter_progress(
+        q_start_3, q_today_3,
+        w_r_start=float(pure_sig_rw.loc[q_start_idx]),
+        w_r_today=float(pure_sig_rw.iloc[-1]),
+        quarterly_target=quarterly_target
+    )
 
-    pct_gap = dollar_gap / current_risky_val if current_risky_val > 0 else 0
+    df1 = pd.DataFrame.from_dict(prog1, orient="index", columns=["Account 1"])
+    df2 = pd.DataFrame.from_dict(prog2, orient="index", columns=["Account 2"])
+    df3 = pd.DataFrame.from_dict(prog3, orient="index", columns=["Account 3"])
+
+    progress_table = pd.concat([df1, df2, df3], axis=1)
+
+    progress_table_fmt = progress_table.copy()
+    progress_table_fmt.loc["Gap (%)"] = progress_table.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
+    st.dataframe(progress_table_fmt, width="stretch")
+
+    st.write("---")
+    # ===== END NEW TABLE =====
+
+    st.write(f"**Quarterly Target (Based on Buy & Hold CAGR):** {quarterly_target:.2%}")
 
     # ================================
     # CURRENT QUARTER ALLOCATION VIEW
