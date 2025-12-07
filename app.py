@@ -450,6 +450,10 @@ def main():
     sig = best_result["signal"]
     perf = best_result["performance"]
     
+    # === Compute MA used for signal (needed throughout UI) ===
+    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+    opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
+    
     # === Trades per Year Calculation (must be defined early) ===
     switches = sig.astype(int).diff().abs().sum()
     trades_per_year = switches / (len(sig) / 252)
@@ -943,9 +947,6 @@ def main():
     # ============================================
 
     st.subheader("Next Signal Information")
-
-    portfolio_index = build_portfolio_index(prices, risk_on_weights)
-    opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
 
     latest_date = opt_ma.dropna().index[-1]
     P = float(portfolio_index.loc[latest_date])
