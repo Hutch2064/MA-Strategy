@@ -604,14 +604,18 @@ def main():
     def add_percentage_column(alloc_dict):
         df = pd.DataFrame.from_dict(alloc_dict, orient="index", columns=["$"])
 
-        # TRUE total portfolio = risky + safe (do NOT double count tickers)
-        total_portfolio = df.loc["Total Risky $","$"] + df.loc["Total Safe $","$"]
+        # Case 1: We have Total Risky $ and Total Safe $
+        if "Total Risky $" in df.index and "Total Safe $" in df.index:
+            total_portfolio = df.loc["Total Risky $","$"] + df.loc["Total Safe $","$"]
+        else:
+            # Case 2: A strategy like Sharpe-optimal that only lists tickers
+            total_portfolio = df["$"].sum()
 
-        # Numeric percentage
-        df["% TotalPortfolio"] = df["$"] / total_portfolio if total_portfolio > 0 else 0
+        # Calculate percentage of total portfolio
+        df["% TotalPortfolio"] = df["$"] / total_portfolio * 100
 
-        # Format as human-readable percent
-        df["% TotalPortfolio"] = df["% TotalPortfolio"].apply(lambda x: f"{x*100:.2f}%")
+        # Format clean percentages
+        df["% TotalPortfolio"] = df["% TotalPortfolio"].apply(lambda x: f"{x:.2f}%")
 
         return df
     
