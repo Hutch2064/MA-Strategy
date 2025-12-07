@@ -558,7 +558,6 @@ def main():
             return f"Decrease Deployed sleeve by **${abs(gap):,.2f}**"
         return "No rebalance needed."
 
-    st.write("###Rebalance Recommendation")
     st.write(f"**Taxable:** {rebalance_text(prog_auto_1['Gap ($)'])}")
     st.write(f"**Tax-Sheltered:** {rebalance_text(prog_auto_2['Gap ($)'])}")
     st.write(f"**Joint (Taxable):** {rebalance_text(prog_auto_3['Gap ($)'])}")
