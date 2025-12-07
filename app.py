@@ -604,9 +604,9 @@ def main():
     def add_percentage_column(alloc_dict):
         df = pd.DataFrame.from_dict(alloc_dict, orient="index", columns=["$"])
 
-        total_portfolio = df["$"].sum()
+        # TRUE total portfolio value
+        total_portfolio = df.loc["Total Risky $","$"] + df.loc["Total Safe $","$"]
 
-        # Every row gets its % of total portfolio
         df["% TotalPortfolio"] = df["$"] / total_portfolio if total_portfolio > 0 else 0
 
         return df
