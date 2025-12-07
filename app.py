@@ -369,9 +369,9 @@ def main():
     risk_off_tickers_str = st.sidebar.text_input("Tickers", ",".join(RISK_OFF_WEIGHTS.keys()))
     risk_off_weights_str = st.sidebar.text_input("Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values()))
 
-    st.sidebar.header("Strategy Start Date")
+    st.sidebar.header("SIG Rebalance Settings")
     strategy_start_date = st.sidebar.date_input(
-        "Select the date you FIRST entered the strategy",
+        "Enter the date you LAST rebalanced your SIG sleeve",
         value=pd.Timestamp.today().date()
     )
     
