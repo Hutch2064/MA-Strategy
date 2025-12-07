@@ -357,21 +357,21 @@ def main():
     st.sidebar.header("Current Account Value (per account)")
 
     quarter_start_cap_1 = st.sidebar.number_input(
-        "Account 1 Starting Capital",
+        "Taxable Current Capital",
         min_value=1.0,
         value=10000.0,
         step=100.0
     )
 
     quarter_start_cap_2 = st.sidebar.number_input(
-        "Account 2 Starting Capital",
+        "Tax-Sheltered Current Capital",
         min_value=1.0,
         value=10000.0,
         step=100.0
     )
 
     quarter_start_cap_3 = st.sidebar.number_input(
-        "Account 3 Starting Capital",
+        "Joint (Taxable)Current Capital",
         min_value=1.0,
         value=10000.0,
         step=100.0
