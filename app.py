@@ -535,6 +535,15 @@ def main():
     latest_signal = sig.iloc[-1]
     regime = "RISK-ON" if latest_signal else "RISK-OFF"
     st.write(f"### Current MA Regime: **{regime}**")
+    
+    latest_ma_val = opt_ma.iloc[-1]
+    latest_px_val = portfolio_index.iloc[-1]
+
+    st.write(f"**Latest Price:** {latest_px_val:,.2f}")
+    st.write(f"**Latest MA({best_len}) [{best_type.upper()}]:** {latest_ma_val:,.2f}")
+
+    st.write(f"**Upper Band:** {latest_ma_val * (1 + best_tol):,.2f}")
+    st.write(f"**Lower Band:** {latest_ma_val * (1 - best_tol):,.2f}")
 
     # 3. Quarterly Target Check
     st.write("### SIG Quarterly Target Check")
@@ -993,6 +1002,14 @@ def main():
 
     st.subheader("Portfolio Strategy vs. Sharpe-Optimal vs. Hybrid vs. Risk-On")
 
+    # === MA LINE FOR PLOTTING ===
+    plot_index = build_portfolio_index(prices, risk_on_weights)
+    plot_ma = compute_ma_matrix(plot_index, [best_len], best_type)[best_len]
+
+    # Normalize both to 10,000 like your strategy curves
+    plot_index_norm = plot_index / plot_index.iloc[0] * 10000
+    plot_ma_norm = plot_ma / plot_ma.dropna().iloc[0] * 10000
+
     fig, ax = plt.subplots(figsize=(12, 6))
 
     strat_eq_norm  = normalize(best_result["equity_curve"])
@@ -1006,6 +1023,7 @@ def main():
     ax.plot(risk_on_norm,   label="Risk-On Portfolio", alpha=0.65)
     ax.plot(hybrid_eq_norm, label="Hybrid SIG Strategy", linewidth=2, color="blue")
     ax.plot(pure_sig_norm,  label="Pure SIG (No MA Filter)", linewidth=2, color="orange")
+    ax.plot(plot_ma_norm, label=f"MA({best_len}) {best_type.upper()}", linestyle="--", color="black", alpha=0.8)
 
     ax.legend()
     ax.grid(alpha=0.3)
