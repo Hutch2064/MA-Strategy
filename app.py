@@ -571,6 +571,17 @@ def main():
             return (
                 f"No rebalance needed until **{date_str}** ({days_str})"
             )
+    # =====================================================
+    # ROLLING 63-DAY REBALANCE LOGIC — NEEDED ABOVE rebalance_text
+    # =====================================================
+
+    today = prices.index[-1]
+    next_q = strategy_start_date + pd.Timedelta(days=QUARTER_DAYS)
+
+    while next_q <= today:
+        next_q += pd.Timedelta(days=QUARTER_DAYS)
+
+    days_to_next_q = (next_q - today).days        
 
     st.write(f"**Taxable:** {rebalance_text(prog_auto_1['Gap ($)'], next_q, days_to_next_q)}")
     st.write(f"**Tax-Sheltered:** {rebalance_text(prog_auto_2['Gap ($)'], next_q, days_to_next_q)}")
@@ -840,36 +851,6 @@ def main():
     # SIG STRATEGIES (PURE + HYBRID TOGETHER)
     # ============================================
 
-    # =====================================================
-    # ROLLING 63-DAY REBALANCE LOGIC — STARTS FROM USER DATE
-    # =====================================================
-
-    st.subheader("Rebalance Timing (Quarterly)")
-
-    strategy_start_date = pd.Timestamp(strategy_start_date)
-    today = prices.index[-1]   # use market's latest available date
-
-    # First scheduled rebalance is 63 days after start
-    next_rebal = strategy_start_date + pd.Timedelta(days=QUARTER_DAYS)
-
-    # If that date is already in the past, keep stepping forward by 63-day blocks
-    while next_rebal <= today:
-        next_rebal += pd.Timedelta(days=QUARTER_DAYS)
-
-    # Days until next rebalance
-    days_to_rebal = (next_rebal - today).days
-
-    st.write(f"**Next Rebalance Date:** {next_rebal.date()}")
-
-    if days_to_rebal > 0:
-        st.write(f"**Days Remaining:** {days_to_rebal} days")
-    elif days_to_rebal == 0:
-        st.write("**Rebalance TODAY.**")
-    else:
-        # Should not happen due to while loop, but included for robustness
-        st.write("**Rebalance overdue — perform immediately.**")
-    
-    
     st.subheader("SIG Metrics & Rebalancing")
 
     # ===== NEW: Quarter Progress Table =====
