@@ -700,34 +700,40 @@ def main():
     # TODAY-BASED ALLOCATION TABLES
     # ============================================
 
-    # TODAY-BASED ALLOCATION TABLES (use SIG 'Value Today' inputs)
-    current_cap_1 = risky_today_1
-    current_cap_2 = risky_today_2
-    current_cap_3 = risky_today_3
+   # ============================================================
+    # REAL-WORLD ACCOUNT ALLOCATION TABLES
+    # Based ONLY on user's actual portfolio today
+    # ============================================================
 
-    # Strategy 1: Hybrid SIG (uses today's hyb_risk / hyb_safe)
-    hyb_alloc_1 = compute_allocations(current_cap_1, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
-    hyb_alloc_2 = compute_allocations(current_cap_2, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
-    hyb_alloc_3 = compute_allocations(current_cap_3, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
+    # These are the real-world total portfolio values (not historical drift)
+    real_cap_1 = risky_today_1 / START_RISKY
+    real_cap_2 = risky_today_2 / START_RISKY
+    real_cap_3 = risky_today_3 / START_RISKY
 
-    # Strategy 2: Pure SIG (today's pure_risk / pure_safe)
-    pure_alloc_1 = compute_allocations(current_cap_1, pure_risk, pure_safe, risk_on_weights, risk_off_weights)
-    pure_alloc_2 = compute_allocations(current_cap_2, pure_risk, pure_safe, risk_on_weights, risk_off_weights)
-    pure_alloc_3 = compute_allocations(current_cap_3, pure_risk, pure_safe, risk_on_weights, risk_off_weights)
+    # Hybrid SIG uses TODAY'S hybrid risky % from backtest, but applied to REAL portfolio dollars
+    hyb_alloc_1 = compute_allocations(real_cap_1, float(hybrid_rw.iloc[-1]), float(hybrid_sw.iloc[-1]), risk_on_weights, risk_off_weights)
+    hyb_alloc_2 = compute_allocations(real_cap_2, float(hybrid_rw.iloc[-1]), float(hybrid_sw.iloc[-1]), risk_on_weights, risk_off_weights)
+    hyb_alloc_3 = compute_allocations(real_cap_3, float(hybrid_rw.iloc[-1]), float(hybrid_sw.iloc[-1]), risk_on_weights, risk_off_weights)
 
-    # Strategy 3: Risk-ON (100% risk-on today)
-    riskon_alloc_1 = compute_allocations(current_cap_1, 1.0, 0.0, risk_on_weights, {"SHY": 0})
-    riskon_alloc_2 = compute_allocations(current_cap_2, 1.0, 0.0, risk_on_weights, {"SHY": 0})
-    riskon_alloc_3 = compute_allocations(current_cap_3, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+    # Pure SIG uses TODAY'S pure SIG risky % from backtest, applied to REAL money
+    pure_alloc_1 = compute_allocations(real_cap_1, float(pure_sig_rw.iloc[-1]), float(pure_sig_sw.iloc[-1]), risk_on_weights, risk_off_weights)
+    pure_alloc_2 = compute_allocations(real_cap_2, float(pure_sig_rw.iloc[-1]), float(pure_sig_sw.iloc[-1]), risk_on_weights, risk_off_weights)
+    pure_alloc_3 = compute_allocations(real_cap_3, float(pure_sig_rw.iloc[-1]), float(pure_sig_sw.iloc[-1]), risk_on_weights, risk_off_weights)
 
-    # Strategy 4: Sharpe-Optimal Portfolio (today's sharpe weights)
-    sharpe_alloc_1 = compute_sharpe_opt_alloc(current_cap_1, risk_on_px.columns, w_opt)
-    sharpe_alloc_2 = compute_sharpe_opt_alloc(current_cap_2, risk_on_px.columns, w_opt)
-    sharpe_alloc_3 = compute_sharpe_opt_alloc(current_cap_3, risk_on_px.columns, w_opt)
+    # 100% Risk-On using REAL money
+    riskon_alloc_1 = compute_allocations(real_cap_1, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+    riskon_alloc_2 = compute_allocations(real_cap_2, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+    riskon_alloc_3 = compute_allocations(real_cap_3, 1.0, 0.0, risk_on_weights, {"SHY": 0})
 
-    ma_alloc_1 = compute_ma_allocations(current_cap_1, ma_w_today)
-    ma_alloc_2 = compute_ma_allocations(current_cap_2, ma_w_today)
-    ma_alloc_3 = compute_ma_allocations(current_cap_3, ma_w_today)
+    # Sharpe-optimal using REAL money
+    sharpe_alloc_1 = compute_sharpe_opt_alloc(real_cap_1, risk_on_px.columns, w_opt)
+    sharpe_alloc_2 = compute_sharpe_opt_alloc(real_cap_2, risk_on_px.columns, w_opt)
+    sharpe_alloc_3 = compute_sharpe_opt_alloc(real_cap_3, risk_on_px.columns, w_opt)
+
+    # MA allocations using REAL money
+    ma_alloc_1 = compute_ma_allocations(real_cap_1, best_result["weights"].iloc[-1])
+    ma_alloc_2 = compute_ma_allocations(real_cap_2, best_result["weights"].iloc[-1])
+    ma_alloc_3 = compute_ma_allocations(real_cap_3, best_result["weights"].iloc[-1])
     
     # ============================================
     # METRIC TABLE — 4 COLUMNS
