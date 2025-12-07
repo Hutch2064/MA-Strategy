@@ -822,18 +822,7 @@ def main():
     pure_target = pure_risky_start * (1 + quarterly_target)
     pure_gap_dollars = pure_target - pure_risky_today
     pure_gap_pct = pure_gap_dollars / pure_risky_today if pure_risky_today > 0 else 0
-
-    # ================================
-    # CURRENT WEIGHTS
-    # ================================
-    st.write("### Current Allocations")
-
-    # Diagnostics
-    st.write(f"**Hybrid — Average Safe Allocation:** {avg_safe:.2%}")
-    # NEW LINE: Pure SIG average safe allocation
-    pure_avg_safe = pure_sig_sw.mean()
-    st.write(f"**Pure SIG — Average Safe Allocation:** {pure_avg_safe:.2%}")
-
+    
     # ============================================
     # ACCOUNT ALLOCATION TABLES
     # ============================================
