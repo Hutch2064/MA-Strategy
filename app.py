@@ -354,9 +354,24 @@ def main():
     risk_off_tickers_str = st.sidebar.text_input("Tickers", ",".join(RISK_OFF_WEIGHTS.keys()))
     risk_off_weights_str = st.sidebar.text_input("Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values()))
     
-    st.sidebar.header("SIG Settings")
-    quarter_start_cap = st.sidebar.number_input(
-        "Quarter-Start Capital",
+    st.sidebar.header("Quarter-Start Capital (per account)")
+
+    quarter_start_cap_1 = st.sidebar.number_input(
+        "Account 1 Starting Capital",
+        min_value=1.0,
+        value=10000.0,
+        step=100.0
+    )
+
+    quarter_start_cap_2 = st.sidebar.number_input(
+        "Account 2 Starting Capital",
+        min_value=1.0,
+        value=10000.0,
+        step=100.0
+    )
+
+    quarter_start_cap_3 = st.sidebar.number_input(
+        "Account 3 Starting Capital",
         min_value=1.0,
         value=10000.0,
         step=100.0
@@ -557,6 +572,68 @@ def main():
     )
 
     avg_safe = hybrid_sw.mean()
+
+    # ============================================
+    # ACCOUNT-LEVEL ALLOCATIONS (3 ACCOUNTS × 4 STRATEGIES)
+    # ============================================
+
+    # Current weights for hybrid / pure sig
+    hyb_risk = float(hybrid_rw.iloc[-1])
+    hyb_safe = float(hybrid_sw.iloc[-1])
+
+    pure_risk = float(pure_sig_rw.iloc[-1])
+    pure_safe = float(pure_sig_sw.iloc[-1])
+
+    # Strategy 1: Hybrid SIG
+    hyb_alloc_1 = compute_allocations(quarter_start_cap_1, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
+    hyb_alloc_2 = compute_allocations(quarter_start_cap_2, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
+    hyb_alloc_3 = compute_allocations(quarter_start_cap_3, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
+
+    # Strategy 2: Pure SIG (no MA filter)
+    pure_alloc_1 = compute_allocations(quarter_start_cap_1, pure_risk, pure_safe, risk_on_weights, risk_off_weights)
+    pure_alloc_2 = compute_allocations(quarter_start_cap_2, pure_risk, pure_safe, risk_on_weights, risk_off_weights)
+    pure_alloc_3 = compute_allocations(quarter_start_cap_3, pure_risk, pure_safe, risk_on_weights, risk_off_weights)
+
+    # Strategy 3: Risk-ON (100% Risk-On portfolio)
+    riskon_alloc_1 = compute_allocations(quarter_start_cap_1, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+    riskon_alloc_2 = compute_allocations(quarter_start_cap_2, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+    riskon_alloc_3 = compute_allocations(quarter_start_cap_3, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+
+    # Strategy 4: Sharpe-Optimal Portfolio
+    sharpe_alloc_1 = compute_sharpe_opt_alloc(quarter_start_cap_1, risk_on_px.columns, w_opt)
+    sharpe_alloc_2 = compute_sharpe_opt_alloc(quarter_start_cap_2, risk_on_px.columns, w_opt)
+    sharpe_alloc_3 = compute_sharpe_opt_alloc(quarter_start_cap_3, risk_on_px.columns, w_opt)
+
+    # ============================================
+    # ALLOCATION HELPERS FOR 3 ACCOUNTS / 4 STRATEGIES
+    # ============================================
+
+    def compute_allocations(start_cap, risky_w, safe_w, risk_on_weights, risk_off_weights):
+        risky_dollars = start_cap * risky_w
+        safe_dollars  = start_cap * safe_w
+
+        alloc = {
+            "Total Risky $": risky_dollars,
+            "Total Safe $": safe_dollars
+        }
+
+        # Risk-On allocations
+        for ticker, w in risk_on_weights.items():
+            alloc[ticker] = risky_dollars * w
+
+        # Risk-Off allocations
+        for ticker, w in risk_off_weights.items():
+            alloc[ticker] = safe_dollars * w
+
+        return alloc
+
+
+    def compute_sharpe_opt_alloc(start_cap, tickers, weights):
+        alloc = {}
+        for t, w in zip(tickers, weights):
+            alloc[t] = start_cap * w
+        return alloc
+        
     # ============================================
     # METRIC TABLE — 4 COLUMNS
     # ============================================
@@ -745,8 +822,57 @@ def main():
     pure_avg_safe = pure_sig_sw.mean()
     st.write(f"**Pure SIG — Average Safe Allocation:** {pure_avg_safe:.2%}")
 
-    st.write(f"**Hybrid — Rebalance Events:** {hybrid_rebals}")
-    st.write(f"**Pure SIG — Rebalance Events:** {pure_sig_rebals}")
+    # ============================================
+    # ACCOUNT ALLOCATION TABLES
+    # ============================================
+
+    st.subheader("Account-Level Allocations")
+
+    tab1, tab2, tab3 = st.tabs(["Account 1", "Account 2", "Account 3"])
+
+    with tab1:
+        st.write("### Hybrid SIG Allocation")
+        st.dataframe(pd.DataFrame.from_dict(hyb_alloc_1, orient="index", columns=["$"]))
+
+        st.write("### Pure SIG Allocation")
+        st.dataframe(pd.DataFrame.from_dict(pure_alloc_1, orient="index", columns=["$"]))
+
+        st.write("### Risk-ON Allocation")
+        st.dataframe(pd.DataFrame.from_dict(riskon_alloc_1, orient="index", columns=["$"]))
+
+        st.write("### Sharpe-Optimal Allocation")
+        st.dataframe(pd.DataFrame.from_dict(sharpe_alloc_1, orient="index", columns=["$"]))
+
+
+    with tab2:
+        st.write("### Hybrid SIG Allocation")
+        st.dataframe(pd.DataFrame.from_dict(hyb_alloc_2, orient="index", columns=["$"]))
+
+        st.write("### Pure SIG Allocation")
+        st.dataframe(pd.DataFrame.from_dict(pure_alloc_2, orient="index", columns=["$"]))
+
+        st.write("### Risk-ON Allocation")
+        st.dataframe(pd.DataFrame.from_dict(riskon_alloc_2, orient="index", columns=["$"]))
+
+        st.write("### Sharpe-Optimal Allocation")
+        st.dataframe(pd.DataFrame.from_dict(sharpe_alloc_2, orient="index", columns=["$"]))
+
+
+    with tab3:
+        st.write("### Hybrid SIG Allocation")
+        st.dataframe(pd.DataFrame.from_dict(hyb_alloc_3, orient="index", columns=["$"]))
+
+        st.write("### Pure SIG Allocation")
+        st.dataframe(pd.DataFrame.from_dict(pure_alloc_3, orient="index", columns=["$"]))
+
+        st.write("### Risk-ON Allocation")
+        st.dataframe(pd.DataFrame.from_dict(riskon_alloc_3, orient="index", columns=["$"]))
+
+        st.write("### Sharpe-Optimal Allocation")
+        st.dataframe(pd.DataFrame.from_dict(sharpe_alloc_3, orient="index", columns=["$"]))
+
+        st.write(f"**Hybrid — Rebalance Events:** {hybrid_rebals}")
+        st.write(f"**Pure SIG — Rebalance Events:** {pure_sig_rebals}")
 
     # ============================================
     # EXTERNAL VALIDATION LINK
