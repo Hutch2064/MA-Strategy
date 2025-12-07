@@ -376,6 +376,50 @@ def main():
         value=10000.0,
         step=100.0
     )
+
+    st.sidebar.header("SIG Quarter Tracking Inputs")
+
+    # ACCOUNT 1 — Taxable
+    q_start_1 = st.sidebar.number_input(
+        "Account 1 – Quarter Start Value (Taxable)",
+        min_value=0.0,
+        value=10000.0,
+        step=100.0
+    )
+    q_today_1 = st.sidebar.number_input(
+        "Account 1 – Value Today (Taxable)",
+        min_value=0.0,
+        value=10000.0,
+        step=100.0
+    )
+
+    # ACCOUNT 2 — Tax-Sheltered
+    q_start_2 = st.sidebar.number_input(
+        "Account 2 – Quarter Start Value (Tax-Sheltered)",
+        min_value=0.0,
+        value=10000.0,
+        step=100.0
+    )
+    q_today_2 = st.sidebar.number_input(
+        "Account 2 – Value Today (Tax-Sheltered)",
+        min_value=0.0,
+        value=10000.0,
+        step=100.0
+    )
+
+    # ACCOUNT 3 — Joint Taxable
+    q_start_3 = st.sidebar.number_input(
+        "Account 3 – Quarter Start Value (Joint)",
+        min_value=0.0,
+        value=10000.0,
+        step=100.0
+    )
+    q_today_3 = st.sidebar.number_input(
+        "Account 3 – Value Today (Joint)",
+        min_value=0.0,
+        value=10000.0,
+        step=100.0
+    )
     
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
