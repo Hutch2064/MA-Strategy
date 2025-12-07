@@ -571,6 +571,36 @@ def main():
         0
     )
 
+    # ============================================
+    # ALLOCATION HELPERS FOR 3 ACCOUNTS / 4 STRATEGIES
+    # ============================================
+
+    def compute_allocations(start_cap, risky_w, safe_w, risk_on_weights, risk_off_weights):
+        risky_dollars = start_cap * risky_w
+        safe_dollars  = start_cap * safe_w
+
+        alloc = {
+            "Total Risky $": risky_dollars,
+            "Total Safe $": safe_dollars
+        }
+
+        # Risk-On allocations
+        for ticker, w in risk_on_weights.items():
+            alloc[ticker] = risky_dollars * w
+
+        # Risk-Off allocations
+        for ticker, w in risk_off_weights.items():
+            alloc[ticker] = safe_dollars * w
+
+        return alloc
+
+
+    def compute_sharpe_opt_alloc(start_cap, tickers, weights):
+        alloc = {}
+        for t, w in zip(tickers, weights):
+            alloc[t] = start_cap * w
+        return alloc
+    
     avg_safe = hybrid_sw.mean()
 
     # ============================================
@@ -603,36 +633,6 @@ def main():
     sharpe_alloc_1 = compute_sharpe_opt_alloc(quarter_start_cap_1, risk_on_px.columns, w_opt)
     sharpe_alloc_2 = compute_sharpe_opt_alloc(quarter_start_cap_2, risk_on_px.columns, w_opt)
     sharpe_alloc_3 = compute_sharpe_opt_alloc(quarter_start_cap_3, risk_on_px.columns, w_opt)
-
-    # ============================================
-    # ALLOCATION HELPERS FOR 3 ACCOUNTS / 4 STRATEGIES
-    # ============================================
-
-    def compute_allocations(start_cap, risky_w, safe_w, risk_on_weights, risk_off_weights):
-        risky_dollars = start_cap * risky_w
-        safe_dollars  = start_cap * safe_w
-
-        alloc = {
-            "Total Risky $": risky_dollars,
-            "Total Safe $": safe_dollars
-        }
-
-        # Risk-On allocations
-        for ticker, w in risk_on_weights.items():
-            alloc[ticker] = risky_dollars * w
-
-        # Risk-Off allocations
-        for ticker, w in risk_off_weights.items():
-            alloc[ticker] = safe_dollars * w
-
-        return alloc
-
-
-    def compute_sharpe_opt_alloc(start_cap, tickers, weights):
-        alloc = {}
-        for t, w in zip(tickers, weights):
-            alloc[t] = start_cap * w
-        return alloc
         
     # ============================================
     # METRIC TABLE — 4 COLUMNS
