@@ -539,15 +539,6 @@ def main():
     latest_signal = sig.iloc[-1]
     regime = "RISK-ON" if latest_signal else "RISK-OFF"
     st.write(f"### Current MA Regime: **{regime}**")
-    
-    latest_ma_val = opt_ma.iloc[-1]
-    latest_px_val = portfolio_index.iloc[-1]
-
-    st.write(f"**Latest Price:** {latest_px_val:,.2f}")
-    st.write(f"**Latest MA({best_len}) [{best_type.upper()}]:** {latest_ma_val:,.2f}")
-
-    st.write(f"**Upper Band:** {latest_ma_val * (1 + best_tol):,.2f}")
-    st.write(f"**Lower Band:** {latest_ma_val * (1 - best_tol):,.2f}")
 
     # 3. Quarterly Target Check
     st.write("### SIG Quarterly Target Check")
