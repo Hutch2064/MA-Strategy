@@ -778,7 +778,9 @@ def main():
 
     progress_table = pd.concat([df1, df2, df3], axis=1)
 
-    progress_table.loc["Gap (%)"] = progress_table.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
+    progress_table_fmt = progress_table.copy()
+    progress_table_fmt.loc["Gap (%)"] = progress_table.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
+    st.dataframe(progress_table_fmt, width="stretch")
 
     st.dataframe(progress_table, use_container_width=True)
     st.write("---")
@@ -818,7 +820,7 @@ def main():
     st.write(f"**Days Until Rebalance:** {days_to_next_q}")
 
     # Current risky bucket value implied by % weights today:
-    current_risky_val = quarter_start_cap_1 * pure_sig_rw.iloc[-1]
+    current_risky_val = q_today_1 * pure_sig_rw.iloc[-1]
 
     # Expected risky value at quarter-end:
     quarter_goal = current_risky_val * (1 + quarterly_target)
@@ -851,10 +853,9 @@ def main():
     pure_w_s_q = float(pure_sig_sw.loc[q_start])
     
     # ----- HYBRID -----
-    hyb_risky_start = quarter_start_cap_1 * hyb_w_r_q
-    hyb_safe_start  = quarter_start_cap_1 * hyb_w_s_q
-
-    hyb_risky_today = quarter_start_cap_1 * float(hybrid_rw.iloc[-1])
+    hyb_risky_start = q_start_1 * hyb_w_r_q
+    hyb_safe_start  = q_start_1 * hyb_w_s_q
+    hyb_risky_today = q_today_1 * float(hybrid_rw.iloc[-1])
 
     hyb_gain_dollars = hyb_risky_today - hyb_risky_start
     hyb_gain_pct = hyb_gain_dollars / hyb_risky_start if hyb_risky_start > 0 else 0
@@ -866,10 +867,9 @@ def main():
     st.write("---")
 
     # ----- PURE SIG -----
-    pure_risky_start = quarter_start_cap_1 * pure_w_r_q
-    pure_safe_start  = quarter_start_cap_1 * pure_w_s_q
-
-    pure_risky_today = quarter_start_cap_1 * float(pure_sig_rw.iloc[-1])
+    pure_risky_start = q_start_1 * pure_w_r_q
+    pure_safe_start  = q_start_1 * pure_w_s_q
+    pure_risky_today = q_today_1 * float(pure_sig_rw.iloc[-1])
 
     pure_gain_dollars = pure_risky_today - pure_risky_start
     pure_gain_pct = pure_gain_dollars / pure_risky_start if pure_risky_start > 0 else 0
