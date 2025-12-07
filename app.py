@@ -880,8 +880,6 @@ def main():
     st.write("---")
     # ===== END NEW TABLE =====
 
-    st.write(f"**Quarterly Target (Based on Buy & Hold CAGR):** {quarterly_target:.2%}")
-
     # =====================================================
     # QUARTERLY PROGRESS TRACKER — EXACT VALUES TODAY
     # =====================================================
