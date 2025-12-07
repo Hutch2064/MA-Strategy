@@ -369,29 +369,6 @@ def main():
     risk_off_tickers_str = st.sidebar.text_input("Tickers", ",".join(RISK_OFF_WEIGHTS.keys()))
     risk_off_weights_str = st.sidebar.text_input("Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values()))
     
-    st.sidebar.header("Current Account Value (per account)")
-
-    quarter_start_cap_1 = st.sidebar.number_input(
-        "Taxable Current Capital",
-        min_value=1.0,
-        value=10000.0,
-        step=100.0
-    )
-
-    quarter_start_cap_2 = st.sidebar.number_input(
-        "Tax-Sheltered Current Capital",
-        min_value=1.0,
-        value=10000.0,
-        step=100.0
-    )
-
-    quarter_start_cap_3 = st.sidebar.number_input(
-        "Joint (Taxable)Current Capital",
-        min_value=1.0,
-        value=10000.0,
-        step=100.0
-    )
-
     st.sidebar.header("SIG Quarter Tracking Inputs")
 
     # ACCOUNT 1 — Taxable
