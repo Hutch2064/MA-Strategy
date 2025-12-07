@@ -375,6 +375,8 @@ def main():
         value=pd.Timestamp.today().date()
     )
     
+    strategy_start_date = pd.Timestamp(strategy_start_date)
+
     st.sidebar.header("SIG Rebalancing Inputs (RISKY dollars only)")
 
     # ACCOUNT 1 — Taxable
@@ -826,29 +828,48 @@ def main():
     # SIG STRATEGIES (PURE + HYBRID TOGETHER)
     # ============================================
 
-
     # =====================================================
-    # TRUE QUARTERLY REBALANCE LOGIC BASED ON LAST DATA DATE
+    # QUARTERLY REBALANCE LOGIC USING USER'S START DATE
     # =====================================================
 
-    last_date = prices.index[-1].to_pydatetime()
-    m = last_date.month
+    st.subheader("Quarterly Rebalance Timing")
 
-    if m in [1, 2, 3]:
-        q_start = pd.Timestamp(last_date.year, 1, 1)
-        q_end   = pd.Timestamp(last_date.year, 3, 31)
-    elif m in [4, 5, 6]:
-        q_start = pd.Timestamp(last_date.year, 4, 1)
-        q_end   = pd.Timestamp(last_date.year, 6, 30)
-    elif m in [7, 8, 9]:
-        q_start = pd.Timestamp(last_date.year, 7, 1)
-        q_end   = pd.Timestamp(last_date.year, 9, 30)
+    strategy_start_date = pd.Timestamp(strategy_start_date)
+
+    # Determine quarter of user's start date
+    start_month = strategy_start_date.month
+
+    if start_month in [1, 2, 3]:
+        q_start = pd.Timestamp(strategy_start_date.year, 1, 1)
+        q_end   = pd.Timestamp(strategy_start_date.year, 3, 31)
+    elif start_month in [4, 5, 6]:
+        q_start = pd.Timestamp(strategy_start_date.year, 4, 1)
+        q_end   = pd.Timestamp(strategy_start_date.year, 6, 30)
+    elif start_month in [7, 8, 9]:
+        q_start = pd.Timestamp(strategy_start_date.year, 7, 1)
+        q_end   = pd.Timestamp(strategy_start_date.year, 9, 30)
     else:
-        q_start = pd.Timestamp(last_date.year, 10, 1)
-        q_end   = pd.Timestamp(last_date.year, 12, 31)
+        q_start = pd.Timestamp(strategy_start_date.year, 10, 1)
+        q_end   = pd.Timestamp(strategy_start_date.year, 12, 31)
 
-    next_q = q_end
-    days_to_next_q = (next_q - last_date).days
+    # If user started mid-quarter, rebalance at the NEXT quarter boundary
+    if strategy_start_date > q_start:
+        next_q = q_end
+    else:
+        # user started before quarter, first rebalance occurs at q_end
+        next_q = q_end
+
+    # Compute days remaining until next rebalance
+    today = prices.index[-1]   # or pd.Timestamp.today() if you want real-time
+    days_to_next_q = (next_q - today).days
+
+    st.write(f"**Next Quarterly Rebalance Date:** {next_q.date()}")
+
+    if days_to_next_q >= 0:
+        st.write(f"**Days Until Next Rebalance:** {days_to_next_q} days")
+    else:
+        st.write("**Quarter has ended — next rebalance should occur now.**")
+    
     
     st.subheader("SIG Metrics & Rebalancing")
 
