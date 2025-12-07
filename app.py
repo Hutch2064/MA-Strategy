@@ -436,17 +436,6 @@ def main():
     # Load prices
     prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
 
-    # Convert strategy start date to nearest price index
-    strategy_ts = pd.Timestamp(strategy_start_date)
-
-    # Handle cases where the date is outside the index
-    if strategy_ts < prices.index[0]:
-        strategy_ts = prices.index[0]
-    elif strategy_ts > prices.index[-1]:
-        strategy_ts = prices.index[-1]
-
-    strategy_ts = prices.index[(abs(prices.index - strategy_ts)).argmin()]
-
     # Run MA optimization
     best_cfg, best_result = run_grid_search(
         prices,
@@ -683,24 +672,9 @@ def main():
 
     # ============================================
     # ACCOUNT-LEVEL ALLOCATIONS (3 ACCOUNTS × 4 STRATEGIES)
-    # ============================================
+    # ===========================================
 
-
-    # NEW: Pull weights from the user strategy start date
-    hyb_risk = float(hybrid_rw.loc[strategy_ts])
-    hyb_safe = float(hybrid_sw.loc[strategy_ts])
-
-    pure_risk = float(pure_sig_rw.loc[strategy_ts])
-    pure_safe = float(pure_sig_sw.loc[strategy_ts])
-
-    # MA strategy weights on user's start date
-    ma_w_today = best_result["weights"].loc[strategy_ts]
-
-    # ============================================
-    # TODAY-BASED ALLOCATION TABLES
-    # ============================================
-
-   # ============================================================
+    # ============================================================
     # REAL-WORLD ACCOUNT ALLOCATION TABLES
     # Based ONLY on user's actual portfolio today
     # ============================================================
@@ -709,31 +683,57 @@ def main():
     real_cap_1 = risky_today_1 / START_RISKY
     real_cap_2 = risky_today_2 / START_RISKY
     real_cap_3 = risky_today_3 / START_RISKY
+    
+    # ------------------------------------------------------------
+    # HYBRID STRATEGY — TODAY’S RECOMMENDED WEIGHTS
+    # (NOT historical drift — real world signal)
+    # ------------------------------------------------------------
+    # Hybrid recommended risky % = START_RISKY when MA signal is ON, else 0%
+    hyb_risk_today = START_RISKY if latest_signal else 0.0
+    hyb_safe_today = 1 - hyb_risk_today
 
-    # Hybrid SIG uses TODAY'S hybrid risky % from backtest, but applied to REAL portfolio dollars
-    hyb_alloc_1 = compute_allocations(real_cap_1, float(hybrid_rw.iloc[-1]), float(hybrid_sw.iloc[-1]), risk_on_weights, risk_off_weights)
-    hyb_alloc_2 = compute_allocations(real_cap_2, float(hybrid_rw.iloc[-1]), float(hybrid_sw.iloc[-1]), risk_on_weights, risk_off_weights)
-    hyb_alloc_3 = compute_allocations(real_cap_3, float(hybrid_rw.iloc[-1]), float(hybrid_sw.iloc[-1]), risk_on_weights, risk_off_weights)
+    hyb_alloc_1 = compute_allocations(real_cap_1, hyb_risk_today, hyb_safe_today, risk_on_weights, risk_off_weights)
+    hyb_alloc_2 = compute_allocations(real_cap_2, hyb_risk_today, hyb_safe_today, risk_on_weights, risk_off_weights)
+    hyb_alloc_3 = compute_allocations(real_cap_3, hyb_risk_today, hyb_safe_today, risk_on_weights, risk_off_weights)
 
-    # Pure SIG uses TODAY'S pure SIG risky % from backtest, applied to REAL money
-    pure_alloc_1 = compute_allocations(real_cap_1, float(pure_sig_rw.iloc[-1]), float(pure_sig_sw.iloc[-1]), risk_on_weights, risk_off_weights)
-    pure_alloc_2 = compute_allocations(real_cap_2, float(pure_sig_rw.iloc[-1]), float(pure_sig_sw.iloc[-1]), risk_on_weights, risk_off_weights)
-    pure_alloc_3 = compute_allocations(real_cap_3, float(pure_sig_rw.iloc[-1]), float(pure_sig_sw.iloc[-1]), risk_on_weights, risk_off_weights)
+    # ------------------------------------------------------------
+    # PURE SIG STRATEGY — ALWAYS RISK-ON (NO MA FILTER)
+    # (Use fixed START_RISKY / START_SAFE, NOT historical drift weights)
+    # ------------------------------------------------------------
+    pure_risk_today = START_RISKY
+    pure_safe_today = START_SAFE
 
-    # 100% Risk-On using REAL money
+    pure_alloc_1 = compute_allocations(real_cap_1, pure_risk_today, pure_safe_today, risk_on_weights, risk_off_weights)
+    pure_alloc_2 = compute_allocations(real_cap_2, pure_risk_today, pure_safe_today, risk_on_weights, risk_off_weights)
+    pure_alloc_3 = compute_allocations(real_cap_3, pure_risk_today, pure_safe_today, risk_on_weights, risk_off_weights)
+
+    # ------------------------------------------------------------
+    # 100% RISK-ON STRATEGY
+    # ------------------------------------------------------------
     riskon_alloc_1 = compute_allocations(real_cap_1, 1.0, 0.0, risk_on_weights, {"SHY": 0})
     riskon_alloc_2 = compute_allocations(real_cap_2, 1.0, 0.0, risk_on_weights, {"SHY": 0})
     riskon_alloc_3 = compute_allocations(real_cap_3, 1.0, 0.0, risk_on_weights, {"SHY": 0})
 
-    # Sharpe-optimal using REAL money
+    # ------------------------------------------------------------
+    # SHARPE-OPTIMAL STRATEGY — USING REAL MONEY
+    # ------------------------------------------------------------
     sharpe_alloc_1 = compute_sharpe_opt_alloc(real_cap_1, risk_on_px.columns, w_opt)
     sharpe_alloc_2 = compute_sharpe_opt_alloc(real_cap_2, risk_on_px.columns, w_opt)
     sharpe_alloc_3 = compute_sharpe_opt_alloc(real_cap_3, risk_on_px.columns, w_opt)
 
-    # MA allocations using REAL money
-    ma_alloc_1 = compute_ma_allocations(real_cap_1, best_result["weights"].iloc[-1])
-    ma_alloc_2 = compute_ma_allocations(real_cap_2, best_result["weights"].iloc[-1])
-    ma_alloc_3 = compute_ma_allocations(real_cap_3, best_result["weights"].iloc[-1])
+    # ------------------------------------------------------------
+    # MA STRATEGY — TODAY’S SIGNAL, NOT HISTORICAL WEIGHTS
+    # ------------------------------------------------------------
+    if latest_signal:
+        # MA says RISK-ON today
+        ma_alloc_1 = compute_allocations(real_cap_1, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+        ma_alloc_2 = compute_allocations(real_cap_2, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+        ma_alloc_3 = compute_allocations(real_cap_3, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+    else:
+        # MA says RISK-OFF today
+        ma_alloc_1 = compute_allocations(real_cap_1, 0.0, 1.0, {}, risk_off_weights)
+        ma_alloc_2 = compute_allocations(real_cap_2, 0.0, 1.0, {}, risk_off_weights)
+        ma_alloc_3 = compute_allocations(real_cap_3, 0.0, 1.0, {}, risk_off_weights)
     
     # ============================================
     # METRIC TABLE — 4 COLUMNS
@@ -846,13 +846,6 @@ def main():
     # =====================================================
     # QUARTERLY PROGRESS TRACKER — EXACT VALUES TODAY
     # =====================================================
-
-    # Risky/safe weights at quarter start
-    hyb_w_r_q = float(hybrid_rw.loc[q_start])
-    hyb_w_s_q = float(hybrid_sw.loc[q_start])
-
-    pure_w_r_q = float(pure_sig_rw.loc[q_start])
-    pure_w_s_q = float(pure_sig_sw.loc[q_start])
     
     # ============================================
     # ACCOUNT ALLOCATION TABLES
