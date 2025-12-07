@@ -847,40 +847,6 @@ def main():
 
     st.dataframe(stat_table, use_container_width=True)
 
-    # ============================================
-    # SIG STRATEGIES (PURE + HYBRID TOGETHER)
-    # ============================================
-
-    st.subheader("SIG Metrics & Rebalancing")
-
-    # ===== NEW: Quarter Progress Table =====
-    st.write("### Quarter Progress — SIG Tracking")
-
-    prog1 = compute_quarter_progress(
-        risky_start_1, risky_today_1, quarterly_target
-    )
-
-    prog2 = compute_quarter_progress(
-        risky_start_2, risky_today_2, quarterly_target
-    )
-
-    prog3 = compute_quarter_progress(
-        risky_start_3, risky_today_3, quarterly_target
-    )   
-    
-    df1 = pd.DataFrame.from_dict(prog1, orient="index", columns=["Taxable"])
-    df2 = pd.DataFrame.from_dict(prog2, orient="index", columns=["Tax-Sheltered"])
-    df3 = pd.DataFrame.from_dict(prog3, orient="index", columns=["Joint (Taxable)"])
-
-    progress_table = pd.concat([df1, df2, df3], axis=1)
-
-    progress_table_fmt = progress_table.copy()
-    progress_table_fmt.loc["Gap (%)"] = progress_table.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
-    st.dataframe(progress_table_fmt, width="stretch")
-
-    st.write("---")
-    # ===== END NEW TABLE =====
-
     # =====================================================
     # QUARTERLY PROGRESS TRACKER — EXACT VALUES TODAY
     # =====================================================
