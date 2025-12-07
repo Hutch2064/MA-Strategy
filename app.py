@@ -368,6 +368,12 @@ def main():
     st.sidebar.header("Risk-OFF Portfolio")
     risk_off_tickers_str = st.sidebar.text_input("Tickers", ",".join(RISK_OFF_WEIGHTS.keys()))
     risk_off_weights_str = st.sidebar.text_input("Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values()))
+
+    st.sidebar.header("Strategy Start Date")
+    strategy_start_date = st.sidebar.date_input(
+        "Select the date you FIRST entered the strategy",
+        value=pd.Timestamp.today().date()
+    )
     
     st.sidebar.header("SIG Rebalancing Inputs")
 
@@ -429,6 +435,17 @@ def main():
 
     # Load prices
     prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
+
+    # Convert strategy start date to nearest price index
+    strategy_ts = pd.Timestamp(strategy_start_date)
+
+    # Handle cases where the date is outside the index
+    if strategy_ts < prices.index[0]:
+        strategy_ts = prices.index[0]
+    elif strategy_ts > prices.index[-1]:
+        strategy_ts = prices.index[-1]
+
+    strategy_ts = prices.index[prices.index.get_loc(strategy_ts, method='nearest')]
 
     # Run MA optimization
     best_cfg, best_result = run_grid_search(
@@ -668,12 +685,16 @@ def main():
     # ACCOUNT-LEVEL ALLOCATIONS (3 ACCOUNTS × 4 STRATEGIES)
     # ============================================
 
-    # Current weights for hybrid / pure sig
-    hyb_risk = float(hybrid_rw.iloc[-1])
-    hyb_safe = float(hybrid_sw.iloc[-1])
 
-    pure_risk = float(pure_sig_rw.iloc[-1])
-    pure_safe = float(pure_sig_sw.iloc[-1])
+    # NEW: Pull weights from the user strategy start date
+    hyb_risk = float(hybrid_rw.loc[strategy_ts])
+    hyb_safe = float(hybrid_sw.loc[strategy_ts])
+
+    pure_risk = float(pure_sig_rw.loc[strategy_ts])
+    pure_safe = float(pure_sig_sw.loc[strategy_ts])
+
+    # MA strategy weights on user's start date
+    ma_w_today = best_result["weights"].loc[strategy_ts]
 
     # ============================================
     # TODAY-BASED ALLOCATION TABLES
@@ -703,9 +724,6 @@ def main():
     sharpe_alloc_1 = compute_sharpe_opt_alloc(current_cap_1, risk_on_px.columns, w_opt)
     sharpe_alloc_2 = compute_sharpe_opt_alloc(current_cap_2, risk_on_px.columns, w_opt)
     sharpe_alloc_3 = compute_sharpe_opt_alloc(current_cap_3, risk_on_px.columns, w_opt)
-
-    # NEW: Strategy 5 – MA Strategy Allocation (today's MA weights)
-    ma_w_today = best_result["weights"].iloc[-1]  # last row = today's weights
 
     ma_alloc_1 = compute_ma_allocations(current_cap_1, ma_w_today)
     ma_alloc_2 = compute_ma_allocations(current_cap_2, ma_w_today)
