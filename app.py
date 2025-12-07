@@ -814,23 +814,21 @@ def main():
     q_start_idx = pure_sig_rw.index[(abs(pure_sig_rw.index - q_start)).argmin()]
 
     prog1 = compute_quarter_progress(
-        q_start_1, q_today_1,
-        w_r_start=float(pure_sig_rw.loc[q_start_idx]),
-        w_r_today=float(pure_sig_rw.iloc[-1]),
-        quarterly_target=quarterly_target
+        q_start_1,
+        q_today_1,
+        quarterly_target
     )
+    
     prog2 = compute_quarter_progress(
-        q_start_2, q_today_2,
-        w_r_start=float(pure_sig_rw.loc[q_start_idx]),
-        w_r_today=float(pure_sig_rw.iloc[-1]),
-        quarterly_target=quarterly_target
+        q_start_2,
+        q_today_2,
+        quarterly_target
     )
 
     prog3 = compute_quarter_progress(
-        q_start_3, q_today_3,
-        w_r_start=float(pure_sig_rw.loc[q_start_idx]),
-        w_r_today=float(pure_sig_rw.iloc[-1]),
-        quarterly_target=quarterly_target
+        q_start_3,
+        q_today_3,
+        quarterly_target
     )
 
     df1 = pd.DataFrame.from_dict(prog1, orient="index", columns=["Account 1"])
