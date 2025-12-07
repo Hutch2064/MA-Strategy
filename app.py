@@ -368,25 +368,6 @@ def main():
     st.sidebar.header("Risk-OFF Portfolio")
     risk_off_tickers_str = st.sidebar.text_input("Tickers", ",".join(RISK_OFF_WEIGHTS.keys()))
     risk_off_weights_str = st.sidebar.text_input("Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values()))
-
-    st.sidebar.header("Strategy Start Date")
-    strategy_start_date = st.sidebar.date_input(
-        "Select the date you FIRST entered the strategy",
-        value=pd.Timestamp.today().date()
-    )
-    
-    # Convert strategy start date to actual price index
-    strategy_ts = pd.Timestamp(strategy_start_date)
-
-    # Clamp to available data range
-    if strategy_ts < prices.index[0]:
-        strategy_ts = prices.index[0]
-    elif strategy_ts > prices.index[-1]:
-        strategy_ts = prices.index[-1]
-
-    # Snap to nearest valid index
-    strategy_ts = prices.index[prices.index.get_loc(strategy_ts, method="nearest")]
-    
     
     st.sidebar.header("SIG Rebalancing Inputs (RISKY dollars only)")
 
@@ -437,6 +418,26 @@ def main():
 
     # Load prices
     prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
+     
+    # ============================================
+    # STRATEGY START DATE — VALIDATED AGAINST PRICES
+    # ============================================
+    st.sidebar.header("Strategy Start Date")
+    strategy_start_date = st.sidebar.date_input(
+        "Select the date you FIRST entered the strategy",
+        value=pd.Timestamp.today().date()
+    )
+
+    strategy_ts = pd.Timestamp(strategy_start_date)
+
+    # Clamp to available price range
+    if strategy_ts < prices.index[0]:
+        strategy_ts = prices.index[0]
+    elif strategy_ts > prices.index[-1]:
+        strategy_ts = prices.index[-1]
+
+    # Snap to nearest trading day
+    strategy_ts = prices.index[prices.index.get_loc(strategy_ts, method="nearest")]
 
     # Run MA optimization
     best_cfg, best_result = run_grid_search(
