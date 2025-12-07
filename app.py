@@ -335,24 +335,15 @@ def normalize(eq):
     return eq / eq.iloc[0] * 10000
 
 # ===== NEW: Quarter Progress Helper =====
-def compute_quarter_progress(q_start, q_today, w_r_start, w_r_today, quarterly_target):
-    # risky bucket at start based on SIG weight at quarter start
-    risky_start = q_start * w_r_start
-
-    # risky bucket today based on current SIG weight
-    risky_today = q_today * w_r_today
-
-    # SIG target applies only to risky bucket
-    risky_target = risky_start * (1 + quarterly_target)
-
-    # gap vs target
-    gap = risky_target - risky_today
+def compute_quarter_progress(risky_start, risky_today, quarterly_target):
+    target = risky_start * (1 + quarterly_target)
+    gap = target - risky_today
     pct_gap = gap / risky_start if risky_start > 0 else 0
 
     return {
         "Risky Start ($)": risky_start,
         "Risky Today ($)": risky_today,
-        "Quarterly Target ($)": risky_target,
+        "Quarterly Target ($)": target,
         "Gap ($)": gap,
         "Gap (%)": pct_gap
     }
@@ -384,47 +375,47 @@ def main():
         value=pd.Timestamp.today().date()
     )
     
-    st.sidebar.header("SIG Rebalancing Inputs")
+    st.sidebar.header("SIG Rebalancing Inputs (RISKY dollars only)")
 
     # ACCOUNT 1 — Taxable
-    q_start_1 = st.sidebar.number_input(
-        "Taxable – Quarter Start Value",
+    risky_start_1 = st.sidebar.number_input(
+        "Taxable – RISKY Dollars at Quarter Start",
         min_value=0.0,
-        value=10000.0,
+        value=6000.0,   # example default: 60% of 10k
         step=100.0
     )
-    q_today_1 = st.sidebar.number_input(
-        "Taxable – Value Today",
+    risky_today_1 = st.sidebar.number_input(
+        "Taxable – RISKY Dollars Today",
         min_value=0.0,
-        value=10000.0,
+        value=6000.0,
         step=100.0
     )
 
     # ACCOUNT 2 — Tax-Sheltered
-    q_start_2 = st.sidebar.number_input(
-        "Tax-Sheltered – Quarter Start Value",
+    risky_start_2 = st.sidebar.number_input(
+        "Tax-Sheltered – RISKY Dollars at Quarter Start",
         min_value=0.0,
-        value=10000.0,
+        value=6000.0,
         step=100.0
     )
-    q_today_2 = st.sidebar.number_input(
-        "Tax-Sheltered – Value Today",
+    risky_today_2 = st.sidebar.number_input(
+        "Tax-Sheltered – RISKY Dollars Today",
         min_value=0.0,
-        value=10000.0,
+        value=6000.0,
         step=100.0
     )
 
-    # ACCOUNT 3 — Joint Taxable
-    q_start_3 = st.sidebar.number_input(
-        "Joint (Taxable) – Quarter Start Value",
+    # ACCOUNT 3 — Joint
+    risky_start_3 = st.sidebar.number_input(
+        "Joint (Taxable) – RISKY Dollars at Quarter Start",
         min_value=0.0,
-        value=10000.0,
+        value=6000.0,
         step=100.0
     )
-    q_today_3 = st.sidebar.number_input(
-        "Joint (Taxable) – Value Today",
+    risky_today_3 = st.sidebar.number_input(
+        "Joint (Taxable) – RISKY Dollars Today",
         min_value=0.0,
-        value=10000.0,
+        value=6000.0,
         step=100.0
     )
     
@@ -823,25 +814,16 @@ def main():
     q_start_idx = pure_sig_rw.index[(abs(pure_sig_rw.index - q_start)).argmin()]
 
     prog1 = compute_quarter_progress(
-        q_start_1, q_today_1,
-        w_r_start=float(pure_sig_rw.loc[q_start_idx]),
-        w_r_today=float(pure_sig_rw.iloc[-1]),
-        quarterly_target=quarterly_target
+        risky_start_1, risky_today_1, quarterly_target
     )
 
     prog2 = compute_quarter_progress(
-        q_start_2, q_today_2,
-        w_r_start=float(pure_sig_rw.loc[q_start_idx]),
-        w_r_today=float(pure_sig_rw.iloc[-1]),
-        quarterly_target=quarterly_target
+        risky_start_2, risky_today_2, quarterly_target
     )
 
     prog3 = compute_quarter_progress(
-        q_start_3, q_today_3,
-        w_r_start=float(pure_sig_rw.loc[q_start_idx]),
-        w_r_today=float(pure_sig_rw.iloc[-1]),
-        quarterly_target=quarterly_target
-    )    
+        risky_start_3, risky_today_3, quarterly_target
+    )   
     
     df1 = pd.DataFrame.from_dict(prog1, orient="index", columns=["Account 1"])
     df2 = pd.DataFrame.from_dict(prog2, orient="index", columns=["Account 2"])
