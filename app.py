@@ -704,7 +704,7 @@ def main():
 
     stat_table = pd.DataFrame(
         table_data,
-        columns=["Metric", "Strategy", "Sharpe-Optimal", "Risk-On", "Hybrid", "Pure-SIG"]
+        columns=["Metric", "MA Strategy", "Sharpe-Opt Buy & Hold (Limited: 09/17/2014)", "Buy & Hold", "Hybrid MA/SIG", "SIG"]
     )
 
     st.dataframe(stat_table, use_container_width=True)
