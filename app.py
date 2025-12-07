@@ -600,6 +600,12 @@ def main():
         for t, w in zip(tickers, weights):
             alloc[t] = start_cap * w
         return alloc
+
+    def add_percentage_column(alloc_dict):
+        df = pd.DataFrame.from_dict(alloc_dict, orient="index", columns=["$"])
+        total = df["$"].sum()
+        df["%"] = df["$"] / total if total != 0 else 0
+        return df
     
     avg_safe = hybrid_sw.mean()
 
@@ -832,47 +838,47 @@ def main():
 
     with tab1:
         st.write("### Hybrid SIG Allocation")
-        st.dataframe(pd.DataFrame.from_dict(hyb_alloc_1, orient="index", columns=["$"]))
+        st.dataframe(add_percentage_column(hyb_alloc_1))
 
         st.write("### Pure SIG Allocation")
-        st.dataframe(pd.DataFrame.from_dict(pure_alloc_1, orient="index", columns=["$"]))
+        st.dataframe(add_percentage_column(pure_alloc_1))
 
         st.write("### Risk-ON Allocation")
-        st.dataframe(pd.DataFrame.from_dict(riskon_alloc_1, orient="index", columns=["$"]))
+        st.dataframe(add_percentage_column(riskon_alloc_1))
 
         st.write("### Sharpe-Optimal Allocation")
-        st.dataframe(pd.DataFrame.from_dict(sharpe_alloc_1, orient="index", columns=["$"]))
+        st.dataframe(add_percentage_column(sharpe_alloc_1))
 
 
     with tab2:
         st.write("### Hybrid SIG Allocation")
-        st.dataframe(pd.DataFrame.from_dict(hyb_alloc_2, orient="index", columns=["$"]))
+        st.dataframe(add_percentage_column(hyb_alloc_2))
 
         st.write("### Pure SIG Allocation")
-        st.dataframe(pd.DataFrame.from_dict(pure_alloc_2, orient="index", columns=["$"]))
-
+        st.dataframe(add_percentage_column(hyb_alloc_2))
+        
         st.write("### Risk-ON Allocation")
-        st.dataframe(pd.DataFrame.from_dict(riskon_alloc_2, orient="index", columns=["$"]))
+        st.dataframe(add_percentage_column(hyb_alloc_2))
 
         st.write("### Sharpe-Optimal Allocation")
-        st.dataframe(pd.DataFrame.from_dict(sharpe_alloc_2, orient="index", columns=["$"]))
+        st.dataframe(add_percentage_column(hyb_alloc_2))
 
 
     with tab3:
         st.write("### Hybrid SIG Allocation")
-        st.dataframe(pd.DataFrame.from_dict(hyb_alloc_3, orient="index", columns=["$"]))
+        st.dataframe(add_percentage_column(hyb_alloc_3))
 
         st.write("### Pure SIG Allocation")
-        st.dataframe(pd.DataFrame.from_dict(pure_alloc_3, orient="index", columns=["$"]))
+        st.dataframe(add_percentage_column(hyb_alloc_3))
 
         st.write("### Risk-ON Allocation")
-        st.dataframe(pd.DataFrame.from_dict(riskon_alloc_3, orient="index", columns=["$"]))
+        st.dataframe(add_percentage_column(hyb_alloc_3))
 
         st.write("### Sharpe-Optimal Allocation")
-        st.dataframe(pd.DataFrame.from_dict(sharpe_alloc_3, orient="index", columns=["$"]))
+        st.dataframe(add_percentage_column(hyb_alloc_3))
 
         st.write(f"**Hybrid — Rebalance Events:** {hybrid_rebals}")
-        st.write(f"**Pure SIG — Rebalance Events:** {pure_sig_rebals}")
+        st.dataframe(add_percentage_column(hyb_alloc_3))
 
     # ============================================
     # EXTERNAL VALIDATION LINK
