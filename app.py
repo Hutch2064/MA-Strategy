@@ -604,10 +604,14 @@ def main():
     def add_percentage_column(alloc_dict):
         df = pd.DataFrame.from_dict(alloc_dict, orient="index", columns=["$"])
 
-        # TRUE total portfolio value
+        # TRUE total portfolio = risky + safe (do NOT double count tickers)
         total_portfolio = df.loc["Total Risky $","$"] + df.loc["Total Safe $","$"]
 
+        # Numeric percentage
         df["% TotalPortfolio"] = df["$"] / total_portfolio if total_portfolio > 0 else 0
+
+        # Format as human-readable percent
+        df["% TotalPortfolio"] = df["% TotalPortfolio"].apply(lambda x: f"{x*100:.2f}%")
 
         return df
     
