@@ -529,8 +529,6 @@ def main():
     # AUTOMATED HYBRID STRATEGY DECISION BLOCK
     # ============================================================
 
-    st.subheader("Automated Hybrid Strategy Decision")
-
     # 1. MA Regime Today
     latest_signal = sig.iloc[-1]
     regime = "RISK-ON" if latest_signal else "RISK-OFF"
