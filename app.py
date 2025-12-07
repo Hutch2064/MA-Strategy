@@ -340,7 +340,7 @@ def normalize(eq):
 def main():
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
-    st.title("Portfolio MA Strategy")
+    st.title("Portfolio Strategy")
 
     st.sidebar.header("Backtest Settings")
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
@@ -704,7 +704,7 @@ def main():
     # SIG STRATEGIES (PURE + HYBRID TOGETHER)
     # ============================================
 
-    st.subheader("SIG Strategies (Hybrid + Pure)")
+    st.subheader("SIG Metrics & Rebalancing")
 
     st.write(f"**Quarterly Target (Based on Buy & Hold CAGR):** {quarterly_target:.2%}")
 
@@ -753,7 +753,6 @@ def main():
     # ================================
     # CURRENT QUARTER ALLOCATION VIEW
     # ================================
-    st.write("### Current Allocations (Quarter-Start Basis)")
 
     # ---- quarter-start weights ----
     hyb_w_r_q = float(hybrid_rw.loc[q_start])
