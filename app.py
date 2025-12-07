@@ -815,7 +815,7 @@ def main():
     days_to_next_q = (next_q - last_date).days
 
     st.write(f"**Quarter Start:** {q_start.date()}")
-    st.write(f"**Quarter End (SIG Rebalance Date):** {q_end.date()}")
+    st.write(f"**Quarter End (Rebalance Date):** {q_end.date()}")
     st.write(f"**Days Until Rebalance:** {days_to_next_q}")
 
     # Current risky bucket value implied by % weights today:
@@ -883,7 +883,7 @@ def main():
 
     st.subheader("Account-Level Allocations")
 
-    tab1, tab2, tab3 = st.tabs(["Account 1", "Account 2", "Account 3"])
+    tab1, tab2, tab3 = st.tabs(["Taxable", "Tax-Sheltered", "Joint (Taxable)"])
 
     with tab1:
         st.write("### Hybrid SIG Allocation")
