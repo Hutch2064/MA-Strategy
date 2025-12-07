@@ -354,7 +354,7 @@ def main():
     risk_off_tickers_str = st.sidebar.text_input("Tickers", ",".join(RISK_OFF_WEIGHTS.keys()))
     risk_off_weights_str = st.sidebar.text_input("Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values()))
     
-    st.sidebar.header("Quarter-Start Capital (per account)")
+    st.sidebar.header("Current Account Value (per account)")
 
     quarter_start_cap_1 = st.sidebar.number_input(
         "Account 1 Starting Capital",
@@ -632,25 +632,34 @@ def main():
     pure_risk = float(pure_sig_rw.iloc[-1])
     pure_safe = float(pure_sig_sw.iloc[-1])
 
-    # Strategy 1: Hybrid SIG
-    hyb_alloc_1 = compute_allocations(quarter_start_cap_1, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
-    hyb_alloc_2 = compute_allocations(quarter_start_cap_2, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
-    hyb_alloc_3 = compute_allocations(quarter_start_cap_3, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
+    # ============================================
+    # TODAY-BASED ALLOCATION TABLES
+    # ============================================
 
-    # Strategy 2: Pure SIG (no MA filter)
-    pure_alloc_1 = compute_allocations(quarter_start_cap_1, pure_risk, pure_safe, risk_on_weights, risk_off_weights)
-    pure_alloc_2 = compute_allocations(quarter_start_cap_2, pure_risk, pure_safe, risk_on_weights, risk_off_weights)
-    pure_alloc_3 = compute_allocations(quarter_start_cap_3, pure_risk, pure_safe, risk_on_weights, risk_off_weights)
+    # Reinterpret user inputs as today's actual account values
+    current_cap_1 = quarter_start_cap_1
+    current_cap_2 = quarter_start_cap_2
+    current_cap_3 = quarter_start_cap_3
 
-    # Strategy 3: Risk-ON (100% Risk-On portfolio)
-    riskon_alloc_1 = compute_allocations(quarter_start_cap_1, 1.0, 0.0, risk_on_weights, {"SHY": 0})
-    riskon_alloc_2 = compute_allocations(quarter_start_cap_2, 1.0, 0.0, risk_on_weights, {"SHY": 0})
-    riskon_alloc_3 = compute_allocations(quarter_start_cap_3, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+    # Strategy 1: Hybrid SIG (uses today's hyb_risk / hyb_safe)
+    hyb_alloc_1 = compute_allocations(current_cap_1, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
+    hyb_alloc_2 = compute_allocations(current_cap_2, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
+    hyb_alloc_3 = compute_allocations(current_cap_3, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
 
-    # Strategy 4: Sharpe-Optimal Portfolio
-    sharpe_alloc_1 = compute_sharpe_opt_alloc(quarter_start_cap_1, risk_on_px.columns, w_opt)
-    sharpe_alloc_2 = compute_sharpe_opt_alloc(quarter_start_cap_2, risk_on_px.columns, w_opt)
-    sharpe_alloc_3 = compute_sharpe_opt_alloc(quarter_start_cap_3, risk_on_px.columns, w_opt)
+    # Strategy 2: Pure SIG (today's pure_risk / pure_safe)
+    pure_alloc_1 = compute_allocations(current_cap_1, pure_risk, pure_safe, risk_on_weights, risk_off_weights)
+    pure_alloc_2 = compute_allocations(current_cap_2, pure_risk, pure_safe, risk_on_weights, risk_off_weights)
+    pure_alloc_3 = compute_allocations(current_cap_3, pure_risk, pure_safe, risk_on_weights, risk_off_weights)
+
+    # Strategy 3: Risk-ON (100% risk-on today)
+    riskon_alloc_1 = compute_allocations(current_cap_1, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+    riskon_alloc_2 = compute_allocations(current_cap_2, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+    riskon_alloc_3 = compute_allocations(current_cap_3, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+
+    # Strategy 4: Sharpe-Optimal Portfolio (today's sharpe weights)
+    sharpe_alloc_1 = compute_sharpe_opt_alloc(current_cap_1, risk_on_px.columns, w_opt)
+    sharpe_alloc_2 = compute_sharpe_opt_alloc(current_cap_2, risk_on_px.columns, w_opt)
+    sharpe_alloc_3 = compute_sharpe_opt_alloc(current_cap_3, risk_on_px.columns, w_opt)
         
     # ============================================
     # METRIC TABLE — 4 COLUMNS
