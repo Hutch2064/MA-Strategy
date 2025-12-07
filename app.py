@@ -867,13 +867,13 @@ def main():
         st.dataframe(add_percentage_column(hyb_alloc_2))
 
         st.write("### Pure SIG Allocation")
-        st.dataframe(add_percentage_column(hyb_alloc_2))
-        
+        st.dataframe(add_percentage_column(pure_alloc_2))
+    
         st.write("### Risk-ON Allocation")
-        st.dataframe(add_percentage_column(hyb_alloc_2))
+        st.dataframe(add_percentage_column(riskon_alloc_2))
 
         st.write("### Sharpe-Optimal Allocation")
-        st.dataframe(add_percentage_column(hyb_alloc_2))
+        st.dataframe(add_percentage_column(sharpe_alloc_2))
 
 
     with tab3:
@@ -881,16 +881,15 @@ def main():
         st.dataframe(add_percentage_column(hyb_alloc_3))
 
         st.write("### Pure SIG Allocation")
-        st.dataframe(add_percentage_column(hyb_alloc_3))
+        st.dataframe(add_percentage_column(pure_alloc_3))
 
         st.write("### Risk-ON Allocation")
-        st.dataframe(add_percentage_column(hyb_alloc_3))
+        st.dataframe(add_percentage_column(riskon_alloc_3))
 
         st.write("### Sharpe-Optimal Allocation")
-        st.dataframe(add_percentage_column(hyb_alloc_3))
+        st.dataframe(add_percentage_column(sharpe_alloc_3))
 
         st.write(f"**Hybrid — Rebalance Events:** {hybrid_rebals}")
-        st.dataframe(add_percentage_column(hyb_alloc_3))
 
     # ============================================
     # EXTERNAL VALIDATION LINK
