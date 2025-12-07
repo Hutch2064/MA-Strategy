@@ -369,17 +369,17 @@ def main():
     risk_off_tickers_str = st.sidebar.text_input("Tickers", ",".join(RISK_OFF_WEIGHTS.keys()))
     risk_off_weights_str = st.sidebar.text_input("Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values()))
     
-    st.sidebar.header("SIG Quarter Tracking Inputs")
+    st.sidebar.header("SIG Rebalancing Inputs")
 
     # ACCOUNT 1 — Taxable
     q_start_1 = st.sidebar.number_input(
-        "Account 1 – Quarter Start Value (Taxable)",
+        "Taxable – Quarter Start Value",
         min_value=0.0,
         value=10000.0,
         step=100.0
     )
     q_today_1 = st.sidebar.number_input(
-        "Account 1 – Value Today (Taxable)",
+        "Taxable – Value Today",
         min_value=0.0,
         value=10000.0,
         step=100.0
@@ -387,13 +387,13 @@ def main():
 
     # ACCOUNT 2 — Tax-Sheltered
     q_start_2 = st.sidebar.number_input(
-        "Account 2 – Quarter Start Value (Tax-Sheltered)",
+        "Tax-Sheltered – Quarter Start Value",
         min_value=0.0,
         value=10000.0,
         step=100.0
     )
     q_today_2 = st.sidebar.number_input(
-        "Account 2 – Value Today (Tax-Sheltered)",
+        "Tax-Sheltered – Value Today",
         min_value=0.0,
         value=10000.0,
         step=100.0
@@ -401,13 +401,13 @@ def main():
 
     # ACCOUNT 3 — Joint Taxable
     q_start_3 = st.sidebar.number_input(
-        "Account 3 – Quarter Start Value (Joint)",
+        "Joint (Taxable) – Quarter Start Value",
         min_value=0.0,
         value=10000.0,
         step=100.0
     )
     q_today_3 = st.sidebar.number_input(
-        "Account 3 – Value Today (Joint)",
+        "Joint (Taxable) – Value Today",
         min_value=0.0,
         value=10000.0,
         step=100.0
