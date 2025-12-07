@@ -928,7 +928,7 @@ def main():
     # OPTIMAL SIGNAL PARAMETERS
     # ============================================
 
-    st.subheader("Optimal Signal Parameters")
+    st.subheader("Optimal MA Signal Parameters")
     st.write(f"**Moving Average Type:** {best_type.upper()}")
     st.write(f"**Optimal MA Length:** {best_len}")
     st.write(f"**Optimal Tolerance:** {best_tol:.2%}")
@@ -937,7 +937,7 @@ def main():
     # SIGNAL DISTANCE
     # ============================================
 
-    st.subheader("Next Signal Information")
+    st.subheader("Next MA Signal Information")
 
     latest_date = opt_ma.dropna().index[-1]
     P = float(portfolio_index.loc[latest_date])
