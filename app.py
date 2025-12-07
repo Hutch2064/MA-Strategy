@@ -828,12 +828,6 @@ def main():
     # ================================
     st.write("### Current Allocations")
 
-    st.write("**Hybrid SIG Weights (today)**")
-    st.write({"Risk-On": hybrid_rw.iloc[-1], "Risk-Off": hybrid_sw.iloc[-1]})
-
-    st.write("**Pure SIG Weights (today)**")
-    st.write({"Risk-On": pure_sig_rw.iloc[-1], "Risk-Off": pure_sig_sw.iloc[-1]})
-
     # Diagnostics
     st.write(f"**Hybrid — Average Safe Allocation:** {avg_safe:.2%}")
     # NEW LINE: Pure SIG average safe allocation
