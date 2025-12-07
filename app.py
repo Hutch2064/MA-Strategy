@@ -785,17 +785,6 @@ def main():
     hyb_gap_dollars = hyb_target - hyb_risky_today
     hyb_gap_pct = hyb_gap_dollars / hyb_risky_today if hyb_risky_today > 0 else 0
 
-    st.write("### Hybrid SIG — Quarter Progress")
-    st.write({
-        "Risky Start ($)": hyb_risky_start,
-        "Risky Today ($)": hyb_risky_today,
-        "Gain ($)": hyb_gain_dollars,
-        "Gain (%)": hyb_gain_pct,
-        "Quarterly Target ($)": hyb_target,
-        "More Needed ($)": hyb_gap_dollars,
-        "More Needed (%)": hyb_gap_pct,
-    })
-    
     st.write("---")
 
     # ----- PURE SIG -----
@@ -810,17 +799,6 @@ def main():
     pure_target = pure_risky_start * (1 + quarterly_target)
     pure_gap_dollars = pure_target - pure_risky_today
     pure_gap_pct = pure_gap_dollars / pure_risky_today if pure_risky_today > 0 else 0
-
-    st.write("### Pure SIG — Quarter Progress")
-    st.write({
-        "Risky Start ($)": pure_risky_start,
-        "Risky Today ($)": pure_risky_today,
-        "Gain ($)": pure_gain_dollars,
-        "Gain (%)": pure_gain_pct,
-        "Quarterly Target ($)": pure_target,
-        "More Needed ($)": pure_gap_dollars,
-        "More Needed (%)": pure_gap_pct,
-    })
 
     # ================================
     # CURRENT WEIGHTS
