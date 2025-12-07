@@ -782,7 +782,6 @@ def main():
     progress_table_fmt.loc["Gap (%)"] = progress_table.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
     st.dataframe(progress_table_fmt, width="stretch")
 
-    st.dataframe(progress_table, use_container_width=True)
     st.write("---")
     # ===== END NEW TABLE =====
 
