@@ -701,9 +701,9 @@ def main():
     # ============================================
 
     # TODAY-BASED ALLOCATION TABLES (use SIG 'Value Today' inputs)
-    current_cap_1 = q_today_1
-    current_cap_2 = q_today_2
-    current_cap_3 = q_today_3
+    current_cap_1 = risky_today_1
+    current_cap_2 = risky_today_2
+    current_cap_3 = risky_today_3
 
     # Strategy 1: Hybrid SIG (uses today's hyb_risk / hyb_safe)
     hyb_alloc_1 = compute_allocations(current_cap_1, hyb_risk, hyb_safe, risk_on_weights, risk_off_weights)
@@ -810,9 +810,6 @@ def main():
     # ===== NEW: Quarter Progress Table =====
     st.write("### Quarter Progress — SIG Tracking")
 
-    # Convert quarter start date to nearest index in SIG weights
-    q_start_idx = pure_sig_rw.index[(abs(pure_sig_rw.index - q_start)).argmin()]
-
     prog1 = compute_quarter_progress(
         risky_start_1, risky_today_1, quarterly_target
     )
@@ -840,17 +837,6 @@ def main():
 
     st.write(f"**Quarterly Target (Based on Buy & Hold CAGR):** {quarterly_target:.2%}")
 
-    # ================================
-    # CURRENT QUARTER ALLOCATION VIEW
-    # ================================
-
-    # ---- quarter-start weights ----
-    hyb_w_r_q = float(hybrid_rw.loc[q_start])
-    hyb_w_s_q = float(hybrid_sw.loc[q_start])
-
-    pure_w_r_q = float(pure_sig_rw.loc[q_start])
-    pure_w_s_q = float(pure_sig_sw.loc[q_start])
-
     # =====================================================
     # QUARTERLY PROGRESS TRACKER — EXACT VALUES TODAY
     # =====================================================
@@ -861,32 +847,6 @@ def main():
 
     pure_w_r_q = float(pure_sig_rw.loc[q_start])
     pure_w_s_q = float(pure_sig_sw.loc[q_start])
-    
-    # ----- HYBRID -----
-    hyb_risky_start = q_start_1 * hyb_w_r_q
-    hyb_safe_start  = q_start_1 * hyb_w_s_q
-    hyb_risky_today = q_today_1 * float(hybrid_rw.iloc[-1])
-
-    hyb_gain_dollars = hyb_risky_today - hyb_risky_start
-    hyb_gain_pct = hyb_gain_dollars / hyb_risky_start if hyb_risky_start > 0 else 0
-
-    hyb_target = hyb_risky_start * (1 + quarterly_target)
-    hyb_gap_dollars = hyb_target - hyb_risky_today
-    hyb_gap_pct = hyb_gap_dollars / hyb_risky_today if hyb_risky_today > 0 else 0
-
-    st.write("---")
-
-    # ----- PURE SIG -----
-    pure_risky_start = q_start_1 * pure_w_r_q
-    pure_safe_start  = q_start_1 * pure_w_s_q
-    pure_risky_today = q_today_1 * float(pure_sig_rw.iloc[-1])
-
-    pure_gain_dollars = pure_risky_today - pure_risky_start
-    pure_gain_pct = pure_gain_dollars / pure_risky_start if pure_risky_start > 0 else 0
-
-    pure_target = pure_risky_start * (1 + quarterly_target)
-    pure_gap_dollars = pure_target - pure_risky_today
-    pure_gap_pct = pure_gap_dollars / pure_risky_today if pure_risky_today > 0 else 0
     
     # ============================================
     # ACCOUNT ALLOCATION TABLES
