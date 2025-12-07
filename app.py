@@ -379,13 +379,13 @@ def main():
 
     # ACCOUNT 1 — Taxable
     risky_start_1 = st.sidebar.number_input(
-        "Taxable – RISKY Dollars at Quarter Start",
+        "Taxable – Deployed Dollars at Quarter Start",
         min_value=0.0,
         value=6000.0,   # example default: 60% of 10k
         step=100.0
     )
     risky_today_1 = st.sidebar.number_input(
-        "Taxable – RISKY Dollars Today",
+        "Taxable – Deployed Dollars Today",
         min_value=0.0,
         value=6000.0,
         step=100.0
@@ -393,13 +393,13 @@ def main():
 
     # ACCOUNT 2 — Tax-Sheltered
     risky_start_2 = st.sidebar.number_input(
-        "Tax-Sheltered – RISKY Dollars at Quarter Start",
+        "Tax-Sheltered – Deployed Dollars at Quarter Start",
         min_value=0.0,
         value=6000.0,
         step=100.0
     )
     risky_today_2 = st.sidebar.number_input(
-        "Tax-Sheltered – RISKY Dollars Today",
+        "Tax-Sheltered – Deployed Dollars Today",
         min_value=0.0,
         value=6000.0,
         step=100.0
@@ -407,13 +407,13 @@ def main():
 
     # ACCOUNT 3 — Joint
     risky_start_3 = st.sidebar.number_input(
-        "Joint (Taxable) – RISKY Dollars at Quarter Start",
+        "Joint (Taxable) – Deployed Dollars at Quarter Start",
         min_value=0.0,
         value=6000.0,
         step=100.0
     )
     risky_today_3 = st.sidebar.number_input(
-        "Joint (Taxable) – RISKY Dollars Today",
+        "Joint (Taxable) – Deployed Dollars Today",
         min_value=0.0,
         value=6000.0,
         step=100.0
@@ -550,9 +550,9 @@ def main():
     prog_auto_3 = compute_quarter_progress(risky_start_3, risky_today_3, quarterly_target)
 
     auto_prog = pd.concat([
-        pd.DataFrame.from_dict(prog_auto_1, orient='index', columns=['Account 1']),
-        pd.DataFrame.from_dict(prog_auto_2, orient='index', columns=['Account 2']),
-        pd.DataFrame.from_dict(prog_auto_3, orient='index', columns=['Account 3']),
+        pd.DataFrame.from_dict(prog_auto_1, orient='index', columns=['Taxable']),
+        pd.DataFrame.from_dict(prog_auto_2, orient='index', columns=['Tax-Sheltered']),
+        pd.DataFrame.from_dict(prog_auto_3, orient='index', columns=['Joint (Taxable)']),
     ], axis=1)
 
     auto_prog.loc["Gap (%)"] = auto_prog.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
@@ -566,12 +566,9 @@ def main():
         return "No rebalance needed."
 
     st.write("### Automated Rebalance Recommendation")
-    st.write(f"**Account 1:** {rebalance_text(prog_auto_1['Gap ($)'])}")
-    st.write(f"**Account 2:** {rebalance_text(prog_auto_2['Gap ($)'])}")
-    st.write(f"**Account 3:** {rebalance_text(prog_auto_3['Gap ($)'])}")
-
-    st.write("### Full MA Signal History")
-    st.write(sig.astype(int).to_frame("Signal"))
+    st.write(f"**Taxable:** {rebalance_text(prog_auto_1['Gap ($)'])}")
+    st.write(f"**Tax-Sheltered:** {rebalance_text(prog_auto_2['Gap ($)'])}")
+    st.write(f"**Joint (Taxable):** {rebalance_text(prog_auto_3['Gap ($)'])}")
 
 # ============================================================
     
@@ -878,9 +875,9 @@ def main():
         risky_start_3, risky_today_3, quarterly_target
     )   
     
-    df1 = pd.DataFrame.from_dict(prog1, orient="index", columns=["Account 1"])
-    df2 = pd.DataFrame.from_dict(prog2, orient="index", columns=["Account 2"])
-    df3 = pd.DataFrame.from_dict(prog3, orient="index", columns=["Account 3"])
+    df1 = pd.DataFrame.from_dict(prog1, orient="index", columns=["Taxable"])
+    df2 = pd.DataFrame.from_dict(prog2, orient="index", columns=["Tax-Sheltered"])
+    df3 = pd.DataFrame.from_dict(prog3, orient="index", columns=["Joint (Taxable)"])
 
     progress_table = pd.concat([df1, df2, df3], axis=1)
 
