@@ -621,6 +621,77 @@ def main():
     
     avg_safe = hybrid_sw.mean()
 
+    # ============================================================
+    # NEW: REBALANCE TABLE FOR SIG STRATEGIES (Hybrid + Pure)
+    # ============================================================
+
+    def compute_sig_rebalance_table(
+        alloc_today,
+        start_cap,
+        w_r_start,
+        w_s_start,
+        w_r_today,
+        w_s_today,
+        risk_on_weights,
+        risk_off_weights,
+        quarterly_target
+    ):
+        df = pd.DataFrame.from_dict(alloc_today, orient="index", columns=["$ Today"])
+
+        # ---- Step 1: Compute quarter-start risky/safe values ----
+        risky_start = start_cap * w_r_start
+        safe_start  = start_cap * w_s_start
+
+        # ---- Step 2: Compute target risky value according to SIG rules ----
+        target_risky = risky_start * (1 + quarterly_target)
+        total_today  = df["$ Today"].sum()
+
+        # ---- Step 3: Compute CURRENT risky value (sum of risk-on tickers) ----
+        current_risky = 0
+        current_safe  = 0
+
+        for asset in df.index:
+            if asset in risk_on_weights:
+                current_risky += df.loc[asset, "$ Today"]
+            elif asset in risk_off_weights:
+                current_safe += df.loc[asset, "$ Today"]
+
+        # ---- Step 4: Total dollars to move into/out of risky bucket ----
+        risky_flow = target_risky - current_risky    # + = buy risky, - = sell risky
+
+        # ---- Step 5: Compute target per-asset dollars ------------------
+        target_alloc = {}
+
+        # Risk-on tickers share target_risky according to weights:
+        for t, w in risk_on_weights.items():
+            target_alloc[t] = target_risky * w
+
+        # Risk-off tickers share the remaining safe bucket:
+        target_safe = total_today - target_risky
+        for t, w in risk_off_weights.items():
+            target_alloc[t] = target_safe * w
+
+        # ---- Step 6: Per-asset trade amount ----------------------------
+        trade = {}
+        new_value = {}
+        new_weight = {}
+
+        for asset in df.index:
+            today_val = df.loc[asset, "$ Today"]
+            tgt = target_alloc.get(asset, today_val)
+            trade_amt = tgt - today_val
+            new_val = today_val + trade_amt
+
+            trade[asset] = trade_amt
+            new_value[asset] = new_val
+            new_weight[asset] = new_val / total_today
+
+        df["$ To Trade"] = pd.Series(trade)
+        df["New $ Value"] = pd.Series(new_value)
+        df["New % If Q Started Today"] = pd.Series(new_weight).apply(lambda x: f"{x:.2%}")
+
+        return df
+
     # ============================================
     # ACCOUNT-LEVEL ALLOCATIONS (3 ACCOUNTS × 4 STRATEGIES)
     # ============================================
@@ -849,11 +920,31 @@ def main():
     tab1, tab2, tab3 = st.tabs(["Account 1", "Account 2", "Account 3"])
 
     with tab1:
-        st.write("### Hybrid SIG Allocation")
-        st.dataframe(add_percentage_column(hyb_alloc_1))
+        st.write("### Hybrid SIG Allocation (With SIG Rebalance Table)")
+        st.dataframe(
+            compute_sig_rebalance_table(
+                hyb_alloc_1,
+                quarter_start_cap_1,
+                hyb_w_r_q, hyb_w_s_q,
+                hyb_risk, hyb_safe,
+                risk_on_weights, risk_off_weights,
+                quarterly_target
+            ),
+            use_container_width=True
+        )
 
-        st.write("### Pure SIG Allocation")
-        st.dataframe(add_percentage_column(pure_alloc_1))
+        st.write("### Pure SIG Allocation (With SIG Rebalance Table)")
+        st.dataframe(
+            compute_sig_rebalance_table(
+                pure_alloc_1,
+                quarter_start_cap_1,
+                pure_w_r_q, pure_w_s_q,
+                pure_risk, pure_safe,
+                risk_on_weights, risk_off_weights,
+                quarterly_target
+            ),
+            use_container_width=True
+        )
 
         st.write("### Risk-ON Allocation")
         st.dataframe(add_percentage_column(riskon_alloc_1))
@@ -863,12 +954,32 @@ def main():
 
 
     with tab2:
-        st.write("### Hybrid SIG Allocation")
-        st.dataframe(add_percentage_column(hyb_alloc_2))
+        st.write("### Hybrid SIG Allocation (With SIG Rebalance Table)")
+        st.dataframe(
+            compute_sig_rebalance_table(
+                hyb_alloc_2,
+                quarter_start_cap_2,
+                hyb_w_r_q, hyb_w_s_q,
+                hyb_risk, hyb_safe,
+                risk_on_weights, risk_off_weights,
+                quarterly_target
+            ),
+            use_container_width=True
+        )
 
-        st.write("### Pure SIG Allocation")
-        st.dataframe(add_percentage_column(pure_alloc_2))
-    
+        st.write("### Pure SIG Allocation (With SIG Rebalance Table)")
+        st.dataframe(
+            compute_sig_rebalance_table(
+                pure_alloc_2,
+                quarter_start_cap_2,
+                pure_w_r_q, pure_w_s_q,
+                pure_risk, pure_safe,
+                risk_on_weights, risk_off_weights,
+                quarterly_target
+            ),
+            use_container_width=True
+        )
+
         st.write("### Risk-ON Allocation")
         st.dataframe(add_percentage_column(riskon_alloc_2))
 
@@ -877,11 +988,31 @@ def main():
 
 
     with tab3:
-        st.write("### Hybrid SIG Allocation")
-        st.dataframe(add_percentage_column(hyb_alloc_3))
+        st.write("### Hybrid SIG Allocation (With SIG Rebalance Table)")
+        st.dataframe(
+            compute_sig_rebalance_table(
+                hyb_alloc_3,
+                quarter_start_cap_3,
+                hyb_w_r_q, hyb_w_s_q,
+                hyb_risk, hyb_safe,
+                risk_on_weights, risk_off_weights,
+                quarterly_target
+            ),
+            use_container_width=True
+        )
 
-        st.write("### Pure SIG Allocation")
-        st.dataframe(add_percentage_column(pure_alloc_3))
+        st.write("### Pure SIG Allocation (With SIG Rebalance Table)")
+        st.dataframe(
+            compute_sig_rebalance_table(
+                pure_alloc_3,
+                quarter_start_cap_3,
+                pure_w_r_q, pure_w_s_q,
+                pure_risk, pure_safe,
+                risk_on_weights, risk_off_weights,
+                quarterly_target
+            ),
+            use_container_width=True
+        )
 
         st.write("### Risk-ON Allocation")
         st.dataframe(add_percentage_column(riskon_alloc_3))
