@@ -609,6 +609,8 @@ def main():
 
         # Compute overall portfolio percentages (totals + tickers)
         df["%"] = df["$"] / total_cap if total_cap > 0 else 0
+
+        return df
     
     avg_safe = hybrid_sw.mean()
 
