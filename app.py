@@ -553,16 +553,28 @@ def main():
     auto_prog.loc["Gap (%)"] = auto_prog.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
     st.dataframe(auto_prog)
 
-    def rebalance_text(gap):
-        if gap > 0:
-            return f"Increase Deployed sleeve by **${gap:,.2f}**"
-        elif gap < 0:
-            return f"Decrease Deployed sleeve by **${abs(gap):,.2f}**"
-        return "No rebalance needed."
+    def rebalance_text(gap, next_q, days_to_next_q):
+        date_str = next_q.strftime("%m/%d/%Y")
+        days_str = f"{days_to_next_q} days" if days_to_next_q >= 0 else "0 days"
 
-    st.write(f"**Taxable:** {rebalance_text(prog_auto_1['Gap ($)'])}")
-    st.write(f"**Tax-Sheltered:** {rebalance_text(prog_auto_2['Gap ($)'])}")
-    st.write(f"**Joint (Taxable):** {rebalance_text(prog_auto_3['Gap ($)'])}")
+        if gap > 0:
+            return (
+                f"Increase deployed sleeve by **${gap:,.2f}** "
+                f"on **{date_str}** ({days_str})"
+            )
+        elif gap < 0:
+            return (
+                f"Decrease deployed sleeve by **${abs(gap):,.2f}** "
+                f"on **{date_str}** ({days_str})"
+            )
+        else:
+            return (
+                f"No rebalance needed until **{date_str}** ({days_str})"
+            )
+
+    st.write(f"**Taxable:** {rebalance_text(prog_auto_1['Gap ($)'], next_q, days_to_next_q)}")
+    st.write(f"**Tax-Sheltered:** {rebalance_text(prog_auto_2['Gap ($)'], next_q, days_to_next_q)}")
+    st.write(f"**Joint (Taxable):** {rebalance_text(prog_auto_3['Gap ($)'], next_q, days_to_next_q)}")
 
 # ============================================================
     
@@ -832,7 +844,7 @@ def main():
     # ROLLING 63-DAY REBALANCE LOGIC — STARTS FROM USER DATE
     # =====================================================
 
-    st.subheader("Rebalance Timing (Every 63 Days from Start)")
+    st.subheader("Rebalance Timing (Quarterly)")
 
     strategy_start_date = pd.Timestamp(strategy_start_date)
     today = prices.index[-1]   # use market's latest available date
