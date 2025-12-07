@@ -375,6 +375,19 @@ def main():
         value=pd.Timestamp.today().date()
     )
     
+    # Convert strategy start date to actual price index
+    strategy_ts = pd.Timestamp(strategy_start_date)
+
+    # Clamp to available data range
+    if strategy_ts < prices.index[0]:
+        strategy_ts = prices.index[0]
+    elif strategy_ts > prices.index[-1]:
+        strategy_ts = prices.index[-1]
+
+    # Snap to nearest valid index
+    strategy_ts = prices.index[prices.index.get_loc(strategy_ts, method="nearest")]
+    
+    
     st.sidebar.header("SIG Rebalancing Inputs (RISKY dollars only)")
 
     # ACCOUNT 1 — Taxable
@@ -384,13 +397,7 @@ def main():
         value=6000.0,   # example default: 60% of 10k
         step=100.0
     )
-    risky_today_1 = st.sidebar.number_input(
-        "Taxable – RISKY Dollars Today",
-        min_value=0.0,
-        value=6000.0,
-        step=100.0
-    )
-
+    
     # ACCOUNT 2 — Tax-Sheltered
     risky_start_2 = st.sidebar.number_input(
         "Tax-Sheltered – RISKY Dollars at Quarter Start",
@@ -398,13 +405,7 @@ def main():
         value=6000.0,
         step=100.0
     )
-    risky_today_2 = st.sidebar.number_input(
-        "Tax-Sheltered – RISKY Dollars Today",
-        min_value=0.0,
-        value=6000.0,
-        step=100.0
-    )
-
+    
     # ACCOUNT 3 — Joint
     risky_start_3 = st.sidebar.number_input(
         "Joint (Taxable) – RISKY Dollars at Quarter Start",
@@ -412,12 +413,13 @@ def main():
         value=6000.0,
         step=100.0
     )
-    risky_today_3 = st.sidebar.number_input(
-        "Joint (Taxable) – RISKY Dollars Today",
-        min_value=0.0,
-        value=6000.0,
-        step=100.0
-    )
+    
+    # OVERRIDE risky_today values using real performance since strategy start date
+    risky_today_1 = risky_start_1 * risky_growth_factor
+    risky_today_2 = risky_start_2 * risky_growth_factor
+    risky_today_3 = risky_start_3 * risky_growth_factor
+    
+    
     
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
@@ -464,8 +466,42 @@ def main():
     for a, w in risk_on_weights.items():
         if a in simple_rets.columns:
             risk_on_simple += simple_rets[a] * w
+            
+    # Build risky portfolio index to track real-world growth
+    risky_index = (1 + risk_on_simple).cumprod()
 
     risk_on_eq = (1 + risk_on_simple).cumprod()
+    
+    # Compute growth of risky portfolio since user-selected strategy start date
+    start_risky_idx = risky_index.loc[strategy_ts]
+    end_risky_idx = risky_index.iloc[-1]
+    risky_growth_factor = end_risky_idx / start_risky_idx
+    
+    # === Build REAL portfolio index since user-selected start date ===
+    # Risky = SIG or MA risky bucket performance
+    # Safe = SHY or user's risk-off buckets
+
+    # Build safe asset index the same way as risky_index
+    risk_off_index = (1 + risk_off_daily).cumprod()
+
+    start_safe_idx = risk_off_index.loc[strategy_ts]
+    end_safe_idx = risk_off_index.iloc[-1]
+
+    safe_growth_factor = end_safe_idx / start_safe_idx
+
+    # Combine risky + safe into a total portfolio return since strategy start
+    # Using the START_RISKY / START_SAFE allocation
+    real_total_growth = (
+        START_RISKY * risky_growth_factor +
+        START_SAFE * safe_growth_factor
+    )
+
+    # Build a synthetic total portfolio index (normalized to 1 at start)
+    real_portfolio_index = (
+        START_RISKY * (risky_index / start_risky_idx) +
+        START_SAFE * (risk_off_index / start_safe_idx)
+    )
+    
     risk_on_perf = compute_performance(risk_on_simple, risk_on_eq)
 
     # ============================================
@@ -613,6 +649,27 @@ def main():
         0
     )
 
+    # === PERFORMANCE OF REAL USER PORTFOLIO SINCE STRATEGY START ===
+    real_portfolio_returns = real_portfolio_index.pct_change().fillna(0)
+
+    real_perf = compute_performance(
+        real_portfolio_returns,
+        real_portfolio_index
+    )
+
+    real_stats = {
+        "CAGR": real_perf["CAGR"],
+        "Volatility": real_perf["Volatility"],
+        "Sharpe": real_perf["Sharpe"],
+        "MaxDD": real_perf["MaxDrawdown"],
+        "TotalReturn": real_perf["TotalReturn"],
+        "MAR": real_perf["CAGR"] / abs(real_perf["MaxDrawdown"]) if real_perf["MaxDrawdown"] != 0 else np.nan,
+        "TID": (real_perf["DD_Series"] < 0).mean(),
+        "PainGain": real_perf["CAGR"] / np.sqrt((real_perf["DD_Series"]**2).mean()),
+        "Skew": real_portfolio_returns.skew(),
+        "Kurtosis": real_portfolio_returns.kurt(),
+    }
+
     # ============================================
     # ALLOCATION HELPERS FOR 3 ACCOUNTS / 4 STRATEGIES
     # ============================================
@@ -739,6 +796,38 @@ def main():
     # METRIC TABLE — 4 COLUMNS
     # ============================================
 
+    # ============================================
+    # REAL USER PORTFOLIO SINCE STRATEGY START
+    # ============================================
+
+    st.subheader("Your Portfolio Performance Since Strategy Start Date")
+
+    rows_real = [
+        ("Total Return", real_stats["TotalReturn"]),
+        ("CAGR", real_stats["CAGR"]),
+        ("Volatility", real_stats["Volatility"]),
+        ("Sharpe", real_stats["Sharpe"]),
+        ("Max Drawdown", real_stats["MaxDD"]),
+        ("MAR Ratio", real_stats["MAR"]),
+        ("Time in Drawdown (%)", real_stats["TID"]),
+        ("Pain-to-Gain", real_stats["PainGain"]),
+        ("Skew", real_stats["Skew"]),
+        ("Kurtosis", real_stats["Kurtosis"]),
+    ]
+
+    def fmt_pct(x): return f"{x:.2%}" if pd.notna(x) else "—"
+    def fmt_dec(x): return f"{x:.3f}" if pd.notna(x) else "—"
+
+    table_real = []
+    for label, val in rows_real:
+        if label in ["CAGR", "Volatility", "Total Return", "Max Drawdown", "Time in Drawdown (%)"]:
+            table_real.append([label, fmt_pct(val)])
+        else:
+            table_real.append([label, fmt_dec(val)])
+
+    real_df = pd.DataFrame(table_real, columns=["Metric", "Value"])
+    st.dataframe(real_df, use_container_width=True)
+    
     st.subheader("Strategy vs. Sharpe-Optimal vs. Risk-ON vs. Hybrid vs. Pure SIG")
 
     rows = [
