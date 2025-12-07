@@ -447,6 +447,15 @@ def main():
 
     sig = best_result["signal"]
     perf = best_result["performance"]
+    
+    # ======= DISPLAY MA SIGNAL USED FOR BOTH MA + HYBRID STRATEGIES =======
+    st.subheader("MA Signal Used by Strategy (1 = Risk-ON, 0 = Risk-OFF)")
+    st.write(sig.astype(int).to_frame("Signal"))
+
+    latest_signal = sig.iloc[-1]
+    regime = "RISK-ON" if latest_signal else "RISK-OFF"
+    st.write(f"**Current Regime:** {regime}")
+    # ======================================================================
 
     latest_signal = sig.iloc[-1]
     regime = "RISK-ON" if latest_signal else "RISK-OFF"
