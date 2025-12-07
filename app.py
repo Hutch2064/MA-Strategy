@@ -371,7 +371,7 @@ def main():
 
     st.sidebar.header("SIG Rebalance Settings")
     strategy_start_date = st.sidebar.date_input(
-        "Enter the date you LAST rebalanced your SIG sleeve",
+        "Enter the date you LAST rebalanced",
         value=pd.Timestamp.today().date()
     )
     
