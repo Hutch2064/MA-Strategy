@@ -445,7 +445,7 @@ def main():
     elif strategy_ts > prices.index[-1]:
         strategy_ts = prices.index[-1]
 
-    strategy_ts = prices.index[prices.index.get_loc(strategy_ts, method='nearest')]
+    strategy_ts = prices.index[(abs(prices.index - strategy_ts)).argmin()]
 
     # Run MA optimization
     best_cfg, best_result = run_grid_search(
