@@ -602,13 +602,13 @@ def main():
         return alloc
 
     def add_percentage_column(alloc_dict):
-    df = pd.DataFrame.from_dict(alloc_dict, orient="index", columns=["$"])
+        df = pd.DataFrame.from_dict(alloc_dict, orient="index", columns=["$"])
 
-    # Total portfolio value
-    total_cap = df["$"].sum()
+        # Total portfolio value
+        total_cap = df["$"].sum()
 
-    # Compute overall portfolio percentages (totals + tickers)
-    df["%"] = df["$"] / total_cap if total_cap > 0 else 0
+        # Compute overall portfolio percentages (totals + tickers)
+        df["%"] = df["$"] / total_cap if total_cap > 0 else 0
     
     avg_safe = hybrid_sw.mean()
 
