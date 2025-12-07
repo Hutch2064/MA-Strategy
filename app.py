@@ -447,6 +447,10 @@ def main():
 
     sig = best_result["signal"]
     perf = best_result["performance"]
+    
+    # === Trades per Year Calculation (must be defined early) ===
+    switches = sig.astype(int).diff().abs().sum()
+    trades_per_year = switches / (len(sig) / 252)
 
     # ============================================
     # ALWAYS-ON RISK-ON PERFORMANCE
