@@ -603,8 +603,16 @@ def main():
 
     def add_percentage_column(alloc_dict):
         df = pd.DataFrame.from_dict(alloc_dict, orient="index", columns=["$"])
-        total = df["$"].sum()
-        df["%"] = df["$"] / total if total != 0 else 0
+
+        # Identify actual asset rows (exclude Total Risky $ and Total Safe $)
+        mask_assets = ~df.index.isin(["Total Risky $", "Total Safe $"])
+    
+        asset_total = df.loc[mask_assets, "$"].sum()
+
+        # Compute percentages only for assets
+        df["%"] = 0.0
+        df.loc[mask_assets, "%"] = df.loc[mask_assets, "$"] / asset_total if asset_total > 0 else 0
+
         return df
     
     avg_safe = hybrid_sw.mean()
