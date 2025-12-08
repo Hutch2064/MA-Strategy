@@ -341,9 +341,9 @@ def compute_quarter_progress(risky_start, risky_today, quarterly_target):
     pct_gap = gap / risky_start if risky_start > 0 else 0
 
     return {
-        "Risky Start ($)": risky_start,
-        "Risky Today ($)": risky_today,
-        "Quarterly Target ($)": target_risky,
+        "Implied Deployed Capital at Qtr Start ($)": risky_start,
+        "Implied Deployed Capital Today ($)": risky_today,
+        "Deployed Capital Target Qtr End ($)": target_risky,
         "Gap ($)": gap,
         "Gap (%)": pct_gap,
     }
