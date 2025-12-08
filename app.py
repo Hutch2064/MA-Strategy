@@ -736,12 +736,7 @@ def main():
         # Identify ticker rows
         ticker_rows = out.index.difference([risky_total_row, safe_total_row])
 
-        # Compute sleeve totals
-        risky_total = out.loc[risky_total_row, "$"]
-        safe_total  = out.loc[safe_total_row, "$"]
-
         # Create blank columns
-        out["% Sleeve"] = ""
         out["% Portfolio"] = ""
 
         # Sleeve percentages (risk-on tickers divide by risky total, etc.)
