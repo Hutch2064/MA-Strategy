@@ -355,6 +355,23 @@ def compute_quarter_progress(risky_start, risky_today, quarterly_target):
 
 def normalize(eq):
     return eq / eq.iloc[0] * 10000
+    
+# ============================================================
+# PRECOMPUTE QUARTER START DATE (before running backtest)
+# ============================================================
+
+def precompute_quarter_start():
+    # Use SHY because long reliable history & stable
+    px = yf.download("SHY", start=DEFAULT_START_DATE, progress=False)
+    if "Adj Close" in px.columns:
+        px = px["Adj Close"].dropna()
+    else:
+        px = px["Close"].dropna()
+
+    n = len(px)
+    quarter_indices = [i for i in range(n) if i % QUARTER_DAYS == 0]
+    q_start_idx = quarter_indices[-1]        # latest full quarter start index
+    return px.index[q_start_idx]
 # ============================================================
 # STREAMLIT APP
 # ============================================================
@@ -391,25 +408,42 @@ def main():
     )
 
     # ------------------------------------------------------------
-    # SIDEBAR: Real-World Account Values (C1)
+    # SIDEBAR: Quarter Start + User Inputs for Real-World Balances
     # ------------------------------------------------------------
-    st.sidebar.header("Current Portfolio Values")
+    st.sidebar.header("Quarterly Tracking Inputs")
 
-    real_cap_1 = st.sidebar.number_input(
-        "Taxable – Total Portfolio Value Today ($)",
-        min_value=0.0, value=72558.41, step=100.0
+    # Show the detected quarter start date BEFORE any run
+    quarter_start_precalc = precompute_quarter_start()
+    st.sidebar.markdown(f"**Current Quarter Start Date:** {quarter_start_precalc.date()}")
+
+    st.sidebar.write("Enter your real portfolio values:")
+
+    real_start_1 = st.sidebar.number_input(
+        "Taxable – Portfolio Value at Quarter Start ($)",
+        min_value=0.0, step=100.0
     )
-    real_cap_2 = st.sidebar.number_input(
-        "Tax-Sheltered – Total Portfolio Value Today ($)",
-        min_value=0.0, value=9177.97, step=100.0
-    )
-    real_cap_3 = st.sidebar.number_input(
-        "Joint (Taxable) – Total Portfolio Value Today ($)",
-        min_value=0.0, value=4151.11, step=100.0
+    real_today_1 = st.sidebar.number_input(
+        "Taxable – Portfolio Value Today ($)",
+        min_value=0.0, step=100.0
     )
 
-    if not st.sidebar.button("Run Backtest & Optimize"):
-        st.stop()
+    real_start_2 = st.sidebar.number_input(
+        "Tax-Sheltered – Portfolio Value at Quarter Start ($)",
+        min_value=0.0, step=100.0
+    )
+    real_today_2 = st.sidebar.number_input(
+        "Tax-Sheltered – Portfolio Value Today ($)",
+        min_value=0.0, step=100.0
+    )
+
+    real_start_3 = st.sidebar.number_input(
+        "Joint – Portfolio Value at Quarter Start ($)",
+        min_value=0.0, step=100.0
+    )
+    real_today_3 = st.sidebar.number_input(
+        "Joint – Portfolio Value Today ($)",
+        min_value=0.0, step=100.0
+    )
 
     # ------------------------------------------------------------
     # Parse sleeve inputs
@@ -543,14 +577,14 @@ def main():
     # ------------------------------------------------------------
     # DERIVE risky_start / risky_today FOR EACH ACCOUNT (C1)
     # ------------------------------------------------------------
-    def get_sig_progress(real_cap):
-        risky_start = float(hybrid_rw.iloc[q_start_idx]) * real_cap
-        risky_today = float(hybrid_rw.iloc[-1]) * real_cap
+    def get_sig_progress(real_start_val, real_today_val):
+        risky_start = real_start_val * float(hybrid_rw.iloc[q_start_idx])
+        risky_today = real_today_val * float(hybrid_rw.iloc[-1])
         return compute_quarter_progress(risky_start, risky_today, quarterly_target)
 
-    prog_1 = get_sig_progress(real_cap_1)
-    prog_2 = get_sig_progress(real_cap_2)
-    prog_3 = get_sig_progress(real_cap_3)
+    prog_1 = get_sig_progress(real_start_1, real_today_1)
+    prog_2 = get_sig_progress(real_start_2, real_today_2)
+    prog_3 = get_sig_progress(real_start_3, real_today_3)
 
     # ------------------------------------------------------------
     # NEXT QUARTER DATE (automatic)
