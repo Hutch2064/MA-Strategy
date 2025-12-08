@@ -504,33 +504,6 @@ def main():
     st.write("### SIG Quarterly Target Check")
     st.write(f"**Quarterly Target Growth:** {quarterly_target:.2%}")
 
-    # === NEW: derive SIG risky/safe weights based on today's hybrid/pure signals ==
-
-    # === NEW: derive real-world risky dollar values automatically ===
-    risky_today_1 = total_portfolio_value * hyb_risk_today
-    risky_start_1 = risky_today_1 / (1 + quarterly_target)
-
-    # Accounts 2 and 3 mirror account 1 (same SIG)
-    risky_today_2 = risky_today_1
-    risky_start_2 = risky_start_1
-
-    risky_today_3 = risky_today_1
-    risky_start_3 = risky_start_1
-    
-    # === Quarterly progress calculation ===
-    prog_auto_1 = compute_quarter_progress(risky_start_1, risky_today_1, quarterly_target)
-    prog_auto_2 = compute_quarter_progress(risky_start_2, risky_today_2, quarterly_target)
-    prog_auto_3 = compute_quarter_progress(risky_start_3, risky_today_3, quarterly_target)
-
-    auto_prog = pd.concat([
-        pd.DataFrame.from_dict(prog_auto_1, orient='index', columns=['Taxable']),
-        pd.DataFrame.from_dict(prog_auto_2, orient='index', columns=['Tax-Sheltered']),
-        pd.DataFrame.from_dict(prog_auto_3, orient='index', columns=['Joint (Taxable)']),
-    ], axis=1)
-
-    auto_prog.loc["Gap (%)"] = auto_prog.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
-    st.dataframe(auto_prog)
-
     def rebalance_text(gap, next_q, days_to_next_q):
         date_str = next_q.strftime("%m/%d/%Y")
         days_str = f"{days_to_next_q} days" if days_to_next_q >= 0 else "0 days"
@@ -614,6 +587,38 @@ def main():
         pure_sig_sw=pure_sig_sw,
         flip_cost=FLIP_COST
     )
+
+    # === TRUE TODAY WEIGHTS FOR PURE & HYBRID (must come AFTER run_sig_engine)
+    pure_risk_today  = float(pure_sig_rw.iloc[-1])
+    pure_safe_today  = float(pure_sig_sw.iloc[-1])
+
+    hyb_risk_today   = float(hybrid_rw.iloc[-1])
+    hyb_safe_today   = float(hybrid_sw.iloc[-1])
+
+    # === Automatically compute risky dollars today from real-world portfolio ===
+    risky_today_1 = total_portfolio_value * hyb_risk_today
+    risky_start_1 = risky_today_1 / (1 + quarterly_target)
+
+    # Accounts 2 and 3 mirror SIG logic
+    risky_today_2 = risky_today_1
+    risky_start_2 = risky_start_1
+
+    risky_today_3 = risky_today_1
+    risky_start_3 = risky_start_1
+
+    # === Quarterly progress calculation ===
+    prog_auto_1 = compute_quarter_progress(risky_start_1, risky_today_1, quarterly_target)
+    prog_auto_2 = compute_quarter_progress(risky_start_2, risky_today_2, quarterly_target)
+    prog_auto_3 = compute_quarter_progress(risky_start_3, risky_today_3, quarterly_target)
+
+    auto_prog = pd.concat([
+        pd.DataFrame.from_dict(prog_auto_1, orient='index', columns=['Taxable']),
+        pd.DataFrame.from_dict(prog_auto_2, orient='index', columns=['Tax-Sheltered']),
+        pd.DataFrame.from_dict(prog_auto_3, orient='index', columns=['Joint (Taxable)']),
+    ], axis=1)
+
+    auto_prog.loc["Gap (%)"] = auto_prog.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
+    st.dataframe(auto_prog)
 
     # === TRUE TODAY WEIGHTS FOR PURE & HYBRID (must come AFTER run_sig_engine)
     pure_risk_today  = float(pure_sig_rw.iloc[-1])
