@@ -151,12 +151,8 @@ def run_sig_engine(
         if ma_on:
 
             if frozen_risky is not None:
-                if pure_sig_rw is not None and pure_sig_sw is not None:
-                    w_r = pure_sig_rw.iloc[i]
-                    w_s = pure_sig_sw.iloc[i]
-                else:
-                    w_r = START_RISKY
-                    w_s = START_SAFE
+                w_r = pure_sig_rw.iloc[i]
+                w_s = pure_sig_sw.iloc[i]
 
                 risky_val = eq * w_r
                 safe_val  = eq * w_s
@@ -592,16 +588,6 @@ def main():
     st.write(f"**Joint (Taxable):** {rebalance_text(prog_auto_3['Gap ($)'], next_q, days_to_next_q)}")
 
 # ============================================================
-    
-    hybrid_eq, hybrid_rw, hybrid_sw, hybrid_rebals = run_sig_engine(
-        risk_on_simple,
-        risk_off_daily,
-        quarterly_target,
-        sig,
-        pure_sig_rw=pure_sig_rw,
-        pure_sig_sw=pure_sig_sw,
-        flip_cost=FLIP_COST
-    )
 
     hybrid_simple = hybrid_eq.pct_change().fillna(0)
     hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
@@ -641,6 +627,16 @@ def main():
         risk_off_daily,
         quarterly_target,
         pure_sig_signal,
+        flip_cost=FLIP_COST
+    )
+
+    hybrid_eq, hybrid_rw, hybrid_sw, hybrid_rebals = run_sig_engine(
+        risk_on_simple,
+        risk_off_daily,
+        quarterly_target,
+        sig,
+        pure_sig_rw=pure_sig_rw,
+        pure_sig_sw=pure_sig_sw,
         flip_cost=FLIP_COST
     )
 
