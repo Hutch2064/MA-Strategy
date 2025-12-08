@@ -726,16 +726,37 @@ def main():
     def add_pct(df):
         out = pd.DataFrame.from_dict(df, orient="index", columns=["$"])
 
-        # Identify Tickers (exclude totals)
-        ticker_rows = out[~out.index.str.contains("Total")]
-        total_portfolio = ticker_rows["$"].sum()
+        # Identify rows
+        risky_total_row = "Total Risky $"
+        safe_total_row  = "Total Safe $"
 
-        # Compute percent of portfolio only for tickers
+        # Determine total portfolio value
+        total_portfolio = out.loc[risky_total_row, "$"] + out.loc[safe_total_row, "$"]
+
+        # Identify ticker rows
+        ticker_rows = out.index.difference([risky_total_row, safe_total_row])
+
+        # Compute sleeve totals
+        risky_total = out.loc[risky_total_row, "$"]
+        safe_total  = out.loc[safe_total_row, "$"]
+
+        # Create blank columns
+        out["% Sleeve"] = ""
         out["% Portfolio"] = ""
 
-        out.loc[ticker_rows.index, "% Portfolio"] = (
-            ticker_rows["$"] / total_portfolio * 100
-        ).apply(lambda x: f"{x:.2f}%")
+        # Sleeve percentages (risk-on tickers divide by risky total, etc.)
+        for idx in ticker_rows:
+            if idx in RISK_ON_WEIGHTS:
+                out.loc[idx, "% Sleeve"] = f"{(out.loc[idx, '$'] / risky_total) * 100:.2f}%"
+            else:
+                out.loc[idx, "% Sleeve"] = f"{(out.loc[idx, '$'] / safe_total) * 100:.2f}%"
+
+        # Sleeve totals must show 100%
+        out.loc[risky_total_row, "% Sleeve"] = "100%"
+        out.loc[safe_total_row,  "% Sleeve"] = "100%"
+
+        # Portfolio percentages
+        out["% Portfolio"] = (out["$"] / total_portfolio * 100).apply(lambda x: f"{x:.2f}%")
 
         return out
 
