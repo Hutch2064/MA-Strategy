@@ -399,15 +399,15 @@ def main():
     # User enters quarter-start total balances (real values from statements)
     qs_cap_1 = st.sidebar.number_input(
         "Taxable – Portfolio Value at Quarter Start ($)",
-        min_value=0.0, value=0.0, step=100.0
+        min_value=0.0, value=73202.85, step=100.0
     )
     qs_cap_2 = st.sidebar.number_input(
         "Tax-Sheltered – Portfolio Value at Quarter Start ($)",
-        min_value=0.0, value=0.0, step=100.0
+        min_value=0.0, value=9442.15, step=100.0
     )
     qs_cap_3 = st.sidebar.number_input(
         "Joint – Portfolio Value at Quarter Start ($)",
-        min_value=0.0, value=0.0, step=100.0
+        min_value=0.0, value=4189.76, step=100.0
     )
 
     st.sidebar.header("Current Portfolio Values (Today)")
