@@ -357,27 +357,6 @@ def normalize(eq):
     return eq / eq.iloc[0] * 10000
     
 # ============================================================
-# PRECOMPUTE QUARTER START DATE (before running backtest)
-# ============================================================
-
-# ---- PREVIEW QUARTER START DATE WITHOUT RUNNING ANY STRATEGY ----
-# Load only prices for quarter detection (fast, minimal)
-preview_prices = load_price_data(
-    sorted(set(RISK_ON_WEIGHTS.keys()) | set(RISK_OFF_WEIGHTS.keys())),
-    DEFAULT_START_DATE,
-    None
-)
-
-# Build index just to align with dates
-preview_index = build_portfolio_index(preview_prices, RISK_ON_WEIGHTS)
-
-# Determine quarter start index (same method the engine uses)
-preview_quarter_indices = [i for i in range(len(preview_index)) if i % QUARTER_DAYS == 0]
-preview_q_start_idx = max(preview_quarter_indices)
-
-# Sidebar needs this date BEFORE running the strategy
-preview_quarter_start_date = preview_index.index[preview_q_start_idx].date()
-# ============================================================
 # STREAMLIT APP
 # ============================================================
 
@@ -413,13 +392,27 @@ def main():
     )
 
     # ------------------------------------------------------------
+    # PREVIEW QUARTER START (correct, fast version)
+    # ------------------------------------------------------------
+
+    preview_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
+    preview_prices = load_price_data(preview_tickers, start, end if end.strip() else None)
+
+    preview_index = build_portfolio_index(preview_prices, risk_on_weights)
+
+    if len(preview_index) > 0:
+        last_idx = len(preview_index) - 1
+        quarter_candidates = [i for i in range(len(preview_index)) if i % QUARTER_DAYS == 0]
+        preview_q_start_idx = max(i for i in quarter_candidates if i <= last_idx)
+        preview_quarter_start_date = preview_index.index[preview_q_start_idx]
+    else:
+        preview_quarter_start_date = "N/A"
+        
+    # ------------------------------------------------------------
     # SIDEBAR: Quarter Start + User Inputs for Real-World Balances
     # ------------------------------------------------------------
     st.sidebar.header("Quarterly Tracking Inputs")
-
-    # Show the correct quarter start date before clicking RUN
     st.sidebar.write(f"**Current Quarter Start Date:** {preview_quarter_start_date}")
-
     st.sidebar.write("Enter your real portfolio values:")
 
     real_cap_1_start = st.sidebar.number_input(
@@ -459,6 +452,31 @@ def main():
     risk_off_tickers = [t.strip().upper() for t in risk_off_tickers_str.split(",")]
     risk_off_weights_list = [float(x) for x in risk_off_weights_str.split(",")]
     risk_off_weights = dict(zip(risk_off_tickers, risk_off_weights_list))
+
+    # ------------------------------------------------------------
+    # PREVIEW QUARTER START (correct, fast version)
+    # ------------------------------------------------------------
+
+    # Load prices using user-selected tickers + start date
+    preview_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
+    preview_prices = load_price_data(preview_tickers, start, end if end.strip() else None)
+
+    # Build portfolio index for Risk-On sleeve (same as main code)
+    preview_index = build_portfolio_index(preview_prices, risk_on_weights)
+
+    # Compute a simple preview quarterly cadence:
+    # We do NOT run grid search — we just use the natural quarter boundaries
+    if len(preview_index) > 0:
+        last_idx = len(preview_index) - 1
+        quarter_candidates = [i for i in range(len(preview_index)) if i % QUARTER_DAYS == 0]
+        preview_q_start_idx = max(i for i in quarter_candidates if i <= last_idx)
+        preview_quarter_start_date = preview_index.index[preview_q_start_idx]
+    else:
+        preview_quarter_start_date = "N/A"
+
+    # Display preview in sidebar BEFORE user clicks "Run Backtest"
+    st.sidebar.markdown("### Quarterly Tracking Inputs")
+    st.sidebar.write(f"**Current Quarter Start Date:** {preview_quarter_start_date}")
 
     # ------------------------------------------------------------
     # Load prices
