@@ -723,34 +723,11 @@ def main():
     def compute_sharpe_alloc(account_value, tickers, weights):
         return {t: account_value * w for t, w in zip(tickers, weights)}
 
-    def add_pct(df):
-        out = pd.DataFrame.from_dict(df, orient="index", columns=["$"])
+    def add_pct(df_dict):
+        out = pd.DataFrame.from_dict(df_dict, orient="index", columns=["$"])
 
-        # Identify rows
-        risky_total_row = "Total Risky $"
-        safe_total_row  = "Total Safe $"
-
-        # Determine total portfolio value
-        total_portfolio = out.loc[risky_total_row, "$"] + out.loc[safe_total_row, "$"]
-
-        # Identify ticker rows
-        ticker_rows = out.index.difference([risky_total_row, safe_total_row])
-
-        # Create blank columns
-        out["% Portfolio"] = ""
-
-        # Sleeve percentages (risk-on tickers divide by risky total, etc.)
-        for idx in ticker_rows:
-            if idx in RISK_ON_WEIGHTS:
-                out.loc[idx, "% Sleeve"] = f"{(out.loc[idx, '$'] / risky_total) * 100:.2f}%"
-            else:
-                out.loc[idx, "% Sleeve"] = f"{(out.loc[idx, '$'] / safe_total) * 100:.2f}%"
-
-        # Sleeve totals must show 100%
-        out.loc[risky_total_row, "% Sleeve"] = "100%"
-        out.loc[safe_total_row,  "% Sleeve"] = "100%"
-
-        # Portfolio percentages
+        # Compute % of total portfolio
+        total_portfolio = out["$"].sum()
         out["% Portfolio"] = (out["$"] / total_portfolio * 100).apply(lambda x: f"{x:.2f}%")
 
         return out
