@@ -724,20 +724,20 @@ def main():
         return {t: account_value * w for t, w in zip(tickers, weights)}
 
     def add_pct(df):
-    out = pd.DataFrame.from_dict(df, orient="index", columns=["$"])
+        out = pd.DataFrame.from_dict(df, orient="index", columns=["$"])
 
-    # Identify Tickers (exclude totals)
-    ticker_rows = out[~out.index.str.contains("Total")]
-    total_portfolio = ticker_rows["$"].sum()
+        # Identify Tickers (exclude totals)
+        ticker_rows = out[~out.index.str.contains("Total")]
+        total_portfolio = ticker_rows["$"].sum()
 
-    # Compute percent of portfolio only for tickers
-    out["% Portfolio"] = ""
+        # Compute percent of portfolio only for tickers
+        out["% Portfolio"] = ""
 
-    out.loc[ticker_rows.index, "% Portfolio"] = (
-        ticker_rows["$"] / total_portfolio * 100
-    ).apply(lambda x: f"{x:.2f}%")
+        out.loc[ticker_rows.index, "% Portfolio"] = (
+            ticker_rows["$"] / total_portfolio * 100
+        ).apply(lambda x: f"{x:.2f}%")
 
-    return out
+        return out
 
     st.subheader("Account-Level Allocations")
 
