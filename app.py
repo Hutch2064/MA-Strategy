@@ -423,6 +423,14 @@ def main():
         "Joint – Portfolio Value Today ($)",
         min_value=0.0, value=0.0, step=100.0
     )
+    
+    # ------------------------------------------------------------
+    # Run Button — prevents auto execution
+    # ------------------------------------------------------------
+    run_clicked = st.sidebar.button("Run Backtest & Optimize")
+
+    if not run_clicked:
+        st.stop()
 
     # ------------------------------------------------------------
     # Parse sleeve inputs
