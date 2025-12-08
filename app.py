@@ -603,6 +603,12 @@ def main():
     st.write(f"**Quarter start:** {quarter_start_date.date()}")
     st.write(f"**Next rebalance date:** {next_q.date()} ({days_to_next_q} days)")
 
+    # ------------------------------------------------------------
+    # SHOW QUARTERLY GROWTH TARGET (Kelly quarterly target)
+    # ------------------------------------------------------------
+    st.subheader("Quarterly Growth Target")
+    st.write(f"**Quarterly Target Growth Rate:** {quarterly_target:.2%}")
+
     prog_df = pd.concat([
         pd.DataFrame.from_dict(prog_1, orient='index', columns=['Taxable']),
         pd.DataFrame.from_dict(prog_2, orient='index', columns=['Tax-Sheltered']),
