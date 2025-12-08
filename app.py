@@ -360,18 +360,23 @@ def normalize(eq):
 # PRECOMPUTE QUARTER START DATE (before running backtest)
 # ============================================================
 
-def precompute_quarter_start():
-    # Use SHY because long reliable history & stable
-    px = yf.download("SHY", start=DEFAULT_START_DATE, progress=False)
-    if "Adj Close" in px.columns:
-        px = px["Adj Close"].dropna()
-    else:
-        px = px["Close"].dropna()
+# ---- PREVIEW QUARTER START DATE WITHOUT RUNNING ANY STRATEGY ----
+# Load only prices for quarter detection (fast, minimal)
+preview_prices = load_price_data(
+    sorted(set(RISK_ON_WEIGHTS.keys()) | set(RISK_OFF_WEIGHTS.keys())),
+    DEFAULT_START_DATE,
+    None
+)
 
-    n = len(px)
-    quarter_indices = [i for i in range(n) if i % QUARTER_DAYS == 0]
-    q_start_idx = quarter_indices[-1]        # latest full quarter start index
-    return px.index[q_start_idx]
+# Build index just to align with dates
+preview_index = build_portfolio_index(preview_prices, RISK_ON_WEIGHTS)
+
+# Determine quarter start index (same method the engine uses)
+preview_quarter_indices = [i for i in range(len(preview_index)) if i % QUARTER_DAYS == 0]
+preview_q_start_idx = max(preview_quarter_indices)
+
+# Sidebar needs this date BEFORE running the strategy
+preview_quarter_start_date = preview_index.index[preview_q_start_idx].date()
 # ============================================================
 # STREAMLIT APP
 # ============================================================
@@ -412,39 +417,38 @@ def main():
     # ------------------------------------------------------------
     st.sidebar.header("Quarterly Tracking Inputs")
 
-    # Show the detected quarter start date BEFORE any run
-    quarter_start_precalc = precompute_quarter_start()
-    st.sidebar.markdown(f"**Current Quarter Start Date:** {quarter_start_precalc.date()}")
+    # Show the correct quarter start date before clicking RUN
+    st.sidebar.write(f"**Current Quarter Start Date:** {preview_quarter_start_date}")
 
     st.sidebar.write("Enter your real portfolio values:")
 
-    real_start_1 = st.sidebar.number_input(
+    real_cap_1_start = st.sidebar.number_input(
         "Taxable – Portfolio Value at Quarter Start ($)",
-        min_value=0.0, step=100.0
+        min_value=0.0, value=0.0, step=100.0
     )
-    real_today_1 = st.sidebar.number_input(
+    real_cap_1_today = st.sidebar.number_input(
         "Taxable – Portfolio Value Today ($)",
-        min_value=0.0, step=100.0
+        min_value=0.0, value=0.0, step=100.0
     )
 
-    real_start_2 = st.sidebar.number_input(
+    real_cap_2_start = st.sidebar.number_input(
         "Tax-Sheltered – Portfolio Value at Quarter Start ($)",
-        min_value=0.0, step=100.0
+        min_value=0.0, value=0.0, step=100.0
     )
-    real_today_2 = st.sidebar.number_input(
+    real_cap_2_today = st.sidebar.number_input(
         "Tax-Sheltered – Portfolio Value Today ($)",
-        min_value=0.0, step=100.0
+        min_value=0.0, value=0.0, step=100.0
     )
 
-    real_start_3 = st.sidebar.number_input(
+    real_cap_3_start = st.sidebar.number_input(
         "Joint – Portfolio Value at Quarter Start ($)",
-        min_value=0.0, step=100.0
+        min_value=0.0, value=0.0, step=100.0
     )
-    real_today_3 = st.sidebar.number_input(
+    real_cap_3_today = st.sidebar.number_input(
         "Joint – Portfolio Value Today ($)",
-        min_value=0.0, step=100.0
+        min_value=0.0, value=0.0, step=100.0
     )
-
+    
     # ------------------------------------------------------------
     # Parse sleeve inputs
     # ------------------------------------------------------------
