@@ -414,15 +414,15 @@ def main():
 
     real_cap_1 = st.sidebar.number_input(
         "Taxable – Portfolio Value Today ($)",
-        min_value=0.0, value=0.0, step=100.0
+        min_value=0.0, value=72078.40, step=100.0
     )
     real_cap_2 = st.sidebar.number_input(
         "Tax-Sheltered – Portfolio Value Today ($)",
-        min_value=0.0, value=0.0, step=100.0
+        min_value=0.0, value=9117.45, step=100.0
     )
     real_cap_3 = st.sidebar.number_input(
         "Joint – Portfolio Value Today ($)",
-        min_value=0.0, value=0.0, step=100.0
+        min_value=0.0, value=4122.41, step=100.0
     )
     
     # ------------------------------------------------------------
