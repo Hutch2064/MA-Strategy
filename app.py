@@ -441,6 +441,15 @@ def main():
     sig = best_result["signal"]
     perf = best_result["performance"]
 
+    # ------------------------------------------------------------
+    # CURRENT MA REGIME
+    # ------------------------------------------------------------
+    latest_signal = sig.iloc[-1]
+    current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
+
+    st.subheader(f"Current MA Regime: {current_regime}")
+    st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
+
     # Compute MA used for final signal
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
@@ -568,7 +577,7 @@ def main():
     # ------------------------------------------------------------
     # DISPLAY SIG QUARTERLY PROGRESS RESULTS
     # ------------------------------------------------------------
-    st.subheader("Quarterly SIG Progress (Derived Automatically From Hybrid Backtest)")
+    st.subheader("Strategy Summary")
     st.write(f"**Quarter start:** {quarter_start_date.date()}")
     st.write(f"**Next rebalance date:** {next_q.date()} ({days_to_next_q} days)")
 
