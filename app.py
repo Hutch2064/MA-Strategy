@@ -723,29 +723,18 @@ def main():
     def compute_sharpe_alloc(account_value, tickers, weights):
         return {t: account_value * w for t, w in zip(tickers, weights)}
 
-    def add_pct(df):
-        out = pd.DataFrame.from_dict(df, orient="index", columns=["$"])
+    def add_pct(df_dict):
+        out = pd.DataFrame.from_dict(df_dict, orient="index", columns=["$"])
 
-        # Identify rows
-        risky_total_row = "Total Risky $"
-        safe_total_row  = "Total Safe $"
+        # If this is a SIG-style table (has total risky/safe rows)
+        if "Total Risky $" in out.index and "Total Safe $" in out.index:
+            total_portfolio = float(out.loc["Total Risky $","$"]) + float(out.loc["Total Safe $","$"])
+            out["% Portfolio"] = (out["$"] / total_portfolio * 100).apply(lambda x: f"{x:.2f}%")
+            return out
 
-        # Determine total portfolio value
-        total_portfolio = out.loc[risky_total_row, "$"] + out.loc[safe_total_row, "$"]
-
-        # Identify ticker rows (unused now but kept for structure consistency)
-        ticker_rows = out.index.difference([risky_total_row, safe_total_row])
-
-        # --- REMOVED: % Sleeve column (all of it) ---
-        # No creation of "% Sleeve"
-        # No assignments for "% Sleeve"
-        # No 100% totals for "% Sleeve"
-
-        # Portfolio percentages (kept exactly the same)
-        out["% Portfolio"] = (
-            out["$"] / total_portfolio * 100
-        ).apply(lambda x: f"{x:.2f}%")
-
+        # Otherwise this is a simple ticker-only allocation (Sharpe-optimal, MA-only, 100% Risk-On, etc.)
+        total = out["$"].sum()
+        out["% Portfolio"] = (out["$"] / total * 100).apply(lambda x: f"{x:.2f}%")
         return out
 
     st.subheader("Account-Level Allocations")
