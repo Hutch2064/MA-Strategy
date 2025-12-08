@@ -374,7 +374,7 @@ def main():
     # ------------------------------------------------------------
     # SIDEBAR: Asset Sleeves
     # ------------------------------------------------------------
-    st.sidebar.header("Deployed Capital Sleeve (RISK-ON)")
+    st.sidebar.header("Deployed Capital Sleeve")
     risk_on_tickers_str = st.sidebar.text_input(
         "Tickers", ",".join(RISK_ON_WEIGHTS.keys())
     )
@@ -382,7 +382,7 @@ def main():
         "Weights", ",".join(str(w) for w in RISK_ON_WEIGHTS.values())
     )
 
-    st.sidebar.header("Treasury Sleeve (RISK-OFF)")
+    st.sidebar.header("Treasury Sleeve")
     risk_off_tickers_str = st.sidebar.text_input(
         "Tickers", ",".join(RISK_OFF_WEIGHTS.keys())
     )
@@ -393,7 +393,7 @@ def main():
     # ------------------------------------------------------------
     # SIDEBAR: Real-World Account Values (C1)
     # ------------------------------------------------------------
-    st.sidebar.header("Real-World Account Values")
+    st.sidebar.header("Current Portfolio Values")
 
     real_cap_1 = st.sidebar.number_input(
         "Taxable – Total Portfolio Value Today ($)",
