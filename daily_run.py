@@ -1,27 +1,28 @@
-import os
+# ===============================================
+# DAILY EMAIL SCRIPT — BLOCK 1
+# All defaults preserved exactly from Streamlit app
+# ===============================================
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
 from scipy.optimize import minimize
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
-import smtplib
 import datetime
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+import ssl
+import io
+import base64
 
 # ============================================================
-# CONFIG — MATCH MAIN STREAMLIT APP EXACTLY
+# CONFIG  (identical to Streamlit)
 # ============================================================
 
 DEFAULT_START_DATE = "1999-01-01"
 RISK_FREE_RATE = 0.0
-FLIP_COST = 0.045
-QUARTER_DAYS = 63
 
 RISK_ON_WEIGHTS = {
     "UGL": .25,
@@ -33,16 +34,28 @@ RISK_OFF_WEIGHTS = {
     "SHY": 1.0,
 }
 
+FLIP_COST = 0.045
+QUARTER_DAYS = 63
+
+# SIG engine starting point (unchanged)
 START_RISKY = 0.60
 START_SAFE  = 0.40
 
+# ============================================================
+# REAL ACCOUNT VALUES (A1 — hardcoded)
+# ============================================================
+
+REAL_CAP_1 = 72558.41     # Taxable
+REAL_CAP_2 = 9177.97      # Tax-Sheltered
+REAL_CAP_3 = 4151.11      # Joint
 
 # ============================================================
-# DATA LOADING
+# DATA LOADING (no Streamlit caching here)
 # ============================================================
 
 def load_price_data(tickers, start_date, end_date=None):
     data = yf.download(tickers, start=start_date, end=end_date, progress=False)
+
     if "Adj Close" in data.columns:
         px = data["Adj Close"].copy()
     else:
@@ -53,9 +66,8 @@ def load_price_data(tickers, start_date, end_date=None):
 
     return px.dropna(how="all")
 
-
 # ============================================================
-# PORTFOLIO INDEX — SIMPLE RETURNS
+# BUILD PORTFOLIO INDEX — SIMPLE RETURNS
 # ============================================================
 
 def build_portfolio_index(prices, weights_dict):
@@ -68,26 +80,24 @@ def build_portfolio_index(prices, weights_dict):
 
     return (1 + idx_rets).cumprod()
 
-
 # ============================================================
-# MOVING AVERAGE MATRIX
+# MA MATRIX (same as Streamlit)
 # ============================================================
 
 def compute_ma_matrix(price_series, lengths, ma_type):
-    out = {}
+    ma_dict = {}
     if ma_type == "ema":
         for L in lengths:
             ma = price_series.ewm(span=L, adjust=False).mean()
-            out[L] = ma.shift(1)
+            ma_dict[L] = ma.shift(1)
     else:
         for L in lengths:
             ma = price_series.rolling(window=L, min_periods=L).mean()
-            out[L] = ma.shift(1)
-    return out
-
+            ma_dict[L] = ma.shift(1)
+    return ma_dict
 
 # ============================================================
-# TESTFOL SIGNAL ENGINE (HYSTERESIS)
+# TESTFOL MA SIGNAL (same)
 # ============================================================
 
 def generate_testfol_signal_vectorized(price, ma, tol):
@@ -99,43 +109,29 @@ def generate_testfol_signal_vectorized(price, ma, tol):
     lower = ma_vals * (1 - tol)
 
     sig = np.zeros(n, dtype=bool)
+
     first_valid = np.nanargmin(np.isnan(ma_vals))
     if first_valid == 0:
         first_valid = 1
-
     start_index = first_valid + 1
 
     for t in range(start_index, n):
-        if not sig[t-1]:
+        if not sig[t - 1]:
             sig[t] = px[t] > upper[t]
         else:
             sig[t] = not (px[t] < lower[t])
 
     return pd.Series(sig, index=ma.index).fillna(False)
 
-
 # ============================================================
-# BACKTEST ENGINE FOR MA STRATEGY
+# PERFORMANCE ENGINE HELPERS
 # ============================================================
-
-def build_weight_df(prices, signal, ron, roff):
-    w = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
-
-    for a, pct in ron.items():
-        if a in w.columns:
-            w.loc[signal, a] = pct
-
-    for a, pct in roff.items():
-        if a in w.columns:
-            w.loc[~signal, a] = pct
-
-    return w
-
 
 def compute_performance(simple_returns, eq_curve, rf=0.0):
     cagr = (eq_curve.iloc[-1] / eq_curve.iloc[0]) ** (252 / len(eq_curve)) - 1
     vol = simple_returns.std() * np.sqrt(252)
     sharpe = (simple_returns.mean() * 252 - rf) / vol if vol > 0 else np.nan
+
     dd = eq_curve / eq_curve.cummax() - 1
 
     return {
@@ -147,66 +143,101 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
         "DD_Series": dd,
     }
 
+# ============================================================
+# BACKTEST ENGINE (MA Strategy)
+# ============================================================
 
-def backtest(prices, signal, ron, roff, flip_cost):
+def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
+    weights = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
+
+    for a, w in risk_on_weights.items():
+        if a in prices.columns:
+            weights.loc[signal, a] = w
+
+    for a, w in risk_off_weights.items():
+        if a in prices.columns:
+            weights.loc[~signal, a] = w
+
+    return weights
+
+def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
     simple = prices.pct_change().fillna(0)
-    weights = build_weight_df(prices, signal, ron, roff)
+    weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
-    strat_simple = (weights.shift(1).fillna(0) * simple).sum(axis=1)
-    flips = signal.astype(int).diff().abs() == 1
-    flip_hits = np.where(flips, -flip_cost, 0.0)
+    strategy_simple = (weights.shift(1).fillna(0) * simple).sum(axis=1)
+    sig_arr = signal.astype(int)
 
-    adj = strat_simple + flip_hits
-    eq = (1 + adj).cumprod()
+    flip_mask = sig_arr.diff().abs() == 1
+    flip_costs = np.where(flip_mask, -flip_cost, 0.0)
+
+    strat_adj = strategy_simple + flip_costs
+    eq = (1 + strat_adj).cumprod()
 
     return {
-        "returns": adj,
+        "returns": strat_adj,
         "equity_curve": eq,
         "signal": signal,
-        "flip_mask": flips,
-        "performance": compute_performance(adj, eq),
+        "weights": weights,
+        "performance": compute_performance(strat_adj, eq),
+        "flip_mask": flip_mask,
     }
 
-
 # ============================================================
-# GRID SEARCH — IDENTICAL TO MAIN APP
+# GRID SEARCH (EXACT from Streamlit — no UI)
 # ============================================================
 
-def run_grid_search(prices, ron, roff, flip_cost):
-    best_sharpe = -1e12
+def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
+
+    best_sharpe = -1e9
     best_cfg = None
-    best_res = None
+    best_result = None
     best_trades = np.inf
 
-    portfolio_index = build_portfolio_index(prices, ron)
+    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+
     lengths = list(range(21, 253))
     types = ["sma", "ema"]
-    tolerances = np.arange(0.0, 0.0501, 0.002)
+    tolerances = np.arange(0.0, .0501, .002)
 
     ma_cache = {t: compute_ma_matrix(portfolio_index, lengths, t) for t in types}
 
+    total_loops = len(lengths) * len(types) * len(tolerances)
+    loop = 0
+
     for ma_type in types:
-        for L in lengths:
-            ma = ma_cache[ma_type][L]
+        for length in lengths:
+            ma = ma_cache[ma_type][length]
 
             for tol in tolerances:
-                sig = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-                res = backtest(prices, sig, ron, roff, flip_cost)
+                signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+                result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
 
-                sig_arr = sig.astype(int)
-                trades = sig_arr.diff().abs().sum() / (len(sig_arr) / 252)
+                sig_arr = signal.astype(int)
+                switches = sig_arr.diff().abs().sum()
+                trades_per_year = switches / (len(sig_arr) / 252)
 
-                sharpe = res["performance"]["Sharpe"]
+                sharpe = result["performance"]["Sharpe"]
 
-                if (sharpe > best_sharpe) or (sharpe == best_sharpe and trades < best_trades):
+                # Selection logic identical to app
+                if (
+                    sharpe > best_sharpe or
+                    (sharpe == best_sharpe and trades_per_year < best_trades)
+                ):
                     best_sharpe = sharpe
-                    best_trades = trades
-                    best_cfg = (L, ma_type, tol)
-                    best_res = res
+                    best_trades = trades_per_year
+                    best_cfg = (length, ma_type, tol)
+                    best_result = result
 
-    return best_cfg, best_res
+                loop += 1
+
+    return best_cfg, best_result
+# ===============================================
+# DAILY EMAIL SCRIPT — BLOCK 2
+# SIG Engine, performance stats, quarterly progress
+# ===============================================
+
 # ============================================================
-# SIG ENGINE — PURE SIG + HYBRID SIG (IDENTICAL TO MAIN APP)
+# SIG ENGINE
 # ============================================================
 
 def run_sig_engine(
@@ -245,6 +276,7 @@ def run_sig_engine(
 
         if ma_on:
 
+            # Restore pure SIG weights upon re-entering
             if frozen_risky is not None:
                 w_r = pure_sig_rw.iloc[i]
                 w_s = pure_sig_sw.iloc[i]
@@ -256,6 +288,7 @@ def run_sig_engine(
             risky_val *= (1 + r_on)
             safe_val  *= (1 + r_off)
 
+            # Quarterly rebalance
             if i >= QUARTER_DAYS and (i % QUARTER_DAYS == 0):
 
                 past_risky_val = risky_val_series[i - QUARTER_DAYS]
@@ -274,11 +307,11 @@ def run_sig_engine(
                     risky_val += move
                     rebalance_events += 1
 
+                # Small quarterly fee
                 quarter_fee = flip_cost * target_quarter
                 eq *= (1 - quarter_fee)
 
             eq = risky_val + safe_val
-
             risky_w = risky_val / eq
             safe_w  = safe_val / eq
 
@@ -286,6 +319,7 @@ def run_sig_engine(
                 eq *= (1 - flip_cost)
 
         else:
+            # Freeze SIG weights for re-entry
             if frozen_risky is None:
                 frozen_risky = risky_val
                 frozen_safe  = safe_val
@@ -304,9 +338,8 @@ def run_sig_engine(
         pd.Series(equity_curve, index=dates),
         pd.Series(risky_w_series, index=dates),
         pd.Series(safe_w_series, index=dates),
-        rebalance_events
+        rebalance_events,
     )
-
 
 # ============================================================
 # QUARTERLY PROGRESS HELPER
@@ -325,80 +358,200 @@ def compute_quarter_progress(risky_start, risky_today, quarterly_target):
         "Gap (%)": pct_gap,
     }
 
-
 # ============================================================
-# ADVANCED METRICS — MATCH MAIN APP
-# ============================================================
-
-def time_in_drawdown(dd): 
-    return (dd < 0).mean()
-
-def ulcer(dd): 
-    return np.sqrt((dd**2).mean()) if (dd**2).mean() != 0 else np.nan
-
-def pain_gain(cagr, dd): 
-    u = ulcer(dd)
-    return cagr / u if u != 0 else np.nan
-
-def mar_ratio(cagr, maxdd): 
-    return cagr / abs(maxdd) if maxdd != 0 else np.nan
-
-
-def compute_stats(perf, returns, dd, flips, tpy):
-    return {
-        "CAGR": perf["CAGR"],
-        "Volatility": perf["Volatility"],
-        "Sharpe": perf["Sharpe"],
-        "MaxDD": perf["MaxDrawdown"],
-        "Total": perf["TotalReturn"],
-        "MAR": mar_ratio(perf["CAGR"], perf["MaxDrawdown"]),
-        "TID": time_in_drawdown(dd),
-        "PainGain": pain_gain(perf["CAGR"], dd),
-        "Skew": returns.skew(),
-        "Kurtosis": returns.kurt(),
-        "Trades/year": tpy,
-    }
-
-
-# ============================================================
-# SHARPE OPTIMAL PORTFOLIO (IDENTICAL TO MAIN APP)
+# NORMALIZER
 # ============================================================
 
-def compute_sharpe_optimal(prices, ron_weights):
-    tickers = [t for t in ron_weights.keys() if t in prices.columns]
-    px = prices[tickers].dropna()
-    rets = px.pct_change().dropna()
+def normalize(eq):
+    return eq / eq.iloc[0] * 10000
 
-    mu = rets.mean().values
-    cov = rets.cov().values + np.eye(len(mu)) * 1e-10
+# ============================================================
+# MAIN ENGINE EXECUTION (headless version of Streamlit logic)
+# ============================================================
+
+def run_full_engine():
+
+    # Load all prices
+    tickers = sorted(set(RISK_ON_WEIGHTS.keys()) | set(RISK_OFF_WEIGHTS.keys()))
+    prices = load_price_data(tickers, DEFAULT_START_DATE)
+
+    # Run MA optimization
+    best_cfg, best_result = run_grid_search(
+        prices, RISK_ON_WEIGHTS, RISK_OFF_WEIGHTS, FLIP_COST
+    )
+    best_len, best_type, best_tol = best_cfg
+
+    sig = best_result["signal"]
+    perf = best_result["performance"]
+
+    # Current MA regime
+    latest_signal = sig.iloc[-1]
+    current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
+
+    # Rebuild MA curve
+    portfolio_index = build_portfolio_index(prices, RISK_ON_WEIGHTS)
+    opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
+
+    # Always-on risk-on benchmark
+    simple_rets = prices.pct_change().fillna(0)
+
+    risk_on_simple = pd.Series(0.0, index=simple_rets.index)
+    for a, w in RISK_ON_WEIGHTS.items():
+        if a in simple_rets.columns:
+            risk_on_simple += simple_rets[a] * w
+
+    risk_on_eq = (1 + risk_on_simple).cumprod()
+    risk_on_perf = compute_performance(risk_on_simple, risk_on_eq)
+
+    # SHARPE-OPTIMAL PORTFOLIO
+    ron_px = prices[list(RISK_ON_WEIGHTS.keys())].dropna()
+    ron_rets = ron_px.pct_change().dropna()
+
+    mu = ron_rets.mean().values
+    cov = ron_rets.cov().values + np.eye(len(mu)) * 1e-10
 
     def neg_sharpe(w):
         r = np.dot(mu, w)
         v = np.sqrt(np.dot(w.T, cov @ w))
-        if v == 0: 
-            return 1e9
-        return -(r / v)
+        return -(r / v) if v > 0 else 1e9
 
     n = len(mu)
-    bounds = [(0, 1)] * n
-    cons = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
-
-    res = minimize(neg_sharpe, np.ones(n)/n, bounds=bounds, constraints=cons)
+    res = minimize(neg_sharpe, np.ones(n)/n,
+                   bounds=[(0,1)]*n,
+                   constraints={"type":"eq","fun":lambda w: w.sum()-1})
     w_opt = res.x
 
-    sharp_returns = (rets * w_opt).sum(axis=1)
+    sharp_returns = (ron_rets * w_opt).sum(axis=1)
     sharp_eq = (1 + sharp_returns).cumprod()
     sharp_perf = compute_performance(sharp_returns, sharp_eq)
 
-    return tickers, w_opt, sharp_returns, sharp_eq, sharp_perf
+    # HYBRID SIG ENGINE
+    risk_off_daily = pd.Series(0.0, index=simple_rets.index)
+    for a, w in RISK_OFF_WEIGHTS.items():
+        if a in simple_rets.columns:
+            risk_off_daily += simple_rets[a] * w
 
+    # Quarterly target
+    bh_cagr = (risk_on_eq.iloc[-1] / risk_on_eq.iloc[0]) ** (252 / len(risk_on_eq)) - 1
+    quarterly_target = (1 + bh_cagr) ** (1/4) - 1
 
-# ============================================================
-# REGIME STATS (IDENTICAL TO MAIN APP)
-# ============================================================
+    # PURE SIG (always risk-on)
+    pure_sig_signal = pd.Series(True, index=risk_on_simple.index)
+    pure_eq, pure_rw, pure_sw, _ = run_sig_engine(
+        risk_on_simple,
+        risk_off_daily,
+        quarterly_target,
+        pure_sig_signal
+    )
 
-def compute_regime_stats(signal):
-    sig_int = signal.astype(int)
+    # HYBRID SIG
+    hybrid_eq, hybrid_rw, hybrid_sw, _ = run_sig_engine(
+        risk_on_simple,
+        risk_off_daily,
+        quarterly_target,
+        sig,
+        pure_sig_rw=pure_rw,
+        pure_sig_sw=pure_sw
+    )
+
+    # QUARTER START DETECTION
+    last_index = len(hybrid_rw) - 1
+    quarter_indices = [i for i in range(len(hybrid_rw)) if i % QUARTER_DAYS == 0]
+    q_start_idx = max([i for i in quarter_indices if i <= last_index])
+
+    quarter_start_date = prices.index[q_start_idx]
+    today_date = prices.index[-1]
+
+    # PROGRESS FOR EACH ACCOUNT
+    def get_sig_progress(real_cap):
+        risky_start = float(hybrid_rw.iloc[q_start_idx]) * real_cap
+        risky_today = float(hybrid_rw.iloc[-1]) * real_cap
+        return compute_quarter_progress(risky_start, risky_today, quarterly_target)
+
+    prog_1 = get_sig_progress(REAL_CAP_1)
+    prog_2 = get_sig_progress(REAL_CAP_2)
+    prog_3 = get_sig_progress(REAL_CAP_3)
+
+    # NEXT QUARTER DATE
+    next_q = quarter_start_date + pd.Timedelta(days=QUARTER_DAYS)
+    while next_q <= today_date:
+        next_q += pd.Timedelta(days=QUARTER_DAYS)
+    days_to_next = (next_q - today_date).days
+
+    # ADVANCED METRICS
+    def time_in_drawdown(dd): return (dd < 0).mean()
+    def mar(c, dd): return c / abs(dd) if dd != 0 else np.nan
+    def ulcer(dd): return np.sqrt((dd**2).mean()) if (dd**2).mean() != 0 else np.nan
+    def pain_gain(c, dd): return c / ulcer(dd) if ulcer(dd) != 0 else np.nan
+
+    # Stats builder
+    def compute_stats(perf, returns, dd, flips, tpy):
+        return {
+            "CAGR": perf["CAGR"],
+            "Volatility": perf["Volatility"],
+            "Sharpe": perf["Sharpe"],
+            "MaxDD": perf["MaxDrawdown"],
+            "Total": perf["TotalReturn"],
+            "MAR": mar(perf["CAGR"], perf["MaxDrawdown"]),
+            "TID": time_in_drawdown(dd),
+            "PainGain": pain_gain(perf["CAGR"], dd),
+            "Skew": returns.skew(),
+            "Kurtosis": returns.kurt(),
+            "Trades/year": tpy,
+        }
+
+    # MA Strategy
+    ma_simple = best_result["returns"]
+    ma_perf = perf
+    ma_stats = compute_stats(
+        perf,
+        ma_simple,
+        perf["DD_Series"],
+        best_result["flip_mask"],
+        (sig.astype(int).diff().abs().sum() / (len(sig) / 252)),
+    )
+
+    # Buy & Hold (100% Risk-On)
+    bh_stats = compute_stats(
+        risk_on_perf,
+        risk_on_simple,
+        risk_on_perf["DD_Series"],
+        np.zeros(len(risk_on_simple), dtype=bool),
+        0,
+    )
+
+    # Sharpe-optimal
+    sharp_stats = compute_stats(
+        sharp_perf,
+        sharp_returns,
+        sharp_perf["DD_Series"],
+        np.zeros(len(sharp_returns), dtype=bool),
+        0,
+    )
+
+    # Hybrid SIG
+    hybrid_simple = hybrid_eq.pct_change().fillna(0)
+    hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
+    hybrid_stats = compute_stats(
+        hybrid_perf,
+        hybrid_simple,
+        hybrid_perf["DD_Series"],
+        np.zeros(len(hybrid_simple)),
+        0,
+    )
+
+    # Pure SIG
+    pure_simple = pure_eq.pct_change().fillna(0)
+    pure_stats = compute_stats(
+        pure_sig_perf := compute_performance(pure_simple, pure_eq),
+        pure_simple,
+        pure_sig_perf["DD_Series"],
+        np.zeros(len(pure_simple)),
+        0,
+    )
+
+    # REGIME STATISTICS
+    sig_int = sig.astype(int)
     flips = sig_int.diff().fillna(0).ne(0)
 
     segments = []
@@ -413,25 +566,81 @@ def compute_regime_stats(signal):
 
     segments.append((current, seg_start, sig_int.index[-1]))
 
-    out = []
+    regime_rows = []
     for r, s, e in segments:
-        out.append([
-            "RISK-ON" if r == 1 else "RISK-OFF",
-            s.date(),
-            e.date(),
-            (e - s).days
-        ])
+        regime_rows.append({
+            "regime": "RISK-ON" if r == 1 else "RISK-OFF",
+            "start": s,
+            "end": e,
+            "duration": (e - s).days
+        })
 
-    df = pd.DataFrame(out, columns=["Regime", "Start", "End", "Duration (days)"])
+    # MA SIGNAL DISTANCE
+    latest_date = opt_ma.dropna().index[-1]
+    P = float(portfolio_index.loc[latest_date])
+    MA_val = float(opt_ma.loc[latest_date])
 
-    avg_on  = df[df["Regime"] == "RISK-ON"]["Duration (days)"].mean()
-    avg_off = df[df["Regime"] == "RISK-OFF"]["Duration (days)"].mean()
+    upper = MA_val * (1 + best_tol)
+    lower = MA_val * (1 - best_tol)
 
-    return df, avg_on, avg_off
+    if latest_signal:
+        ma_distance = ("Drop Required for RISK-OFF", (P - lower) / P)
+    else:
+        ma_distance = ("Gain Required for RISK-ON", (upper - P) / P)
+
+    # RETURN EVERYTHING FOR BLOCK 3 EMAIL FORMATTING
+    return {
+        "prices": prices,
+        "signal": sig,
+        "portfolio_index": portfolio_index,
+        "opt_ma": opt_ma,
+        "best_cfg": best_cfg,
+        "current_regime": current_regime,
+        "ma_distance": ma_distance,
+        "next_q": next_q,
+        "days_to_next": days_to_next,
+        "quarter_start": quarter_start_date,
+        "progress": (prog_1, prog_2, prog_3),
+        "performances": {
+            "MA": ma_stats,
+            "Sharpe": sharp_stats,
+            "BuyHold": bh_stats,
+            "Hybrid": hybrid_stats,
+            "PureSIG": pure_stats,
+        },
+        "equity_curves": {
+            "MA": best_result["equity_curve"],
+            "Sharpe": sharp_eq,
+            "BuyHold": risk_on_eq,
+            "Hybrid": hybrid_eq,
+            "PureSIG": pure_eq,
+            "MA_Curve": opt_ma,
+        },
+        "sharp_weights": (ron_px.columns, w_opt),
+        "regimes": regime_rows,
+    }
 # ============================================================
-# EMAIL HELPERS
+# BLOCK 3 — EMAIL OUTPUT (HTML + PLOT + SEND)
 # ============================================================
 
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+
+
+# ------------------------------------------------------------
+# Email credentials (use environment variables)
+# ------------------------------------------------------------
+EMAIL_USER = os.getenv("EMAIL_USER")
+EMAIL_PASS = os.getenv("EMAIL_PASS")
+EMAIL_TO   = os.getenv("EMAIL_TO")
+
+
+# ------------------------------------------------------------
+# Formatting helpers
+# ------------------------------------------------------------
 def fmt_pct(x):
     return f"{x:.2%}" if pd.notna(x) else "—"
 
@@ -441,220 +650,234 @@ def fmt_dec(x):
 def fmt_num(x):
     return f"{x:,.2f}" if pd.notna(x) else "—"
 
+def html_row(label, *vals):
+    tds = "".join(f"<td style='text-align:right'>{v}</td>" for v in vals)
+    return f"<tr><td>{label}</td>{tds}</tr>"
 
-def attach_file(msg, filepath):
-    with open(filepath, "rb") as f:
+
+# ------------------------------------------------------------
+# Build HTML table for performance stats
+# ------------------------------------------------------------
+def build_stats_table(stats):
+    rows = [
+        ("CAGR", "CAGR"),
+        ("Volatility", "Volatility"),
+        ("Sharpe", "Sharpe"),
+        ("Max Drawdown", "MaxDD"),
+        ("Total Return", "Total"),
+        ("MAR Ratio", "MAR"),
+        ("Time in Drawdown (%)", "TID"),
+        ("Pain-to-Gain", "PainGain"),
+        ("Skew", "Skew"),
+        ("Kurtosis", "Kurtosis"),
+        ("Trades/year", "Trades/year"),
+    ]
+
+    html = """
+    <table border="1" cellspacing="0" cellpadding="5">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>MA Strategy</th>
+          <th>Sharpe-Optimal</th>
+          <th>100% Risk-On</th>
+          <th>Hybrid SIG</th>
+          <th>Pure SIG</th>
+        </tr>
+      </thead>
+      <tbody>
+    """
+
+    sMA     = stats["MA"]
+    sSharp  = stats["Sharpe"]
+    sBH     = stats["BuyHold"]
+    sHybrid = stats["Hybrid"]
+    sPure   = stats["PureSIG"]
+
+    for label, key in rows:
+
+        def get_value(obj):
+            v = obj.get(key, None)
+            if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
+                return fmt_pct(v)
+            elif key in ["Sharpe", "MAR", "PainGain", "Skew", "Kurtosis"]:
+                return fmt_dec(v)
+            else:
+                return fmt_num(v)
+
+        html += html_row(
+            label,
+            get_value(sMA),
+            get_value(sSharp),
+            get_value(sBH),
+            get_value(sHybrid),
+            get_value(sPure),
+        )
+
+    html += "</tbody></table>"
+    return html
+
+
+# ------------------------------------------------------------
+# Build regime table HTML
+# ------------------------------------------------------------
+def build_regime_table(regimes):
+
+    html = """
+    <table border="1" cellspacing="0" cellpadding="4">
+      <thead>
+        <tr>
+          <th>Regime</th>
+          <th>Start</th>
+          <th>End</th>
+          <th>Duration (days)</th>
+        </tr>
+      </thead>
+      <tbody>
+    """
+
+    for row in regimes:
+        html += (
+            f"<tr>"
+            f"<td>{row['regime']}</td>"
+            f"<td>{row['start'].date()}</td>"
+            f"<td>{row['end'].date()}</td>"
+            f"<td style='text-align:right'>{row['duration']}</td>"
+            f"</tr>"
+        )
+
+    html += "</tbody></table>"
+    return html
+
+
+# ------------------------------------------------------------
+# Build quarterly SIG progress table (Taxable / TS / Joint)
+# ------------------------------------------------------------
+def build_quarter_progress_table(prog_1, prog_2, prog_3):
+
+    df = pd.concat([
+        pd.DataFrame.from_dict(prog_1, orient='index', columns=['Taxable']),
+        pd.DataFrame.from_dict(prog_2, orient='index', columns=['Tax-Sheltered']),
+        pd.DataFrame.from_dict(prog_3, orient='index', columns=['Joint']),
+    ], axis=1)
+
+    df.loc["Gap (%)"] = df.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
+
+    return df.to_html(border=1, justify="center")
+
+
+# ------------------------------------------------------------
+# Main function that builds and sends the email
+# ------------------------------------------------------------
+def send_daily_email(results):
+
+    # Unpack everything from results
+    best_len, best_type, best_tol = results["best_cfg"]
+    current_regime = results["current_regime"]
+    ma_distance_str, ma_distance_val = results["ma_distance"]
+    next_q = results["next_q"]
+    days_to_next = results["days_to_next"]
+    quarter_start = results["quarter_start"]
+    prog_1, prog_2, prog_3 = results["progress"]
+    stats = results["performances"]
+    regimes = results["regimes"]
+    eq = results["equity_curves"]
+    sharp_cols, sharp_w = results["sharp_weights"]
+
+    # ---------------------------------------------------------
+    # Build PLOT: combine all equity curves
+    # ---------------------------------------------------------
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(normalize(eq["MA"]),     label="MA Strategy", linewidth=2)
+    ax.plot(normalize(eq["Sharpe"]), label="Sharpe-Optimal", linewidth=2, color="magenta")
+    ax.plot(normalize(eq["BuyHold"]),label="100% Risk-On", alpha=0.7)
+    ax.plot(normalize(eq["Hybrid"]), label="Hybrid SIG", linewidth=2, color="blue")
+    ax.plot(normalize(eq["PureSIG"]),label="Pure SIG", linewidth=2, color="orange")
+
+    ax.legend()
+    ax.grid(alpha=.3)
+    plt.tight_layout()
+
+    plt.savefig("email_chart.png")
+    plt.close()
+
+
+    # ---------------------------------------------------------
+    # HTML BUILD
+    # ---------------------------------------------------------
+    html = f"""
+    <html>
+    <body>
+
+    <h2>Daily MA + SIG Strategy Report</h2>
+
+    <h3>Current MA Regime: {current_regime}</h3>
+    <p><b>MA Type:</b> {best_type.upper()} — <b>Length:</b> {best_len} — <b>Tolerance:</b> {best_tol:.2%}</p>
+
+    <h3>MA Signal Distance</h3>
+    <p><b>{ma_distance_str}:</b> {ma_distance_val:.2%}</p>
+
+    <h3>Quarterly SIG Progress</h3>
+    <p><b>Quarter Start:</b> {quarter_start.date()}<br>
+       <b>Next Rebalance:</b> {next_q.date()} ({days_to_next} days)</p>
+
+    {build_quarter_progress_table(prog_1, prog_2, prog_3)}
+
+    <h3>Performance Comparison Table</h3>
+    {build_stats_table(stats)}
+
+    <h3>Sharpe-Optimal Weights</h3>
+    <ul>
+    """
+    for t, w in zip(sharp_cols, sharp_w):
+        html += f"<li><b>{t}:</b> {w:.2%}</li>"
+    html += "</ul>"
+
+    html += f"""
+    <h3>Regime Durations</h3>
+    {build_regime_table(regimes)}
+
+    <p>The attached chart shows all strategy equity curves normalized to 10,000.</p>
+
+    </body>
+    </html>
+    """
+
+    # ---------------------------------------------------------
+    # Assemble Email
+    # ---------------------------------------------------------
+    msg = MIMEMultipart()
+    msg["Subject"] = f"Daily Portfolio Signal — {current_regime}"
+    msg["From"] = EMAIL_USER
+    msg["To"] = EMAIL_TO
+
+    msg.attach(MIMEText(html, "html"))
+
+    # Attach plot
+    with open("email_chart.png", "rb") as f:
         part = MIMEBase("application", "octet-stream")
         part.set_payload(f.read())
     encoders.encode_base64(part)
-    part.add_header("Content-Disposition", f'attachment; filename="{os.path.basename(filepath)}"')
+    part.add_header(
+        "Content-Disposition",
+        'attachment; filename="strategy_chart.png"'
+    )
     msg.attach(part)
 
-
-def send_email(html):
-    EMAIL_USER = os.getenv("EMAIL_USER")
-    EMAIL_PASS = os.getenv("EMAIL_PASS")
-    SEND_TO = os.getenv("SEND_TO")
-
-    msg = MIMEMultipart()
-    msg["Subject"] = "Daily Portfolio Strategy Update"
-    msg["From"] = EMAIL_USER
-    msg["To"] = SEND_TO
-
-    msg.attach(MIMEText(html, "html"))
-    attach_file(msg, "equity_curve.png")
-
+    # ---------------------------------------------------------
+    # SEND EMAIL
+    # ---------------------------------------------------------
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(EMAIL_USER, EMAIL_PASS)
-        server.sendmail(EMAIL_USER, SEND_TO, msg.as_string())
+        server.sendmail(EMAIL_USER, EMAIL_TO, msg.as_string())
+
+    print("Email sent successfully.")
 
 
-# ============================================================
-# MAIN — HEADLESS DAILY ENGINE
-# ============================================================
-
+# ------------------------------------------------------------
+# FINAL EXECUTION
+# ------------------------------------------------------------
 if __name__ == "__main__":
 
-    # Load the same universe as the main app
-    tickers = sorted(set(list(RISK_ON_WEIGHTS.keys()) + list(RISK_OFF_WEIGHTS.keys())))
-    prices = load_price_data(tickers, DEFAULT_START_DATE).dropna(how="any")
-
-    # 1. GRID SEARCH for optimal MA regime
-    best_cfg, best_result = run_grid_search(prices, RISK_ON_WEIGHTS, RISK_OFF_WEIGHTS, FLIP_COST)
-    best_len, best_type, best_tol = best_cfg
-
-    sig = best_result["signal"]
-    perf = best_result["performance"]
-
-    # MA series
-    portfolio_index = build_portfolio_index(prices, RISK_ON_WEIGHTS)
-    opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
-
-    # Current regime
-    latest_signal = bool(sig.iloc[-1])
-    regime = "RISK-ON" if latest_signal else "RISK-OFF"
-
-    # Trades per year
-    switches = sig.astype(int).diff().abs().sum()
-    trades_per_year = switches / (len(sig) / 252)
-
-    # 2. Always-ON Risk-On Benchmark
-    simple_rets = prices.pct_change().fillna(0)
-    risk_on_simple = pd.Series(0.0, index=simple_rets.index)
-    for a, w in RISK_ON_WEIGHTS.items():
-        if a in simple_rets.columns:
-            risk_on_simple += simple_rets[a] * w
-
-    risk_on_eq = (1 + risk_on_simple).cumprod()
-    risk_on_perf = compute_performance(risk_on_simple, risk_on_eq)
-
-    # 3. SHARPE-OPTIMAL PORTFOLIO
-    so_tickers, so_weights, so_returns, so_eq, so_perf = compute_sharpe_optimal(
-        prices, RISK_ON_WEIGHTS
-    )
-
-    # 4. BUILD HYBRID + PURE SIG ENGINES
-    risk_off_daily = pd.Series(0.0, index=simple_rets.index)
-    for a, w in RISK_OFF_WEIGHTS.items():
-        if a in simple_rets.columns:
-            risk_off_daily += simple_rets[a] * w
-
-    bh_cagr = (risk_on_eq.iloc[-1] / risk_on_eq.iloc[0]) ** (252 / len(risk_on_eq)) - 1
-    quarterly_target = (1 + bh_cagr) ** (1/4) - 1
-
-    pure_sig_signal = pd.Series(True, index=risk_on_simple.index)
-
-    pure_eq, pure_rw, pure_sw, _ = run_sig_engine(
-        risk_on_simple, risk_off_daily, quarterly_target, pure_sig_signal
-    )
-
-    hyb_eq, hyb_rw, hyb_sw, _ = run_sig_engine(
-        risk_on_simple, risk_off_daily, quarterly_target, sig,
-        pure_sig_rw=pure_rw, pure_sig_sw=pure_sw
-    )
-
-    # 5. FIND QUARTER START (IDENTICAL TO MAIN APP)
-    last_index = len(hyb_rw) - 1
-    quarter_indices = [i for i in range(len(hyb_rw)) if i % QUARTER_DAYS == 0]
-    q_start_idx = max(idx for idx in quarter_indices if idx <= last_index)
-
-    quarter_start_date = prices.index[q_start_idx]
-    today_date = prices.index[-1]
-
-    # 6. NEXT QUARTER DATE
-    next_q = quarter_start_date + pd.Timedelta(days=QUARTER_DAYS)
-    while next_q <= today_date:
-        next_q += pd.Timedelta(days=QUARTER_DAYS)
-
-    days_to_next_q = (next_q - today_date).days
-
-    # 7. QUARTERLY PROGRESS TABLE (IDENTICAL CALC)
-    def sig_progress(real_cap):
-        risky_start = float(hyb_rw.iloc[q_start_idx]) * real_cap
-        risky_today = float(hyb_rw.iloc[-1]) * real_cap
-        return compute_quarter_progress(risky_start, risky_today, quarterly_target)
-
-    cap1, cap2, cap3 = 25000, 25000, 25000
-    prog1 = sig_progress(cap1)
-    prog2 = sig_progress(cap2)
-    prog3 = sig_progress(cap3)
-
-    # 8. DISTANCE TO NEXT MA SIGNAL
-    latest_date = opt_ma.dropna().index[-1]
-    P = float(portfolio_index.loc[latest_date])
-    MA = float(opt_ma.loc[latest_date])
-
-    upper = MA * (1 + best_tol)
-    lower = MA * (1 - best_tol)
-
-    if latest_signal:
-        delta = (P - lower) / P
-        flip_direction = "Drop Required for RISK-OFF"
-    else:
-        delta = (upper - P) / P
-        flip_direction = "Gain Required for RISK-ON"
-
-    # 9. REGIME STATS
-    regime_df, avg_on, avg_off = compute_regime_stats(sig)
-
-    # 10. STRATEGY STATS TABLE (ALL FIVE PORTFOLIOS)
-    hyb_simple = hyb_eq.pct_change().fillna(0)
-    pure_simple = pure_eq.pct_change().fillna(0)
-
-    hyb_perf = compute_performance(hyb_simple, hyb_eq)
-    pure_perf = compute_performance(pure_simple, pure_eq)
-
-    strat_stats = compute_stats(
-        perf, best_result["returns"], perf["DD_Series"],
-        best_result["flip_mask"], trades_per_year
-    )
-
-    risk_stats = compute_stats(
-        risk_on_perf, risk_on_simple, risk_on_perf["DD_Series"],
-        np.zeros(len(risk_on_simple), dtype=bool), 0
-    )
-
-    hyb_stats = compute_stats(
-        hyb_perf, hyb_simple, hyb_perf["DD_Series"],
-        np.zeros(len(hyb_simple)), 0
-    )
-
-    pure_stats = compute_stats(
-        pure_perf, pure_simple, pure_perf["DD_Series"],
-        np.zeros(len(pure_simple)), 0
-    )
-
-    # 11. BUILD EQUITY CURVE PLOT
-    plt.figure(figsize=(12, 6))
-    plt.plot((best_result["equity_curve"]/best_result["equity_curve"].iloc[0])*10000,
-             label="MA Strategy", linewidth=2)
-    plt.plot((so_eq/so_eq.iloc[0])*10000, label="Sharpe-Optimal", linewidth=2, color="magenta")
-    plt.plot((risk_on_eq/risk_on_eq.iloc[0])*10000, label="100% Risk-On", alpha=0.6)
-    plt.plot((hyb_eq/hyb_eq.iloc[0])*10000, label="Hybrid SIG", linewidth=2, color="blue")
-    plt.plot((pure_eq/pure_eq.iloc[0])*10000, label="Pure SIG", linewidth=2, color="orange")
-
-    plt.legend()
-    plt.grid(alpha=0.3)
-    plt.tight_layout()
-    plt.savefig("equity_curve.png")
-    plt.close()
-
-    # 12. BUILD HTML EMAIL
-    html = f"""
-    <h2>Daily Portfolio Strategy Update</h2>
-
-    <h3>Current MA Regime: <b>{regime}</b></h3>
-
-    <h3>Optimal Signal Parameters</h3>
-    <ul>
-      <li><b>Type:</b> {best_type.upper()}</li>
-      <li><b>Length:</b> {best_len}</li>
-      <li><b>Tolerance:</b> {best_tol:.2%}</li>
-    </ul>
-
-    <h3>Distance to Next Signal</h3>
-    <p><b>{flip_direction}:</b> {delta:.2%}</p>
-
-    <h3>Quarterly SIG Progress</h3>
-    <p>Quarter started: {quarter_start_date.date()}<br>
-       Next rebalance: {next_q.date()} ({days_to_next_q} days)</p>
-
-    <table border="1" cellspacing="0" cellpadding="4">
-      <tr><th></th><th>Taxable</th><th>Tax-Sheltered</th><th>Joint</th></tr>
-      <tr><td>Start Risky ($)</td><td>{fmt_num(prog1['Implied Deployed Capital at Qtr Start ($)'])}</td><td>{fmt_num(prog2['Implied Deployed Capital at Qtr Start ($)'])}</td><td>{fmt_num(prog3['Implied Deployed Capital at Qtr Start ($)'])}</td></tr>
-      <tr><td>Risky Today ($)</td><td>{fmt_num(prog1['Implied Deployed Capital Today ($)'])}</td><td>{fmt_num(prog2['Implied Deployed Capital Today ($)'])}</td><td>{fmt_num(prog3['Implied Deployed Capital Today ($)'])}</td></tr>
-      <tr><td>Qtr Target ($)</td><td>{fmt_num(prog1['Deployed Capital Target Qtr End ($)'])}</td><td>{fmt_num(prog2['Deployed Capital Target Qtr End ($)'])}</td><td>{fmt_num(prog3['Deployed Capital Target Qtr End ($)'])}</td></tr>
-      <tr><td>Gap ($)</td><td>{fmt_num(prog1['Gap ($)'])}</td><td>{fmt_num(prog2['Gap ($)'])}</td><td>{fmt_num(prog3['Gap ($)'])}</td></tr>
-      <tr><td>Gap (%)</td><td>{fmt_pct(prog1['Gap (%)'])}</td><td>{fmt_pct(prog2['Gap (%)'])}</td><td>{fmt_pct(prog3['Gap (%)'])}</td></tr>
-    </table>
-
-    <h3>Regime Statistics</h3>
-    <p>Avg RISK-ON: {avg_on:.1f} days<br>
-       Avg RISK-OFF: {avg_off:.1f} days</p>
-
-    <h3>Attached Chart</h3>
-    <p>The file <b>equity_curve.png</b> contains the equity curves for all strategies.</p>
-    """
-
-    # 13. SEND EMAIL
-    send_email(html)
+    results = run_full_engine()
+    send_daily_email(results)
