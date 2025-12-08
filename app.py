@@ -397,15 +397,15 @@ def main():
 
     real_cap_1 = st.sidebar.number_input(
         "Taxable – Total Portfolio Value Today ($)",
-        min_value=0.0, value=10000.0, step=100.0
+        min_value=0.0, value=72558.41, step=100.0
     )
     real_cap_2 = st.sidebar.number_input(
         "Tax-Sheltered – Total Portfolio Value Today ($)",
-        min_value=0.0, value=10000.0, step=100.0
+        min_value=0.0, value=9177.97, step=100.0
     )
     real_cap_3 = st.sidebar.number_input(
         "Joint (Taxable) – Total Portfolio Value Today ($)",
-        min_value=0.0, value=10000.0, step=100.0
+        min_value=0.0, value=4151.11, step=100.0
     )
 
     if not st.sidebar.button("Run Backtest & Optimize"):
