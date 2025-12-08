@@ -393,23 +393,36 @@ def main():
     # ------------------------------------------------------------
     # SIDEBAR: Real-World Account Values (C1)
     # ------------------------------------------------------------
-    st.sidebar.header("Current Portfolio Values")
+    st.sidebar.header("Quarterly Portfolio Values")
+
+    # User enters quarter-start total balances (real values from statements)
+    qs_cap_1 = st.sidebar.number_input(
+        "Taxable – Portfolio Value at Quarter Start ($)",
+        min_value=0.0, value=0.0, step=100.0
+    )
+    qs_cap_2 = st.sidebar.number_input(
+        "Tax-Sheltered – Portfolio Value at Quarter Start ($)",
+        min_value=0.0, value=0.0, step=100.0
+    )
+    qs_cap_3 = st.sidebar.number_input(
+        "Joint – Portfolio Value at Quarter Start ($)",
+        min_value=0.0, value=0.0, step=100.0
+    )
+
+    st.sidebar.header("Current Portfolio Values (Today)")
 
     real_cap_1 = st.sidebar.number_input(
-        "Taxable – Total Portfolio Value Today ($)",
-        min_value=0.0, value=72558.41, step=100.0
+        "Taxable – Portfolio Value Today ($)",
+        min_value=0.0, value=0.0, step=100.0
     )
     real_cap_2 = st.sidebar.number_input(
-        "Tax-Sheltered – Total Portfolio Value Today ($)",
-        min_value=0.0, value=9177.97, step=100.0
+        "Tax-Sheltered – Portfolio Value Today ($)",
+        min_value=0.0, value=0.0, step=100.0
     )
     real_cap_3 = st.sidebar.number_input(
-        "Joint (Taxable) – Total Portfolio Value Today ($)",
-        min_value=0.0, value=4151.11, step=100.0
+        "Joint – Portfolio Value Today ($)",
+        min_value=0.0, value=0.0, step=100.0
     )
-
-    if not st.sidebar.button("Run Backtest & Optimize"):
-        st.stop()
 
     # ------------------------------------------------------------
     # Parse sleeve inputs
@@ -543,14 +556,14 @@ def main():
     # ------------------------------------------------------------
     # DERIVE risky_start / risky_today FOR EACH ACCOUNT (C1)
     # ------------------------------------------------------------
-    def get_sig_progress(real_cap):
-        risky_start = float(hybrid_rw.iloc[q_start_idx]) * real_cap
-        risky_today = float(hybrid_rw.iloc[-1]) * real_cap
+    def get_sig_progress(qs_cap, today_cap):
+        risky_start = qs_cap * float(hybrid_rw.iloc[q_start_idx])
+        risky_today = today_cap * float(hybrid_rw.iloc[-1])
         return compute_quarter_progress(risky_start, risky_today, quarterly_target)
 
-    prog_1 = get_sig_progress(real_cap_1)
-    prog_2 = get_sig_progress(real_cap_2)
-    prog_3 = get_sig_progress(real_cap_3)
+    prog_1 = get_sig_progress(qs_cap_1, real_cap_1)
+    prog_2 = get_sig_progress(qs_cap_2, real_cap_2)
+    prog_3 = get_sig_progress(qs_cap_3, real_cap_3)
 
     # ------------------------------------------------------------
     # NEXT QUARTER DATE (automatic)
