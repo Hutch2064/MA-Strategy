@@ -112,35 +112,249 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 
 
 # ============================================================
-# STREAMLIT APP — PREVIEW QUARTER START BEFORE RUNNING
+# SIG ENGINE (no user inputs, internal cadence, deterministic)
 # ============================================================
 
-def preview_quarter_start():
-    """
-    Loads a minimal dataset using default tickers & user dates
-    so we can compute the quarter start date *before* the user
-    presses Run Backtest.
-    """
-    try:
-        tickers = list(RISK_ON_WEIGHTS.keys()) + list(RISK_OFF_WEIGHTS.keys())
-        prices = load_price_data(tickers, DEFAULT_START_DATE, None).dropna(how="any")
+def run_sig_engine(
+    risk_on_returns,
+    risk_off_returns,
+    target_quarter,
+    ma_signal,
+    pure_sig_rw=None,
+    pure_sig_sw=None,
+    flip_cost=FLIP_COST
+):
+    dates = risk_on_returns.index
+    n = len(dates)
 
-        # Build quick MA signal using defaults (sma 200, tol 0)
-        portfolio_index = build_portfolio_index(prices, RISK_ON_WEIGHTS)
-        ma = compute_ma_matrix(portfolio_index, [200], "sma")[200]
-        sig = generate_testfol_signal_vectorized(portfolio_index, ma, 0.0)
+    # Flip detection identical to MA strategy
+    sig_arr = ma_signal.astype(int)
+    flip_mask = sig_arr.diff().abs() == 1
 
-        # Quarter index
-        last_index = len(sig) - 1
-        quarter_indices = [i for i in range(len(sig)) if i % QUARTER_DAYS == 0]
-        q_start_idx = max(idx for idx in quarter_indices if idx <= last_index)
+    eq = 10000.0
+    risky_val = eq * START_RISKY
+    safe_val  = eq * START_SAFE
 
-        return prices.index[q_start_idx]
+    frozen_risky = None
+    frozen_safe  = None
 
-    except Exception:
-        return None
+    equity_curve = []
+    risky_w_series = []
+    safe_w_series = []
+    risky_val_series = []
+    safe_val_series = []
+    rebalance_events = 0
+
+    for i in range(n):
+        r_on  = risk_on_returns.iloc[i]
+        r_off = risk_off_returns.iloc[i]
+        ma_on = bool(ma_signal.iloc[i])
+
+        if ma_on:
+
+            # Restore pure-SIG weights after exiting RISK-OFF
+            if frozen_risky is not None:
+                w_r = pure_sig_rw.iloc[i]
+                w_s = pure_sig_sw.iloc[i]
+                risky_val = eq * w_r
+                safe_val  = eq * w_s
+                frozen_risky = None
+                frozen_safe  = None
+
+            # Apply daily returns
+            risky_val *= (1 + r_on)
+            safe_val  *= (1 + r_off)
+
+            # Quarterly rebalance logic — pure Kelly SIG
+            if i >= QUARTER_DAYS and (i % QUARTER_DAYS == 0):
+
+                past_risky_val = risky_val_series[i - QUARTER_DAYS]
+                goal_risky = past_risky_val * (1 + target_quarter)
+
+                if risky_val > goal_risky:
+                    excess = risky_val - goal_risky
+                    risky_val -= excess
+                    safe_val  += excess
+                    rebalance_events += 1
+
+                elif risky_val < goal_risky:
+                    needed = goal_risky - risky_val
+                    move = min(needed, safe_val)
+                    safe_val  -= move
+                    risky_val += move
+                    rebalance_events += 1
+
+                # Quarterly drag fee (small)
+                quarter_fee = flip_cost * target_quarter
+                eq *= (1 - quarter_fee)
+
+            eq = risky_val + safe_val
+            risky_w = risky_val / eq
+            safe_w  = safe_val  / eq
+
+            # Flip cost identical to MA strategy
+            if flip_mask.iloc[i]:
+                eq *= (1 - flip_cost)
+
+        else:
+            # Freeze risky/safe values for re-entry
+            if frozen_risky is None:
+                frozen_risky = risky_val
+                frozen_safe  = safe_val
+
+            eq *= (1 + r_off)
+            risky_w = 0.0
+            safe_w  = 1.0
+
+        equity_curve.append(eq)
+        risky_w_series.append(risky_w)
+        safe_w_series.append(safe_w)
+        risky_val_series.append(risky_val)
+        safe_val_series.append(safe_val)
+
+    return (
+        pd.Series(equity_curve, index=dates),
+        pd.Series(risky_w_series, index=dates),
+        pd.Series(safe_w_series, index=dates),
+        rebalance_events
+    )
 
 
+# ============================================================
+# BACKTEST ENGINE
+# ============================================================
+
+def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
+    weights = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
+
+    for a, w in risk_on_weights.items():
+        if a in prices.columns:
+            weights.loc[signal, a] = w
+
+    for a, w in risk_off_weights.items():
+        if a in prices.columns:
+            weights.loc[~signal, a] = w
+
+    return weights
+
+
+def compute_performance(simple_returns, eq_curve, rf=0.0):
+    cagr = (eq_curve.iloc[-1] / eq_curve.iloc[0]) ** (252 / len(eq_curve)) - 1
+    vol = simple_returns.std() * np.sqrt(252)
+    sharpe = (simple_returns.mean() * 252 - rf) / vol if vol > 0 else np.nan
+
+    dd = eq_curve / eq_curve.cummax() - 1
+
+    return {
+        "CAGR": cagr,
+        "Volatility": vol,
+        "Sharpe": sharpe,
+        "MaxDrawdown": dd.min(),
+        "TotalReturn": eq_curve.iloc[-1] / eq_curve.iloc[0] - 1,
+        "DD_Series": dd
+    }
+
+
+def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
+    simple = prices.pct_change().fillna(0)
+    weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
+
+    strategy_simple = (weights.shift(1).fillna(0) * simple).sum(axis=1)
+    sig_arr = signal.astype(int)
+
+    flip_mask = sig_arr.diff().abs() == 1
+    flip_costs = np.where(flip_mask, -flip_cost, 0.0)
+
+    strat_adj = strategy_simple + flip_costs
+    eq = (1 + strat_adj).cumprod()
+
+    return {
+        "returns": strat_adj,
+        "equity_curve": eq,
+        "signal": signal,
+        "weights": weights,
+        "performance": compute_performance(strat_adj, eq),
+        "flip_mask": flip_mask,
+    }
+
+
+# ============================================================
+# GRID SEARCH
+# ============================================================
+
+def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
+
+    best_sharpe = -1e9
+    best_cfg = None
+    best_result = None
+    best_trades = np.inf
+
+    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+
+    lengths = list(range(21, 253))
+    types = ["sma", "ema"]
+    tolerances = np.arange(0.0, .0501, .002)
+
+    progress = st.progress(0.0)
+    total = len(lengths) * len(types) * len(tolerances)
+    idx = 0
+
+    ma_cache = {t: compute_ma_matrix(portfolio_index, lengths, t) for t in types}
+
+    for ma_type in types:
+        for length in lengths:
+            ma = ma_cache[ma_type][length]
+
+            for tol in tolerances:
+                signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+                result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+
+                sig_arr = signal.astype(int)
+                switches = sig_arr.diff().abs().sum()
+                trades_per_year = switches / (len(sig_arr) / 252)
+
+                sharpe = result["performance"]["Sharpe"]
+
+                idx += 1
+                if idx % 200 == 0:
+                    progress.progress(idx / total)
+
+                if (
+                    sharpe > best_sharpe or
+                    (sharpe == best_sharpe and trades_per_year < best_trades)
+                ):
+                    best_sharpe = sharpe
+                    best_trades = trades_per_year
+                    best_cfg = (length, ma_type, tol)
+                    best_result = result
+
+    return best_cfg, best_result
+
+
+# ============================================================
+# QUARTERLY PROGRESS HELPER
+# ============================================================
+
+def compute_quarter_progress(risky_start, risky_today, quarterly_target):
+    target_risky = risky_start * (1 + quarterly_target)
+    gap = target_risky - risky_today
+    pct_gap = gap / risky_start if risky_start > 0 else 0
+
+    return {
+        "Implied Deployed Capital at Qtr Start ($)": risky_start,
+        "Implied Deployed Capital Today ($)": risky_today,
+        "Deployed Capital Target Qtr End ($)": target_risky,
+        "Gap ($)": gap,
+        "Gap (%)": pct_gap,
+    }
+
+
+# ============================================================
+# NORMALIZATION FOR PLOTTING
+# ============================================================
+
+def normalize(eq):
+    return eq / eq.iloc[0] * 10000
 # ============================================================
 # STREAMLIT APP
 # ============================================================
@@ -149,16 +363,6 @@ def main():
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
     st.title("Portfolio Strategy")
-
-    # ------------------------------------------------------------
-    # QUARTER START DATE PREVIEW (before clicking Run)
-    # ------------------------------------------------------------
-    st.sidebar.header("Quarter Boundary (Auto-Detected)")
-    auto_qs = preview_quarter_start()
-    if auto_qs is not None:
-        st.sidebar.write(f"**Quarter Start Date:** {auto_qs.date()}")
-    else:
-        st.sidebar.write("Unable to auto-detect quarter start.")
 
     # ------------------------------------------------------------
     # SIDEBAR: Backtest Inputs
@@ -187,36 +391,26 @@ def main():
     )
 
     # ------------------------------------------------------------
-    # SIDEBAR: REAL WORLD INPUTS (Option 3)
+    # SIDEBAR: Real-World Account Values (C1)
     # ------------------------------------------------------------
-    st.sidebar.header("Quarterly Sleeve Inputs (User-Entered)")
+    st.sidebar.header("Current Portfolio Values")
 
-    # Defaults = 0 for all 6 inputs
-    qs_taxable = st.sidebar.number_input(
-        "Quarter Start – Taxable ($)", min_value=0.0, value=0.0, step=100.0
+    real_cap_1 = st.sidebar.number_input(
+        "Taxable – Total Portfolio Value Today ($)",
+        min_value=0.0, value=72558.41, step=100.0
     )
-    qs_shelter = st.sidebar.number_input(
-        "Quarter Start – Tax-Sheltered ($)", min_value=0.0, value=0.0, step=100.0
+    real_cap_2 = st.sidebar.number_input(
+        "Tax-Sheltered – Total Portfolio Value Today ($)",
+        min_value=0.0, value=9177.97, step=100.0
     )
-    qs_joint = st.sidebar.number_input(
-        "Quarter Start – Joint ($)", min_value=0.0, value=0.0, step=100.0
-    )
-
-    td_taxable = st.sidebar.number_input(
-        "Today – Taxable ($)", min_value=0.0, value=0.0, step=100.0
-    )
-    td_shelter = st.sidebar.number_input(
-        "Today – Tax-Sheltered ($)", min_value=0.0, value=0.0, step=100.0
-    )
-    td_joint = st.sidebar.number_input(
-        "Today – Joint ($)", min_value=0.0, value=0.0, step=100.0
+    real_cap_3 = st.sidebar.number_input(
+        "Joint (Taxable) – Total Portfolio Value Today ($)",
+        min_value=0.0, value=4151.11, step=100.0
     )
 
-    # ------------------------------------------------------------
-    # STOP unless user clicks RUN
-    # ------------------------------------------------------------
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
+
     # ------------------------------------------------------------
     # Parse sleeve inputs
     # ------------------------------------------------------------
@@ -339,6 +533,7 @@ def main():
     # ------------------------------------------------------------
     last_index = len(hybrid_rw) - 1
 
+    # Find most recent quarter boundary
     quarter_indices = [i for i in range(len(hybrid_rw)) if i % QUARTER_DAYS == 0]
     q_start_idx = max(idx for idx in quarter_indices if idx <= last_index)
 
@@ -346,25 +541,16 @@ def main():
     today_date = prices.index[-1]
 
     # ------------------------------------------------------------
-    # USER INPUTS (Option 3): use the values they typed directly
+    # DERIVE risky_start / risky_today FOR EACH ACCOUNT (C1)
     # ------------------------------------------------------------
-    # These ARE NOT derived from hybrid weights anymore.
-    # User-entered values drive the quarter-progress math.
-    risky_start_1 = qs_taxable
-    risky_today_1 = td_taxable
+    def get_sig_progress(real_cap):
+        risky_start = float(hybrid_rw.iloc[q_start_idx]) * real_cap
+        risky_today = float(hybrid_rw.iloc[-1]) * real_cap
+        return compute_quarter_progress(risky_start, risky_today, quarterly_target)
 
-    risky_start_2 = qs_shelter
-    risky_today_2 = td_shelter
-
-    risky_start_3 = qs_joint
-    risky_today_3 = td_joint
-
-    # ------------------------------------------------------------
-    # Compute progress for each account using user-entered values
-    # ------------------------------------------------------------
-    prog_1 = compute_quarter_progress(risky_start_1, risky_today_1, quarterly_target)
-    prog_2 = compute_quarter_progress(risky_start_2, risky_today_2, quarterly_target)
-    prog_3 = compute_quarter_progress(risky_start_3, risky_today_3, quarterly_target)
+    prog_1 = get_sig_progress(real_cap_1)
+    prog_2 = get_sig_progress(real_cap_2)
+    prog_3 = get_sig_progress(real_cap_3)
 
     # ------------------------------------------------------------
     # NEXT QUARTER DATE (automatic)
@@ -374,7 +560,6 @@ def main():
         next_q += pd.Timedelta(days=QUARTER_DAYS)
 
     days_to_next_q = (next_q - today_date).days
-
     # ------------------------------------------------------------
     # TEXT FUNCTION FOR SIG REBALANCE GUIDANCE
     # ------------------------------------------------------------
@@ -388,6 +573,7 @@ def main():
             return f"Decrease deployed sleeve by **${abs(gap):,.2f}** on **{date_str}** ({days_str})"
         else:
             return f"No rebalance needed until **{date_str}** ({days_str})"
+
     # ------------------------------------------------------------
     # DISPLAY SIG QUARTERLY PROGRESS RESULTS
     # ------------------------------------------------------------
@@ -528,6 +714,7 @@ def main():
     # ------------------------------------------------------------
     # ACCOUNT-LEVEL ALLOCATIONS
     # ------------------------------------------------------------
+
     def compute_allocations(account_value, risky_w, safe_w, ron_w, roff_w):
         risky_dollars = account_value * risky_w
         safe_dollars  = account_value * safe_w
@@ -548,31 +735,36 @@ def main():
     def add_pct(df_dict):
         out = pd.DataFrame.from_dict(df_dict, orient="index", columns=["$"])
 
+        # If this is a SIG-style table (has total risky/safe rows)
         if "Total Risky $" in out.index and "Total Safe $" in out.index:
             total_portfolio = float(out.loc["Total Risky $","$"]) + float(out.loc["Total Safe $","$"])
             out["% Portfolio"] = (out["$"] / total_portfolio * 100).apply(lambda x: f"{x:.2f}%")
             return out
 
+        # Otherwise this is a simple ticker-only allocation (Sharpe-optimal, MA-only, 100% Risk-On, etc.)
         total = out["$"].sum()
         out["% Portfolio"] = (out["$"] / total * 100).apply(lambda x: f"{x:.2f}%")
         return out
 
     st.subheader("Account-Level Allocations")
 
+    # CURRENT hybrid weights
     hyb_r = float(hybrid_rw.iloc[-1])
     hyb_s = float(hybrid_sw.iloc[-1])
 
     pure_r = float(pure_sig_rw.iloc[-1])
     pure_s = float(pure_sig_sw.iloc[-1])
 
+    # Risk-On is 100% risky sleeve
+    # MA strategy depends on signal today
     latest_signal = sig.iloc[-1]
 
     tab1, tab2, tab3 = st.tabs(["Taxable", "Tax-Sheltered", "Joint"])
 
     accounts = [
-        ("Taxable", td_taxable),
-        ("Tax-Sheltered", td_shelter),
-        ("Joint", td_joint),
+        ("Taxable", real_cap_1),
+        ("Tax-Sheltered", real_cap_2),
+        ("Joint", real_cap_3),
     ]
 
     for (label, cap), tab in zip(accounts, (tab1, tab2, tab3)):
@@ -677,6 +869,7 @@ def main():
     ax.legend()
     ax.grid(alpha=0.3)
     st.pyplot(fig)
+
 
 # ============================================================
 # LAUNCH APP
