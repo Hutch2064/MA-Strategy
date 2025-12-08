@@ -2,7 +2,7 @@
 # DAILY EMAIL SCRIPT — BLOCK 1
 # All defaults preserved exactly from Streamlit app
 # ===============================================
-
+import os
 import numpy as np
 import pandas as pd
 import yfinance as yf
