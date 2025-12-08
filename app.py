@@ -660,7 +660,7 @@ def main():
     # ------------------------------------------------------------
     # STAT TABLE DISPLAY
     # ------------------------------------------------------------
-    st.subheader("MA Strategy vs Sharpe-Optimal vs Buy & Hold vs Hybrid SIG vs Pure SIG")
+    st.subheader("MA vs Sharpe-Optimal vs Buy & Hold vs Hybrid SIG/MA vs Pure SIG")
 
     rows = [
         ("CAGR", "CAGR"),
