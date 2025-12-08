@@ -372,48 +372,12 @@ def main():
     )
     
     strategy_start_date = pd.Timestamp(strategy_start_date)
-
-    st.sidebar.header("SIG Rebalancing Inputs (RISKY dollars only)")
-
-    # ACCOUNT 1 — Taxable
-    risky_start_1 = st.sidebar.number_input(
-        "Taxable – Deployed Dollars at Quarter Start",
+    
+    st.sidebar.header("Real-World Portfolio Value")
+    total_portfolio_value = st.sidebar.number_input(
+        "Total Portfolio Value Today ($)",
         min_value=0.0,
-        value=6000.0,   # example default: 60% of 10k
-        step=100.0
-    )
-    risky_today_1 = st.sidebar.number_input(
-        "Taxable – Deployed Dollars Today",
-        min_value=0.0,
-        value=6000.0,
-        step=100.0
-    )
-
-    # ACCOUNT 2 — Tax-Sheltered
-    risky_start_2 = st.sidebar.number_input(
-        "Tax-Sheltered – Deployed Dollars at Quarter Start",
-        min_value=0.0,
-        value=6000.0,
-        step=100.0
-    )
-    risky_today_2 = st.sidebar.number_input(
-        "Tax-Sheltered – Deployed Dollars Today",
-        min_value=0.0,
-        value=6000.0,
-        step=100.0
-    )
-
-    # ACCOUNT 3 — Joint
-    risky_start_3 = st.sidebar.number_input(
-        "Joint (Taxable) – Deployed Dollars at Quarter Start",
-        min_value=0.0,
-        value=6000.0,
-        step=100.0
-    )
-    risky_today_3 = st.sidebar.number_input(
-        "Joint (Taxable) – Deployed Dollars Today",
-        min_value=0.0,
-        value=6000.0,
+        value=20000.0,
         step=100.0
     )
     
@@ -540,6 +504,25 @@ def main():
     st.write("### SIG Quarterly Target Check")
     st.write(f"**Quarterly Target Growth:** {quarterly_target:.2%}")
 
+    # === NEW: derive SIG risky/safe weights based on today's hybrid/pure signals ===
+    pure_risk_today  = float(pure_sig_rw.iloc[-1])
+    pure_safe_today  = float(pure_sig_sw.iloc[-1])
+
+    hyb_risk_today   = float(hybrid_rw.iloc[-1])
+    hyb_safe_today   = float(hybrid_sw.iloc[-1])
+
+    # === NEW: derive real-world risky dollar values automatically ===
+    risky_today_1 = total_portfolio_value * hyb_risk_today
+    risky_start_1 = risky_today_1 / (1 + quarterly_target)
+
+    # Accounts 2 and 3 mirror account 1 (same SIG)
+    risky_today_2 = risky_today_1
+    risky_start_2 = risky_start_1
+
+    risky_today_3 = risky_today_1
+    risky_start_3 = risky_start_1
+    
+    # === Quarterly progress calculation ===
     prog_auto_1 = compute_quarter_progress(risky_start_1, risky_today_1, quarterly_target)
     prog_auto_2 = compute_quarter_progress(risky_start_2, risky_today_2, quarterly_target)
     prog_auto_3 = compute_quarter_progress(risky_start_3, risky_today_3, quarterly_target)
@@ -744,9 +727,9 @@ def main():
     # ============================================================
 
     # These are the real-world total portfolio values (not historical drift)
-    real_cap_1 = risky_today_1 / START_RISKY
-    real_cap_2 = risky_today_2 / START_RISKY
-    real_cap_3 = risky_today_3 / START_RISKY
+    real_cap_1 = total_portfolio_value
+    real_cap_2 = total_portfolio_value
+    real_cap_3 = total_portfolio_value
     
     # ------------------------------------------------------------
     # HYBRID STRATEGY — TODAY’S RECOMMENDED WEIGHTS
