@@ -1,3 +1,4 @@
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -355,59 +356,6 @@ def compute_quarter_progress(risky_start, risky_today, quarterly_target):
 
 def normalize(eq):
     return eq / eq.iloc[0] * 10000
-    
-# ============================================================
-# QUICK QUARTER START DATE HELPER
-# ============================================================
-
-def compute_quarter_start_date_only(prices, risk_on_weights, risk_off_weights, flip_cost):
-    # Run same grid search as main
-    best_cfg, best_result = run_grid_search(
-        prices, risk_on_weights, risk_off_weights, flip_cost
-    )
-    best_len, best_type, best_tol = best_cfg
-    sig = best_result["signal"]
-
-    # Build risk-on simple returns
-    simple_rets = prices.pct_change().fillna(0)
-    risk_on_simple = pd.Series(0.0, index=simple_rets.index)
-    for a, w in risk_on_weights.items():
-        if a in simple_rets.columns:
-            risk_on_simple += simple_rets[a] * w
-
-    # Build risk-off returns
-    risk_off_daily = pd.Series(0.0, index=simple_rets.index)
-    for a, w in risk_off_weights.items():
-        if a in simple_rets.columns:
-            risk_off_daily += simple_rets[a] * w
-
-    # Annualized CAGR → quarterly target
-    risk_on_eq = (1 + risk_on_simple).cumprod()
-    bh_cagr = (risk_on_eq.iloc[-1] / risk_on_eq.iloc[0]) ** (252 / len(risk_on_eq)) - 1
-    quarterly_target = (1 + bh_cagr) ** (1/4) - 1
-
-    # Pure SIG
-    pure_sig_signal = pd.Series(True, index=risk_on_simple.index)
-    pure_sig_eq, pure_sig_rw, pure_sig_sw, _ = run_sig_engine(
-        risk_on_simple, risk_off_daily, quarterly_target, pure_sig_signal
-    )
-
-    # Hybrid SIG
-    hybrid_eq, hybrid_rw, hybrid_sw, _ = run_sig_engine(
-        risk_on_simple,
-        risk_off_daily,
-        quarterly_target,
-        sig,
-        pure_sig_rw=pure_sig_rw,
-        pure_sig_sw=pure_sig_sw
-    )
-
-    # Quarter start date logic
-    last_index = len(hybrid_rw) - 1
-    quarter_indices = [i for i in range(len(hybrid_rw)) if i % QUARTER_DAYS == 0]
-    q_start_idx = max(idx for idx in quarter_indices if idx <= last_index)
-
-    return prices.index[q_start_idx]
 # ============================================================
 # STREAMLIT APP
 # ============================================================
@@ -423,28 +371,6 @@ def main():
     st.sidebar.header("Backtest Settings")
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
     end = st.sidebar.text_input("End Date (optional)", "")
-
-    # ------------------------------------------------------------
-    # QUICK BUTTON TO SHOW CURRENT QUARTER START DATE
-    # ------------------------------------------------------------
-    if st.sidebar.button("Get Current Quarter Start Date"):
-        # Load minimal prices (same tickers as risk-on + risk-off)
-        all_tickers_preview = sorted(set(risk_on_tickers_str.split(",") + risk_off_tickers_str.split(",")))
-
-        prices_preview = load_price_data(
-            [t.strip().upper() for t in all_tickers_preview],
-            start,
-            end if end.strip() else None
-        ).dropna(how="any")
-
-        q_start = compute_quarter_start_date_only(
-            prices_preview,
-            RISK_ON_WEIGHTS,
-            RISK_OFF_WEIGHTS,
-            FLIP_COST
-        )
-
-    st.sidebar.success(f"Current Quarter Start Date: {q_start.date()}")
 
     # ------------------------------------------------------------
     # SIDEBAR: Asset Sleeves
