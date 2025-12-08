@@ -5,10 +5,11 @@ import matplotlib.pyplot as plt
 import streamlit as st
 import io
 from scipy.optimize import minimize
+import datetime
 
-# ============================================
+# ============================================================
 # CONFIG
-# ============================================
+# ============================================================
 
 DEFAULT_START_DATE = "1999-01-01"
 RISK_FREE_RATE = 0.0
@@ -24,15 +25,16 @@ RISK_OFF_WEIGHTS = {
 }
 
 FLIP_COST = 0.045
-
 QUARTER_DAYS = 63
+
+# Starting weights inside the SIG engine (unchanged)
 START_RISKY = 0.60
-START_SAFE = 0.40
+START_SAFE  = 0.40
 
 
-# ============================================
+# ============================================================
 # DATA LOADING
-# ============================================
+# ============================================================
 
 @st.cache_data(show_spinner=True)
 def load_price_data(tickers, start_date, end_date=None):
@@ -49,9 +51,9 @@ def load_price_data(tickers, start_date, end_date=None):
     return px.dropna(how="all")
 
 
-# ============================================
+# ============================================================
 # BUILD PORTFOLIO INDEX — SIMPLE RETURNS
-# ============================================
+# ============================================================
 
 def build_portfolio_index(prices, weights_dict):
     simple_rets = prices.pct_change().fillna(0)
@@ -64,9 +66,9 @@ def build_portfolio_index(prices, weights_dict):
     return (1 + idx_rets).cumprod()
 
 
-# ============================================
+# ============================================================
 # MA MATRIX
-# ============================================
+# ============================================================
 
 def compute_ma_matrix(price_series, lengths, ma_type):
     ma_dict = {}
@@ -81,9 +83,9 @@ def compute_ma_matrix(price_series, lengths, ma_type):
     return ma_dict
 
 
-# ============================================
+# ============================================================
 # TESTFOL SIGNAL LOGIC
-# ============================================
+# ============================================================
 
 def generate_testfol_signal_vectorized(price, ma, tol):
     px = price.shift(1).values
@@ -101,7 +103,7 @@ def generate_testfol_signal_vectorized(price, ma, tol):
     start_index = first_valid + 1
 
     for t in range(start_index, n):
-        if not sig[t-1]:
+        if not sig[t - 1]:
             sig[t] = px[t] > upper[t]
         else:
             sig[t] = not (px[t] < lower[t])
@@ -110,7 +112,7 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 
 
 # ============================================================
-# NEW: SIG ENGINE — TRUE JASON KELLY LOGIC (Enhanced)
+# SIG ENGINE (no user inputs, internal cadence, deterministic)
 # ============================================================
 
 def run_sig_engine(
@@ -124,8 +126,8 @@ def run_sig_engine(
 ):
     dates = risk_on_returns.index
     n = len(dates)
-    
-    # === Flip detection identical to MA strategy ===
+
+    # Flip detection identical to MA strategy
     sig_arr = ma_signal.astype(int)
     flip_mask = sig_arr.diff().abs() == 1
 
@@ -139,29 +141,31 @@ def run_sig_engine(
     equity_curve = []
     risky_w_series = []
     safe_w_series = []
-    rebalance_events = 0
     risky_val_series = []
     safe_val_series = []
+    rebalance_events = 0
 
-    for i, date in enumerate(dates):
+    for i in range(n):
         r_on  = risk_on_returns.iloc[i]
         r_off = risk_off_returns.iloc[i]
         ma_on = bool(ma_signal.iloc[i])
 
         if ma_on:
 
+            # Restore pure-SIG weights after exiting RISK-OFF
             if frozen_risky is not None:
                 w_r = pure_sig_rw.iloc[i]
                 w_s = pure_sig_sw.iloc[i]
-
                 risky_val = eq * w_r
                 safe_val  = eq * w_s
                 frozen_risky = None
                 frozen_safe  = None
 
+            # Apply daily returns
             risky_val *= (1 + r_on)
             safe_val  *= (1 + r_off)
 
+            # Quarterly rebalance logic — pure Kelly SIG
             if i >= QUARTER_DAYS and (i % QUARTER_DAYS == 0):
 
                 past_risky_val = risky_val_series[i - QUARTER_DAYS]
@@ -179,20 +183,21 @@ def run_sig_engine(
                     safe_val  -= move
                     risky_val += move
                     rebalance_events += 1
-                    
-                # === Quarterly drag fee (NEW STEP 3) ===
+
+                # Quarterly drag fee (small)
                 quarter_fee = flip_cost * target_quarter
                 eq *= (1 - quarter_fee)
 
             eq = risky_val + safe_val
-            risky_w = risky_val / eq if eq > 0 else 0
-            safe_w  = safe_val  / eq if eq > 0 else 0
-            
-            # === Hybrid flip cost identical to MA strategy ===
+            risky_w = risky_val / eq
+            safe_w  = safe_val  / eq
+
+            # Flip cost identical to MA strategy
             if flip_mask.iloc[i]:
                 eq *= (1 - flip_cost)
 
         else:
+            # Freeze risky/safe values for re-entry
             if frozen_risky is None:
                 frozen_risky = risky_val
                 frozen_safe  = safe_val
@@ -213,9 +218,11 @@ def run_sig_engine(
         pd.Series(safe_w_series, index=dates),
         rebalance_events
     )
-# ============================================
-# BACKTEST ENGINE (unchanged)
-# ============================================
+
+
+# ============================================================
+# BACKTEST ENGINE
+# ============================================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
     weights = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
@@ -237,17 +244,14 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
     sharpe = (simple_returns.mean() * 252 - rf) / vol if vol > 0 else np.nan
 
     dd = eq_curve / eq_curve.cummax() - 1
-    max_dd = dd.min()
-
-    total_ret = eq_curve.iloc[-1] / eq_curve.iloc[0] - 1
 
     return {
         "CAGR": cagr,
         "Volatility": vol,
         "Sharpe": sharpe,
-        "MaxDrawdown": max_dd,
-        "TotalReturn": total_ret,
-        "DD_Series": dd,
+        "MaxDrawdown": dd.min(),
+        "TotalReturn": eq_curve.iloc[-1] / eq_curve.iloc[0] - 1,
+        "DD_Series": dd
     }
 
 
@@ -274,9 +278,9 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
     }
 
 
-# ============================================
-# GRID SEARCH (unchanged)
-# ============================================
+# ============================================================
+# GRID SEARCH
+# ============================================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
 
@@ -309,17 +313,17 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
                 switches = sig_arr.diff().abs().sum()
                 trades_per_year = switches / (len(sig_arr) / 252)
 
-                sharpe_adj = result["performance"]["Sharpe"]
+                sharpe = result["performance"]["Sharpe"]
 
                 idx += 1
                 if idx % 200 == 0:
                     progress.progress(idx / total)
 
                 if (
-                    sharpe_adj > best_sharpe or
-                    (sharpe_adj == best_sharpe and trades_per_year < best_trades)
+                    sharpe > best_sharpe or
+                    (sharpe == best_sharpe and trades_per_year < best_trades)
                 ):
-                    best_sharpe = sharpe_adj
+                    best_sharpe = sharpe
                     best_trades = trades_per_year
                     best_cfg = (length, ma_type, tol)
                     best_result = result
@@ -327,99 +331,89 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
     return best_cfg, best_result
 
 
-def normalize(eq):
-    return eq / eq.iloc[0] * 10000
+# ============================================================
+# QUARTERLY PROGRESS HELPER
+# ============================================================
 
-# ===== NEW: Quarter Progress Helper =====
 def compute_quarter_progress(risky_start, risky_today, quarterly_target):
-    target = risky_start * (1 + quarterly_target)
-    gap = target - risky_today
+    target_risky = risky_start * (1 + quarterly_target)
+    gap = target_risky - risky_today
     pct_gap = gap / risky_start if risky_start > 0 else 0
 
     return {
         "Risky Start ($)": risky_start,
         "Risky Today ($)": risky_today,
-        "Quarterly Target ($)": target,
+        "Quarterly Target ($)": target_risky,
         "Gap ($)": gap,
-        "Gap (%)": pct_gap
+        "Gap (%)": pct_gap,
     }
 
-# ============================================
+
+# ============================================================
+# NORMALIZATION FOR PLOTTING
+# ============================================================
+
+def normalize(eq):
+    return eq / eq.iloc[0] * 10000
+# ============================================================
 # STREAMLIT APP
-# ============================================
+# ============================================================
 
 def main():
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
     st.title("Portfolio Strategy")
 
+    # ------------------------------------------------------------
+    # SIDEBAR: Backtest Inputs
+    # ------------------------------------------------------------
     st.sidebar.header("Backtest Settings")
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
     end = st.sidebar.text_input("End Date (optional)", "")
 
-    st.sidebar.header("Deployed Capital Sleeve")
-    risk_on_tickers_str = st.sidebar.text_input("Tickers", ",".join(RISK_ON_WEIGHTS.keys()))
-    risk_on_weights_str = st.sidebar.text_input("Weights", ",".join(str(w) for w in RISK_ON_WEIGHTS.values()))
-
-    st.sidebar.header("Treasury Sleeve")
-    risk_off_tickers_str = st.sidebar.text_input("Tickers", ",".join(RISK_OFF_WEIGHTS.keys()))
-    risk_off_weights_str = st.sidebar.text_input("Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values()))
-
-    st.sidebar.header("SIG Rebalance Settings")
-    strategy_start_date = st.sidebar.date_input(
-        "Enter the date you LAST rebalanced",
-        value=pd.Timestamp.today().date()
+    # ------------------------------------------------------------
+    # SIDEBAR: Asset Sleeves
+    # ------------------------------------------------------------
+    st.sidebar.header("Deployed Capital Sleeve (RISK-ON)")
+    risk_on_tickers_str = st.sidebar.text_input(
+        "Tickers", ",".join(RISK_ON_WEIGHTS.keys())
     )
-    
-    strategy_start_date = pd.Timestamp(strategy_start_date)
-
-    st.sidebar.header("SIG Rebalancing Inputs (RISKY dollars only)")
-
-    # ACCOUNT 1 — Taxable
-    risky_start_1 = st.sidebar.number_input(
-        "Taxable – Deployed Dollars at Quarter Start",
-        min_value=0.0,
-        value=6000.0,   # example default: 60% of 10k
-        step=100.0
-    )
-    risky_today_1 = st.sidebar.number_input(
-        "Taxable – Deployed Dollars Today",
-        min_value=0.0,
-        value=6000.0,
-        step=100.0
+    risk_on_weights_str = st.sidebar.text_input(
+        "Weights", ",".join(str(w) for w in RISK_ON_WEIGHTS.values())
     )
 
-    # ACCOUNT 2 — Tax-Sheltered
-    risky_start_2 = st.sidebar.number_input(
-        "Tax-Sheltered – Deployed Dollars at Quarter Start",
-        min_value=0.0,
-        value=6000.0,
-        step=100.0
+    st.sidebar.header("Treasury Sleeve (RISK-OFF)")
+    risk_off_tickers_str = st.sidebar.text_input(
+        "Tickers", ",".join(RISK_OFF_WEIGHTS.keys())
     )
-    risky_today_2 = st.sidebar.number_input(
-        "Tax-Sheltered – Deployed Dollars Today",
-        min_value=0.0,
-        value=6000.0,
-        step=100.0
+    risk_off_weights_str = st.sidebar.text_input(
+        "Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values())
     )
 
-    # ACCOUNT 3 — Joint
-    risky_start_3 = st.sidebar.number_input(
-        "Joint (Taxable) – Deployed Dollars at Quarter Start",
-        min_value=0.0,
-        value=6000.0,
-        step=100.0
+    # ------------------------------------------------------------
+    # SIDEBAR: Real-World Account Values (C1)
+    # ------------------------------------------------------------
+    st.sidebar.header("Real-World Account Values")
+
+    real_cap_1 = st.sidebar.number_input(
+        "Taxable – Total Portfolio Value Today ($)",
+        min_value=0.0, value=10000.0, step=100.0
     )
-    risky_today_3 = st.sidebar.number_input(
-        "Joint (Taxable) – Deployed Dollars Today",
-        min_value=0.0,
-        value=6000.0,
-        step=100.0
+    real_cap_2 = st.sidebar.number_input(
+        "Tax-Sheltered – Total Portfolio Value Today ($)",
+        min_value=0.0, value=10000.0, step=100.0
     )
-    
+    real_cap_3 = st.sidebar.number_input(
+        "Joint (Taxable) – Total Portfolio Value Today ($)",
+        min_value=0.0, value=10000.0, step=100.0
+    )
+
     if not st.sidebar.button("Run Backtest & Optimize"):
         st.stop()
 
+    # ------------------------------------------------------------
+    # Parse sleeve inputs
+    # ------------------------------------------------------------
     risk_on_tickers = [t.strip().upper() for t in risk_on_tickers_str.split(",")]
     risk_on_weights_list = [float(x) for x in risk_on_weights_str.split(",")]
     risk_on_weights = dict(zip(risk_on_tickers, risk_on_weights_list))
@@ -428,36 +422,36 @@ def main():
     risk_off_weights_list = [float(x) for x in risk_off_weights_str.split(",")]
     risk_off_weights = dict(zip(risk_off_tickers, risk_off_weights_list))
 
+    # ------------------------------------------------------------
+    # Load prices
+    # ------------------------------------------------------------
     all_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
     end_val = end if end.strip() else None
 
-    # Load prices
     prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
 
-    # Run MA optimization
+    # ------------------------------------------------------------
+    # MA Optimization (Grid Search)
+    # ------------------------------------------------------------
     best_cfg, best_result = run_grid_search(
-        prices,
-        risk_on_weights,
-        risk_off_weights,
-        FLIP_COST
+        prices, risk_on_weights, risk_off_weights, FLIP_COST
     )
     best_len, best_type, best_tol = best_cfg
 
     sig = best_result["signal"]
     perf = best_result["performance"]
-    
-    # === Compute MA used for signal (needed throughout UI) ===
+
+    # Compute MA used for final signal
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
-    
-    # === Trades per Year Calculation (must be defined early) ===
+
+    # Trades per year calculation
     switches = sig.astype(int).diff().abs().sum()
     trades_per_year = switches / (len(sig) / 252)
 
-    # ============================================
-    # ALWAYS-ON RISK-ON PERFORMANCE
-    # ============================================
-
+    # ------------------------------------------------------------
+    # Always-ON RISK-ON Benchmark
+    # ------------------------------------------------------------
     simple_rets = prices.pct_change().fillna(0)
 
     risk_on_simple = pd.Series(0.0, index=simple_rets.index)
@@ -468,10 +462,9 @@ def main():
     risk_on_eq = (1 + risk_on_simple).cumprod()
     risk_on_perf = compute_performance(risk_on_simple, risk_on_eq)
 
-    # ============================================
-    # SHARPE OPTIMAL PORTFOLIO
-    # ============================================
-
+    # ------------------------------------------------------------
+    # Sharpe-Optimal Portfolio (unchanged)
+    # ------------------------------------------------------------
     risk_on_px = prices[[t for t in risk_on_tickers if t in prices.columns]].dropna()
     risk_on_rets = risk_on_px.pct_change().dropna()
 
@@ -485,114 +478,117 @@ def main():
 
     n = len(mu)
     bounds = [(0, 1)] * n
-    cons = ({ "type": "eq", "fun": lambda w: np.sum(w) - 1 })
+    cons = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
 
-    res = minimize(neg_sharpe, np.ones(n)/n, bounds=bounds, constraints=cons)
+    res = minimize(neg_sharpe, np.ones(n) / n, bounds=bounds, constraints=cons)
     w_opt = res.x
 
     sharp_returns = (risk_on_rets * w_opt).sum(axis=1)
     sharp_eq = (1 + sharp_returns).cumprod()
     sharp_perf = compute_performance(sharp_returns, sharp_eq)
 
-    sharp_stats = {
-        "CAGR": sharp_perf["CAGR"],
-        "Volatility": sharp_perf["Volatility"],
-        "Sharpe": sharp_perf["Sharpe"],
-        "MaxDD": sharp_perf["MaxDrawdown"],
-        "Total": sharp_perf["TotalReturn"],
-        "MAR": sharp_perf["CAGR"] / abs(sharp_perf["MaxDrawdown"]) if sharp_perf["MaxDrawdown"] != 0 else np.nan,
-        "TID": (sharp_perf["DD_Series"] < 0).mean(),
-        "PainGain": sharp_perf["CAGR"] / np.sqrt((sharp_perf["DD_Series"]**2).mean()) if (sharp_perf["DD_Series"]**2).mean() != 0 else np.nan,
-        "Skew": sharp_returns.skew(),
-        "Kurtosis": sharp_returns.kurt(),
-        "Trades/year": 0.0,
-    }
-
-    sharp_weights_display = {t: round(w, 4) for t, w in zip(risk_on_px.columns, w_opt)}
-
-    # ============================================
-    # HYBRID SIG STRATEGY
-    # ============================================
-
-    pure_sig_rw = None   # placeholder: pure SIG weights will be computed later
-    pure_sig_sw = None
-
+    # ------------------------------------------------------------
+    # HYBRID SIG ENGINE (Backtested, No User Inputs)
+    # ------------------------------------------------------------
     risk_off_daily = pd.Series(0.0, index=simple_rets.index)
     for a, w in risk_off_weights.items():
         if a in simple_rets.columns:
             risk_off_daily += simple_rets[a] * w
 
-    bh_cagr = (risk_on_eq.iloc[-1] / risk_on_eq.iloc[0]) ** (252/len(risk_on_eq)) - 1
-    quarterly_target = (1 + bh_cagr)**(1/4) - 1
-    
-    quarterly_target = (1 + bh_cagr)**(1/4) - 1
+    # Annualized CAGR → quarterly Kelly target
+    bh_cagr = (risk_on_eq.iloc[-1] / risk_on_eq.iloc[0]) ** (252 / len(risk_on_eq)) - 1
+    quarterly_target = (1 + bh_cagr) ** (1/4) - 1
 
-    # ============================================================
-    # AUTOMATED HYBRID STRATEGY DECISION BLOCK
-    # ============================================================
+    # PURE SIG (always RISK-ON)
+    pure_sig_signal = pd.Series(True, index=risk_on_simple.index)
 
-    # 1. MA Regime Today
-    latest_signal = sig.iloc[-1]
-    regime = "RISK-ON" if latest_signal else "RISK-OFF"
-    st.write(f"### Current MA Regime: **{regime}**")
+    pure_sig_eq, pure_sig_rw, pure_sig_sw, pure_sig_rebals = run_sig_engine(
+        risk_on_simple,
+        risk_off_daily,
+        quarterly_target,
+        pure_sig_signal
+    )
 
-    # 3. Quarterly Target Check
-    st.write("### SIG Quarterly Target Check")
-    st.write(f"**Quarterly Target Growth:** {quarterly_target:.2%}")
+    # HYBRID SIG (MA Filter)
+    hybrid_eq, hybrid_rw, hybrid_sw, hybrid_rebals = run_sig_engine(
+        risk_on_simple,
+        risk_off_daily,
+        quarterly_target,
+        sig,
+        pure_sig_rw=pure_sig_rw,
+        pure_sig_sw=pure_sig_sw
+    )
 
-    prog_auto_1 = compute_quarter_progress(risky_start_1, risky_today_1, quarterly_target)
-    prog_auto_2 = compute_quarter_progress(risky_start_2, risky_today_2, quarterly_target)
-    prog_auto_3 = compute_quarter_progress(risky_start_3, risky_today_3, quarterly_target)
+    # ------------------------------------------------------------
+    # AUTOMATIC QUARTER START (Derived From Backtest)
+    # ------------------------------------------------------------
+    last_index = len(hybrid_rw) - 1
 
-    auto_prog = pd.concat([
-        pd.DataFrame.from_dict(prog_auto_1, orient='index', columns=['Taxable']),
-        pd.DataFrame.from_dict(prog_auto_2, orient='index', columns=['Tax-Sheltered']),
-        pd.DataFrame.from_dict(prog_auto_3, orient='index', columns=['Joint (Taxable)']),
-    ], axis=1)
+    # Find most recent quarter boundary
+    quarter_indices = [i for i in range(len(hybrid_rw)) if i % QUARTER_DAYS == 0]
+    q_start_idx = max(idx for idx in quarter_indices if idx <= last_index)
 
-    auto_prog.loc["Gap (%)"] = auto_prog.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
-    st.dataframe(auto_prog)
+    quarter_start_date = prices.index[q_start_idx]
+    today_date = prices.index[-1]
 
-    def rebalance_text(gap, next_q, days_to_next_q):
-        date_str = next_q.strftime("%m/%d/%Y")
-        days_str = f"{days_to_next_q} days" if days_to_next_q >= 0 else "0 days"
+    # ------------------------------------------------------------
+    # DERIVE risky_start / risky_today FOR EACH ACCOUNT (C1)
+    # ------------------------------------------------------------
+    def get_sig_progress(real_cap):
+        risky_start = float(hybrid_rw.iloc[q_start_idx]) * real_cap
+        risky_today = float(hybrid_rw.iloc[-1]) * real_cap
+        return compute_quarter_progress(risky_start, risky_today, quarterly_target)
 
-        if gap > 0:
-            return (
-                f"Increase deployed sleeve by **${gap:,.2f}** "
-                f"on **{date_str}** ({days_str})"
-            )
-        elif gap < 0:
-            return (
-                f"Decrease deployed sleeve by **${abs(gap):,.2f}** "
-                f"on **{date_str}** ({days_str})"
-            )
-        else:
-            return (
-                f"No rebalance needed until **{date_str}** ({days_str})"
-            )
-    # =====================================================
-    # ROLLING 63-DAY REBALANCE LOGIC — NEEDED ABOVE rebalance_text
-    # =====================================================
+    prog_1 = get_sig_progress(real_cap_1)
+    prog_2 = get_sig_progress(real_cap_2)
+    prog_3 = get_sig_progress(real_cap_3)
 
-    today = prices.index[-1]
-    next_q = strategy_start_date + pd.Timedelta(days=QUARTER_DAYS)
-
-    while next_q <= today:
+    # ------------------------------------------------------------
+    # NEXT QUARTER DATE (automatic)
+    # ------------------------------------------------------------
+    next_q = quarter_start_date + pd.Timedelta(days=QUARTER_DAYS)
+    while next_q <= today_date:
         next_q += pd.Timedelta(days=QUARTER_DAYS)
 
-    days_to_next_q = (next_q - today).days        
+    days_to_next_q = (next_q - today_date).days
+    # ------------------------------------------------------------
+    # TEXT FUNCTION FOR SIG REBALANCE GUIDANCE
+    # ------------------------------------------------------------
+    def rebalance_text(gap, next_q, days_to_next_q):
+        date_str = next_q.strftime("%m/%d/%Y")
+        days_str = f"{days_to_next_q} days"
 
-    st.write(f"**Taxable:** {rebalance_text(prog_auto_1['Gap ($)'], next_q, days_to_next_q)}")
-    st.write(f"**Tax-Sheltered:** {rebalance_text(prog_auto_2['Gap ($)'], next_q, days_to_next_q)}")
-    st.write(f"**Joint (Taxable):** {rebalance_text(prog_auto_3['Gap ($)'], next_q, days_to_next_q)}")
+        if gap > 0:
+            return f"Increase deployed sleeve by **${gap:,.2f}** on **{date_str}** ({days_str})"
+        elif gap < 0:
+            return f"Decrease deployed sleeve by **${abs(gap):,.2f}** on **{date_str}** ({days_str})"
+        else:
+            return f"No rebalance needed until **{date_str}** ({days_str})"
 
-# ============================================================
+    # ------------------------------------------------------------
+    # DISPLAY SIG QUARTERLY PROGRESS RESULTS
+    # ------------------------------------------------------------
+    st.subheader("Quarterly SIG Progress (Derived Automatically From Hybrid Backtest)")
+    st.write(f"**Quarter start:** {quarter_start_date.date()}")
+    st.write(f"**Next rebalance date:** {next_q.date()} ({days_to_next_q} days)")
 
-    # ============================================
+    prog_df = pd.concat([
+        pd.DataFrame.from_dict(prog_1, orient='index', columns=['Taxable']),
+        pd.DataFrame.from_dict(prog_2, orient='index', columns=['Tax-Sheltered']),
+        pd.DataFrame.from_dict(prog_3, orient='index', columns=['Joint']),
+    ], axis=1)
+
+    prog_df.loc["Gap (%)"] = prog_df.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
+    st.dataframe(prog_df)
+
+    st.write("### Rebalance Recommendations")
+    st.write("**Taxable:** " + rebalance_text(prog_1["Gap ($)"], next_q, days_to_next_q))
+    st.write("**Tax-Sheltered:** " + rebalance_text(prog_2["Gap ($)"], next_q, days_to_next_q))
+    st.write("**Joint:** " + rebalance_text(prog_3["Gap ($)"], next_q, days_to_next_q))
+
+    # ------------------------------------------------------------
     # ADVANCED METRICS
-    # ============================================
-
+    # ------------------------------------------------------------
     def time_in_drawdown(dd): return (dd < 0).mean()
     def mar(c, dd): return c / abs(dd) if dd != 0 else np.nan
     def ulcer(dd): return np.sqrt((dd**2).mean()) if (dd**2).mean() != 0 else np.nan
@@ -613,52 +609,19 @@ def main():
             "Trades/year": tpy,
         }
 
-    # ============================================
-    # PURE SIG STRATEGY (NO MA FILTER)
-    # ============================================
-
-    pure_sig_signal = pd.Series(True, index=risk_on_simple.index)
-
-    pure_sig_eq, pure_sig_rw, pure_sig_sw, pure_sig_rebals = run_sig_engine(
-        risk_on_simple,
-        risk_off_daily,
-        quarterly_target,
-        pure_sig_signal,
-        flip_cost=FLIP_COST
-    )
-
-    hybrid_eq, hybrid_rw, hybrid_sw, hybrid_rebals = run_sig_engine(
-        risk_on_simple,
-        risk_off_daily,
-        quarterly_target,
-        sig,
-        pure_sig_rw=pure_sig_rw,
-        pure_sig_sw=pure_sig_sw,
-        flip_cost=FLIP_COST
-    )
-
+    # Compute strategy stats
     hybrid_simple = hybrid_eq.pct_change().fillna(0)
     hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
 
     pure_sig_simple = pure_sig_eq.pct_change().fillna(0)
     pure_sig_perf = compute_performance(pure_sig_simple, pure_sig_eq)
 
-    pure_sig_stats = compute_stats(
-        pure_sig_perf,
-        pure_sig_simple,
-        pure_sig_perf["DD_Series"],
-        np.zeros(len(pure_sig_simple), dtype=bool),
-        0
-    )
-
-    pure_sig_stats["QuarterlyTarget"] = quarterly_target
-
     strat_stats = compute_stats(
         perf,
         best_result["returns"],
         perf["DD_Series"],
         best_result["flip_mask"],
-        trades_per_year
+        trades_per_year,
     )
 
     risk_stats = compute_stats(
@@ -666,7 +629,7 @@ def main():
         risk_on_simple,
         risk_on_perf["DD_Series"],
         np.zeros(len(risk_on_simple), dtype=bool),
-        0
+        0,
     )
 
     hybrid_stats = compute_stats(
@@ -674,137 +637,21 @@ def main():
         hybrid_simple,
         hybrid_perf["DD_Series"],
         np.zeros(len(hybrid_simple), dtype=bool),
-        0
+        0,
     )
 
-    # ============================================
-    # ALLOCATION HELPERS FOR 3 ACCOUNTS / 4 STRATEGIES
-    # ============================================
-
-    def compute_allocations(start_cap, risky_w, safe_w, risk_on_weights, risk_off_weights):
-        risky_dollars = start_cap * risky_w
-        safe_dollars  = start_cap * safe_w
-
-        alloc = {
-            "Total Risky $": risky_dollars,
-            "Total Safe $": safe_dollars
-        }
-
-        # Risk-On allocations
-        for ticker, w in risk_on_weights.items():
-            alloc[ticker] = risky_dollars * w
-
-        # Risk-Off allocations
-        for ticker, w in risk_off_weights.items():
-            alloc[ticker] = safe_dollars * w
-
-        return alloc
-
-
-    def compute_sharpe_opt_alloc(start_cap, tickers, weights):
-        alloc = {}
-        for t, w in zip(tickers, weights):
-            alloc[t] = start_cap * w
-        return alloc
-
-
-    def compute_ma_allocations(start_cap, weight_row):
-        alloc = {}
-        for ticker, w in weight_row.items():
-            alloc[ticker] = start_cap * w
-        return alloc
-
-    def add_percentage_column(alloc_dict):
-        df = pd.DataFrame.from_dict(alloc_dict, orient="index", columns=["$"])
-
-        # Case 1: We have Total Risky $ and Total Safe $
-        if "Total Risky $" in df.index and "Total Safe $" in df.index:
-            total_portfolio = df.loc["Total Risky $","$"] + df.loc["Total Safe $","$"]
-        else:
-            # Case 2: A strategy like Sharpe-optimal that only lists tickers
-            total_portfolio = df["$"].sum()
-
-        # Calculate percentage of total portfolio
-        df["% TotalPortfolio"] = df["$"] / total_portfolio * 100
-
-        # Format clean percentages
-        df["% TotalPortfolio"] = df["% TotalPortfolio"].apply(lambda x: f"{x:.2f}%")
-
-        return df
-    
-    avg_safe = hybrid_sw.mean()
-
-    # ============================================
-    # ACCOUNT-LEVEL ALLOCATIONS (3 ACCOUNTS × 4 STRATEGIES)
-    # ===========================================
-
-    # ============================================================
-    # REAL-WORLD ACCOUNT ALLOCATION TABLES
-    # Based ONLY on user's actual portfolio today
-    # ============================================================
-
-    # These are the real-world total portfolio values (not historical drift)
-    real_cap_1 = risky_today_1 / START_RISKY
-    real_cap_2 = risky_today_2 / START_RISKY
-    real_cap_3 = risky_today_3 / START_RISKY
-    
-    # ------------------------------------------------------------
-    # HYBRID STRATEGY — TODAY’S RECOMMENDED WEIGHTS
-    # (NOT historical drift — real world signal)
-    # ------------------------------------------------------------
-    # HYBRID STRATEGY — TRUE STRATEGY WEIGHTS AS OF TODAY
-    hyb_risk_today = float(hybrid_rw.iloc[-1])
-    hyb_safe_today = float(hybrid_sw.iloc[-1])
-
-    hyb_alloc_1 = compute_allocations(real_cap_1, hyb_risk_today, hyb_safe_today, risk_on_weights, risk_off_weights)
-    hyb_alloc_2 = compute_allocations(real_cap_2, hyb_risk_today, hyb_safe_today, risk_on_weights, risk_off_weights)
-    hyb_alloc_3 = compute_allocations(real_cap_3, hyb_risk_today, hyb_safe_today, risk_on_weights, risk_off_weights)
+    pure_sig_stats = compute_stats(
+        pure_sig_perf,
+        pure_sig_simple,
+        pure_sig_perf["DD_Series"],
+        np.zeros(len(pure_sig_simple), dtype=bool),
+        0,
+    )
 
     # ------------------------------------------------------------
-    # PURE SIG STRATEGY — ALWAYS RISK-ON (NO MA FILTER)
-    # (Use fixed START_RISKY / START_SAFE, NOT historical drift weights)
+    # STAT TABLE DISPLAY
     # ------------------------------------------------------------
-    # PURE SIG — TRUE STRATEGY WEIGHTS AS OF TODAY
-    pure_risk_today = float(pure_sig_rw.iloc[-1])
-    pure_safe_today = float(pure_sig_sw.iloc[-1])
-
-    pure_alloc_1 = compute_allocations(real_cap_1, pure_risk_today, pure_safe_today, risk_on_weights, risk_off_weights)
-    pure_alloc_2 = compute_allocations(real_cap_2, pure_risk_today, pure_safe_today, risk_on_weights, risk_off_weights)
-    pure_alloc_3 = compute_allocations(real_cap_3, pure_risk_today, pure_safe_today, risk_on_weights, risk_off_weights)
-
-    # ------------------------------------------------------------
-    # 100% RISK-ON STRATEGY
-    # ------------------------------------------------------------
-    riskon_alloc_1 = compute_allocations(real_cap_1, 1.0, 0.0, risk_on_weights, {"SHY": 0})
-    riskon_alloc_2 = compute_allocations(real_cap_2, 1.0, 0.0, risk_on_weights, {"SHY": 0})
-    riskon_alloc_3 = compute_allocations(real_cap_3, 1.0, 0.0, risk_on_weights, {"SHY": 0})
-
-    # ------------------------------------------------------------
-    # SHARPE-OPTIMAL STRATEGY — USING REAL MONEY
-    # ------------------------------------------------------------
-    sharpe_alloc_1 = compute_sharpe_opt_alloc(real_cap_1, risk_on_px.columns, w_opt)
-    sharpe_alloc_2 = compute_sharpe_opt_alloc(real_cap_2, risk_on_px.columns, w_opt)
-    sharpe_alloc_3 = compute_sharpe_opt_alloc(real_cap_3, risk_on_px.columns, w_opt)
-
-    # ------------------------------------------------------------
-    # MA STRATEGY — TODAY’S SIGNAL, NOT HISTORICAL WEIGHTS
-    # ------------------------------------------------------------
-    if latest_signal:
-        # MA says RISK-ON today
-        ma_alloc_1 = compute_allocations(real_cap_1, 1.0, 0.0, risk_on_weights, {"SHY": 0})
-        ma_alloc_2 = compute_allocations(real_cap_2, 1.0, 0.0, risk_on_weights, {"SHY": 0})
-        ma_alloc_3 = compute_allocations(real_cap_3, 1.0, 0.0, risk_on_weights, {"SHY": 0})
-    else:
-        # MA says RISK-OFF today
-        ma_alloc_1 = compute_allocations(real_cap_1, 0.0, 1.0, {}, risk_off_weights)
-        ma_alloc_2 = compute_allocations(real_cap_2, 0.0, 1.0, {}, risk_off_weights)
-        ma_alloc_3 = compute_allocations(real_cap_3, 0.0, 1.0, {}, risk_off_weights)
-    
-    # ============================================
-    # METRIC TABLE — 4 COLUMNS
-    # ============================================
-
-    st.subheader("Ma Strategy vs. Sharpe-Opt B&H (Limited 9/17/2014) vs. Buy & Hold vs. Hybrid MA/SIG vs. Pure SIG")
+    st.subheader("MA Strategy vs Sharpe-Optimal vs Buy & Hold vs Hybrid SIG vs Pure SIG")
 
     rows = [
         ("CAGR", "CAGR"),
@@ -827,7 +674,7 @@ def main():
     table_data = []
     for label, key in rows:
         sv = strat_stats.get(key, np.nan)
-        sh = sharp_stats.get(key, np.nan)
+        sh = sharp_perf.get(key, np.nan)
         rv = risk_stats.get(key, np.nan)
         hv = hybrid_stats.get(key, np.nan)
         ps = pure_sig_stats.get(key, np.nan)
@@ -843,98 +690,92 @@ def main():
 
     stat_table = pd.DataFrame(
         table_data,
-        columns=["Metric", "MA Strategy", "Sharpe-Opt Buy & Hold (Limited: 09/17/2014)", "Buy & Hold", "Hybrid MA/SIG", "SIG"]
+        columns=[
+            "Metric",
+            "MA Strategy",
+            "Sharpe-Optimal",
+            "Buy & Hold",
+            "Hybrid SIG",
+            "Pure SIG",
+        ],
     )
 
     st.dataframe(stat_table, use_container_width=True)
 
-    # =====================================================
-    # QUARTERLY PROGRESS TRACKER — EXACT VALUES TODAY
-    # =====================================================
-    
-    # ============================================
-    # ACCOUNT ALLOCATION TABLES
-    # ============================================
+    # ------------------------------------------------------------
+    # ACCOUNT-LEVEL ALLOCATIONS
+    # ------------------------------------------------------------
+
+    def compute_allocations(account_value, risky_w, safe_w, ron_w, roff_w):
+        risky_dollars = account_value * risky_w
+        safe_dollars  = account_value * safe_w
+
+        alloc = {"Total Risky $": risky_dollars, "Total Safe $": safe_dollars}
+
+        for t, w in ron_w.items():
+            alloc[t] = risky_dollars * w
+
+        for t, w in roff_w.items():
+            alloc[t] = safe_dollars * w
+
+        return alloc
+
+    def compute_sharpe_alloc(account_value, tickers, weights):
+        return {t: account_value * w for t, w in zip(tickers, weights)}
+
+    def add_pct(df):
+        out = pd.DataFrame.from_dict(df, orient="index", columns=["$"])
+        total = out["$"].sum()
+        out["% Portfolio"] = out["$"] / total * 100
+        out["% Portfolio"] = out["% Portfolio"].apply(lambda x: f"{x:.2f}%")
+        return out
 
     st.subheader("Account-Level Allocations")
 
-    tab1, tab2, tab3 = st.tabs(["Taxable", "Tax-Sheltered", "Joint (Taxable)"])
+    # CURRENT hybrid weights
+    hyb_r = float(hybrid_rw.iloc[-1])
+    hyb_s = float(hybrid_sw.iloc[-1])
 
-    with tab1:
-        st.write("### Hybrid SIG Allocation")
-        st.dataframe(add_percentage_column(hyb_alloc_1))
+    pure_r = float(pure_sig_rw.iloc[-1])
+    pure_s = float(pure_sig_sw.iloc[-1])
 
-        st.write("### Pure SIG Allocation")
-        st.dataframe(add_percentage_column(pure_alloc_1))
+    # Risk-On is 100% risky sleeve
+    # MA strategy depends on signal today
+    latest_signal = sig.iloc[-1]
 
-        st.write("### Risk-ON Allocation")
-        st.dataframe(add_percentage_column(riskon_alloc_1))
+    tab1, tab2, tab3 = st.tabs(["Taxable", "Tax-Sheltered", "Joint"])
 
-        st.write("### Sharpe-Optimal Allocation")
-        st.dataframe(add_percentage_column(sharpe_alloc_1))
-        
-        st.write("### MA Strategy Allocation")
-        st.dataframe(add_percentage_column(ma_alloc_1))
+    accounts = [
+        ("Taxable", real_cap_1),
+        ("Tax-Sheltered", real_cap_2),
+        ("Joint", real_cap_3),
+    ]
 
+    for (label, cap), tab in zip(accounts, (tab1, tab2, tab3)):
+        with tab:
+            st.write(f"### {label} — Hybrid SIG")
+            st.dataframe(add_pct(compute_allocations(cap, hyb_r, hyb_s, risk_on_weights, risk_off_weights)))
 
+            st.write(f"### {label} — Pure SIG")
+            st.dataframe(add_pct(compute_allocations(cap, pure_r, pure_s, risk_on_weights, risk_off_weights)))
 
+            st.write(f"### {label} — 100% Risk-On Portfolio")
+            st.dataframe(add_pct(compute_allocations(cap, 1.0, 0.0, risk_on_weights, {"SHY": 0})))
 
-    with tab2:
-        st.write("### Hybrid SIG Allocation")
-        st.dataframe(add_percentage_column(hyb_alloc_2))
+            st.write(f"### {label} — Sharpe-Optimal")
+            st.dataframe(add_pct(compute_sharpe_alloc(cap, risk_on_px.columns, w_opt)))
 
-        st.write("### Pure SIG Allocation")
-        st.dataframe(add_percentage_column(pure_alloc_2))
-    
-        st.write("### Risk-ON Allocation")
-        st.dataframe(add_percentage_column(riskon_alloc_2))
+            st.write(f"### {label} — MA Strategy")
+            if latest_signal:
+                ma_alloc = compute_allocations(cap, 1.0, 0.0, risk_on_weights, {"SHY": 0})
+            else:
+                ma_alloc = compute_allocations(cap, 0.0, 1.0, {}, risk_off_weights)
+            st.dataframe(add_pct(ma_alloc))
 
-        st.write("### Sharpe-Optimal Allocation")
-        st.dataframe(add_percentage_column(sharpe_alloc_2))
-
-        st.write("### MA Strategy Allocation")
-        st.dataframe(add_percentage_column(ma_alloc_2))
-
-    with tab3:
-        st.write("### Hybrid SIG Allocation")
-        st.dataframe(add_percentage_column(hyb_alloc_3))
-
-        st.write("### Pure SIG Allocation")
-        st.dataframe(add_percentage_column(pure_alloc_3))
-
-        st.write("### Risk-ON Allocation")
-        st.dataframe(add_percentage_column(riskon_alloc_3))
-
-        st.write("### Sharpe-Optimal Allocation")
-        st.dataframe(add_percentage_column(sharpe_alloc_3))
-
-        st.write("### MA Strategy Allocation")
-        st.dataframe(add_percentage_column(ma_alloc_3))
-
-        st.write(f"**Hybrid — Rebalance Events:** {hybrid_rebals}")
-
-    # ============================================
-    # EXTERNAL VALIDATION LINK
-    # ============================================
-    st.subheader("External Sharpe Optimal Validation Link")
-    st.markdown(
-        f"**Quick Access:** [View the Sharpe Optimal recommended portfolio](https://testfol.io/optimizer?s=9y4FBdfW2oO)"
-    )
-
-    # ============================================
-    # OPTIMAL SIGNAL PARAMETERS
-    # ============================================
-
-    st.subheader("Optimal MA Signal Parameters")
-    st.write(f"**Moving Average Type:** {best_type.upper()}")
-    st.write(f"**Optimal MA Length:** {best_len}")
-    st.write(f"**Optimal Tolerance:** {best_tol:.2%}")
-
-    # ============================================
-    # SIGNAL DISTANCE
-    # ============================================
-
-    st.subheader("Next MA Signal Information")
+    # ------------------------------------------------------------
+    # MA SIGNAL DISTANCE
+    # ------------------------------------------------------------
+    st.subheader("Next MA Signal Distance")
 
     latest_date = opt_ma.dropna().index[-1]
     P = float(portfolio_index.loc[latest_date])
@@ -945,15 +786,14 @@ def main():
 
     if latest_signal:
         delta = (P - lower) / P
-        st.write(f"**Drop Required:** {delta:.2%}")
+        st.write(f"**Drop Required for RISK-OFF:** {delta:.2%}")
     else:
         delta = (upper - P) / P
-        st.write(f"**Gain Required:** {delta:.2%}")
+        st.write(f"**Gain Required for RISK-ON:** {delta:.2%}")
 
-    # ============================================
+    # ------------------------------------------------------------
     # REGIME STATS
-    # ============================================
-
+    # ------------------------------------------------------------
     st.subheader("Regime Statistics")
 
     sig_int = sig.astype(int)
@@ -961,67 +801,65 @@ def main():
 
     segments = []
     current = sig_int.iloc[0]
-    start_date = sig_int.index[0]
+    seg_start = sig_int.index[0]
 
     for date, sw in flips.iloc[1:].items():
         if sw:
-            segments.append((current, start_date, date))
+            segments.append((current, seg_start, date))
             current = sig_int.loc[date]
-            start_date = date
+            seg_start = date
 
-    segments.append((current, start_date, sig_int.index[-1]))
+    segments.append((current, seg_start, sig_int.index[-1]))
 
     regime_rows = []
     for r, s, e in segments:
-        label = "RISK-ON" if r == 1 else "RISK-OFF"
-        regime_rows.append([label, s.date(), e.date(), (e - s).days])
+        regime_rows.append([
+            "RISK-ON" if r == 1 else "RISK-OFF",
+            s.date(), e.date(),
+            (e - s).days
+        ])
 
     regime_df = pd.DataFrame(regime_rows, columns=["Regime", "Start", "End", "Duration (days)"])
+    st.dataframe(regime_df)
 
-    avg_on = regime_df[regime_df["Regime"] == "RISK-ON"]["Duration (days)"].mean()
-    avg_off = regime_df[regime_df["Regime"] == "RISK-OFF"]["Duration (days)"].mean()
+    st.write(f"**Avg RISK-ON duration:** {regime_df[regime_df['Regime']=='RISK-ON']['Duration (days)'].mean():.1f} days")
+    st.write(f"**Avg RISK-OFF duration:** {regime_df[regime_df['Regime']=='RISK-OFF']['Duration (days)'].mean():.1f} days")
 
-    st.write(f"**Avg RISK-ON:** {avg_on:.1f} days")
-    st.write(f"**Avg RISK-OFF:** {avg_off:.1f} days")
-    st.dataframe(regime_df, use_container_width=True)
-
-    # ============================================
+    # ------------------------------------------------------------
     # FINAL PLOT
-    # ============================================
+    # ------------------------------------------------------------
+    st.subheader("Portfolio Strategy Performance Comparison")
 
-    st.subheader("Portfolio Strategy vs. Sharpe-Optimal vs. Hybrid vs. Risk-On")
-
-    # === MA LINE FOR PLOTTING ===
     plot_index = build_portfolio_index(prices, risk_on_weights)
     plot_ma = compute_ma_matrix(plot_index, [best_len], best_type)[best_len]
 
-    # Normalize both to 10,000 like your strategy curves
-    plot_index_norm = plot_index / plot_index.iloc[0] * 10000
-    plot_ma_norm = plot_ma / plot_ma.dropna().iloc[0] * 10000
-
-    fig, ax = plt.subplots(figsize=(12, 6))
+    plot_index_norm = normalize(plot_index)
+    plot_ma_norm = normalize(plot_ma.dropna())
 
     strat_eq_norm  = normalize(best_result["equity_curve"])
     sharp_eq_norm  = normalize(sharp_eq)
-    risk_on_norm   = normalize(portfolio_index)
     hybrid_eq_norm = normalize(hybrid_eq)
     pure_sig_norm  = normalize(pure_sig_eq)
+    risk_on_norm   = normalize(risk_on_eq)
 
-    ax.plot(strat_eq_norm,  label="MA Strategy", linewidth=2)
-    ax.plot(sharp_eq_norm,  label="Sharpe-Optimal", linewidth=2, color="magenta")
-    ax.plot(risk_on_norm,   label="Risk-On Portfolio", alpha=0.65)
-    ax.plot(hybrid_eq_norm, label="Hybrid SIG Strategy", linewidth=2, color="blue")
-    ax.plot(pure_sig_norm,  label="Pure SIG (No MA Filter)", linewidth=2, color="orange")
-    ax.plot(plot_ma_norm, label=f"MA({best_len}) {best_type.upper()}", linestyle="--", color="black", alpha=0.8)
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(strat_eq_norm, label="MA Strategy", linewidth=2)
+    ax.plot(sharp_eq_norm, label="Sharpe-Optimal", linewidth=2, color="magenta")
+    ax.plot(risk_on_norm, label="100% Risk-On", alpha=0.65)
+    ax.plot(hybrid_eq_norm, label="Hybrid SIG", linewidth=2, color="blue")
+    ax.plot(pure_sig_norm, label="Pure SIG", linewidth=2, color="orange")
+    ax.plot(plot_ma_norm, label=f"MA({best_len}) {best_type.upper()}", linestyle="--", color="black", alpha=0.6)
 
     ax.legend()
     ax.grid(alpha=0.3)
     st.pyplot(fig)
 
 
-# ============================================
+# ============================================================
 # LAUNCH APP
-# ============================================
+# ============================================================
 
 if __name__ == "__main__":
     main()
+
+
