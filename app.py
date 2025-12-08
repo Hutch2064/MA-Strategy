@@ -752,9 +752,9 @@ def main():
     # HYBRID STRATEGY — TODAY’S RECOMMENDED WEIGHTS
     # (NOT historical drift — real world signal)
     # ------------------------------------------------------------
-    # Hybrid recommended risky % = START_RISKY when MA signal is ON, else 0%
-    hyb_risk_today = START_RISKY if latest_signal else 0.0
-    hyb_safe_today = 1 - hyb_risk_today
+    # HYBRID STRATEGY — TRUE STRATEGY WEIGHTS AS OF TODAY
+    hyb_risk_today = float(hybrid_rw.iloc[-1])
+    hyb_safe_today = float(hybrid_sw.iloc[-1])
 
     hyb_alloc_1 = compute_allocations(real_cap_1, hyb_risk_today, hyb_safe_today, risk_on_weights, risk_off_weights)
     hyb_alloc_2 = compute_allocations(real_cap_2, hyb_risk_today, hyb_safe_today, risk_on_weights, risk_off_weights)
@@ -764,8 +764,9 @@ def main():
     # PURE SIG STRATEGY — ALWAYS RISK-ON (NO MA FILTER)
     # (Use fixed START_RISKY / START_SAFE, NOT historical drift weights)
     # ------------------------------------------------------------
-    pure_risk_today = START_RISKY
-    pure_safe_today = START_SAFE
+    # PURE SIG — TRUE STRATEGY WEIGHTS AS OF TODAY
+    pure_risk_today = float(pure_sig_rw.iloc[-1])
+    pure_safe_today = float(pure_sig_sw.iloc[-1])
 
     pure_alloc_1 = compute_allocations(real_cap_1, pure_risk_today, pure_safe_today, risk_on_weights, risk_off_weights)
     pure_alloc_2 = compute_allocations(real_cap_2, pure_risk_today, pure_safe_today, risk_on_weights, risk_off_weights)
