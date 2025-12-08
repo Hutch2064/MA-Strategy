@@ -504,12 +504,7 @@ def main():
     st.write("### SIG Quarterly Target Check")
     st.write(f"**Quarterly Target Growth:** {quarterly_target:.2%}")
 
-    # === NEW: derive SIG risky/safe weights based on today's hybrid/pure signals ===
-    pure_risk_today  = float(pure_sig_rw.iloc[-1])
-    pure_safe_today  = float(pure_sig_sw.iloc[-1])
-
-    hyb_risk_today   = float(hybrid_rw.iloc[-1])
-    hyb_safe_today   = float(hybrid_sw.iloc[-1])
+    # === NEW: derive SIG risky/safe weights based on today's hybrid/pure signals ==
 
     # === NEW: derive real-world risky dollar values automatically ===
     risky_today_1 = total_portfolio_value * hyb_risk_today
@@ -619,6 +614,13 @@ def main():
         pure_sig_sw=pure_sig_sw,
         flip_cost=FLIP_COST
     )
+
+    # === TRUE TODAY WEIGHTS FOR PURE & HYBRID (must come AFTER run_sig_engine)
+    pure_risk_today  = float(pure_sig_rw.iloc[-1])
+    pure_safe_today  = float(pure_sig_sw.iloc[-1])
+
+    hyb_risk_today   = float(hybrid_rw.iloc[-1])
+    hyb_safe_today   = float(hybrid_sw.iloc[-1])
 
     hybrid_simple = hybrid_eq.pct_change().fillna(0)
     hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
