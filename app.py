@@ -578,17 +578,9 @@ def main():
     quarter_start_date = prices.index[q_start_idx]
     today_date = prices.index[-1]
 
-    # ------------------------------------------------------------
-    # DERIVE risky_start / risky_today FOR EACH ACCOUNT (C1)
-    # ------------------------------------------------------------
-    def get_sig_progress(real_start_val, real_today_val):
-        risky_start = real_start_val * float(hybrid_rw.iloc[q_start_idx])
-        risky_today = real_today_val * float(hybrid_rw.iloc[-1])
-        return compute_quarter_progress(risky_start, risky_today, quarterly_target)
-
-    prog_1 = get_sig_progress(real_start_1, real_today_1)
-    prog_2 = get_sig_progress(real_start_2, real_today_2)
-    prog_3 = get_sig_progress(real_start_3, real_today_3)
+    prog_1 = compute_quarter_progress(real_cap_1_start, real_cap_1_today, quarterly_target)
+    prog_2 = compute_quarter_progress(real_cap_2_start, real_cap_2_today, quarterly_target)
+    prog_3 = compute_quarter_progress(real_cap_3_start, real_cap_3_today, quarterly_target)
 
     # ------------------------------------------------------------
     # NEXT QUARTER DATE (automatic)
