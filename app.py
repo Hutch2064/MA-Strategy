@@ -390,23 +390,6 @@ def main():
     risk_off_weights_str = st.sidebar.text_input(
         "Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values())
     )
-
-    # ------------------------------------------------------------
-    # PREVIEW QUARTER START (correct, fast version)
-    # ------------------------------------------------------------
-
-    preview_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
-    preview_prices = load_price_data(preview_tickers, start, end if end.strip() else None)
-
-    preview_index = build_portfolio_index(preview_prices, risk_on_weights)
-
-    if len(preview_index) > 0:
-        last_idx = len(preview_index) - 1
-        quarter_candidates = [i for i in range(len(preview_index)) if i % QUARTER_DAYS == 0]
-        preview_q_start_idx = max(i for i in quarter_candidates if i <= last_idx)
-        preview_quarter_start_date = preview_index.index[preview_q_start_idx]
-    else:
-        preview_quarter_start_date = "N/A"
         
     # ------------------------------------------------------------
     # SIDEBAR: Quarter Start + User Inputs for Real-World Balances
@@ -441,6 +424,13 @@ def main():
         "Joint – Portfolio Value Today ($)",
         min_value=0.0, value=0.0, step=100.0
     )
+    
+    # ------------------------------------------------------------
+    # REAL-WORLD ACCOUNT CAPITAL (used for allocations)
+    # ------------------------------------------------------------
+    real_cap_1 = real_cap_1_today
+    real_cap_2 = real_cap_2_today
+    real_cap_3 = real_cap_3_today
     
     # ------------------------------------------------------------
     # Parse sleeve inputs
@@ -635,8 +625,13 @@ def main():
         pd.DataFrame.from_dict(prog_3, orient='index', columns=['Joint']),
     ], axis=1)
 
-    prog_df.loc["Gap (%)"] = prog_df.loc["Gap (%)"].apply(lambda x: f"{x:.2%}")
-    st.dataframe(prog_df)
+    # Convert Gap (%) to formatted string but keep others numeric for computations
+    prog_df_display = prog_df.copy()
+    prog_df_display.loc["Gap (%)"] = prog_df_display.loc["Gap (%)"].apply(
+        lambda x: f"{x:.2%}"
+    )
+
+    st.dataframe(prog_df_display)
 
     st.write("### Rebalance Recommendations")
     st.write("**Taxable:** " + rebalance_text(prog_1["Gap ($)"], next_q, days_to_next_q))
