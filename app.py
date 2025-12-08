@@ -589,9 +589,6 @@ def main():
 
 # ============================================================
 
-    hybrid_simple = hybrid_eq.pct_change().fillna(0)
-    hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
-
     # ============================================
     # ADVANCED METRICS
     # ============================================
@@ -639,6 +636,9 @@ def main():
         pure_sig_sw=pure_sig_sw,
         flip_cost=FLIP_COST
     )
+
+    hybrid_simple = hybrid_eq.pct_change().fillna(0)
+    hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
 
     pure_sig_simple = pure_sig_eq.pct_change().fillna(0)
     pure_sig_perf = compute_performance(pure_sig_simple, pure_sig_eq)
