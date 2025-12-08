@@ -373,7 +373,11 @@ def run_full_engine():
 
     # Load all prices
     tickers = sorted(set(RISK_ON_WEIGHTS.keys()) | set(RISK_OFF_WEIGHTS.keys()))
-    prices = load_price_data(tickers, DEFAULT_START_DATE)
+    prices = load_price_data(tickers, DEFAULT_START_DATE).dropna(how="any")
+
+    # Use the SAME start date Streamlit uses:
+    first_valid = prices.dropna().index[0]
+    prices = prices.loc[first_valid:]
 
     # Run MA optimization
     best_cfg, best_result = run_grid_search(
