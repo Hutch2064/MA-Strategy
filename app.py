@@ -1,4 +1,3 @@
-
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -551,32 +550,16 @@ def main():
     )
 
     # ------------------------------------------------------------
-    # AUTOMATIC QUARTER START — ACADEMIC CALENDAR QUARTERS
+    # AUTOMATIC QUARTER START (Derived From Backtest)
     # ------------------------------------------------------------
+    last_index = len(hybrid_rw) - 1
 
-    # Force the index into a real DatetimeIndex (fixes PrettyDict bug)
-    dates = pd.DatetimeIndex(hybrid_rw.index.copy())
-    today_date = dates[-1]
+    # Find most recent quarter boundary
+    quarter_indices = [i for i in range(len(hybrid_rw)) if i % QUARTER_DAYS == 0]
+    q_start_idx = max(idx for idx in quarter_indices if idx <= last_index)
 
-    # Convert to quarter periods (Q1, Q2, Q3, Q4)
-    quarters = dates.to_period("Q")
-
-    # Identify the last trading day of each quarter
-    quarter_end_dates = dates.groupby(quarters).max()
-
-    # Most recent quarter-end on or before today
-    past_q_end = quarter_end_dates[quarter_end_dates <= today_date].max()
-
-    # Quarter start = first trading day AFTER the past quarter-end
-    q_end_idx = dates.get_loc(past_q_end)
-    if q_end_idx + 1 < len(dates):
-        quarter_start_date = dates[q_end_idx + 1]
-    else:
-        quarter_start_date = dates[q_end_idx]
-
-    # Next quarter-end after today
-    next_q_end = quarter_end_dates[quarter_end_dates > today_date].min()
-    days_to_next_q = (next_q_end - today_date).days
+    quarter_start_date = prices.index[q_start_idx]
+    today_date = prices.index[-1]
 
     # ------------------------------------------------------------
     # DERIVE risky_start / risky_today FOR EACH ACCOUNT (C1)
