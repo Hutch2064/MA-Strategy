@@ -587,7 +587,6 @@ def main():
     prog_2 = get_sig_progress(qs_cap_2, real_cap_2)
     prog_3 = get_sig_progress(qs_cap_3, real_cap_3)
 
-    st.subheader("Quarterly Growth Target")
     st.write(f"**Quarterly Target Growth Rate:** {quarterly_target:.2%}")
 
     prog_df = pd.concat([
