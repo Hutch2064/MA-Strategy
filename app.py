@@ -516,9 +516,11 @@ def main():
     today_date = dates[-1]
     past_q_end = mapped_q_ends[mapped_q_ends <= today_date].max()
 
-    # Force alignment: ensure this date exists in the price index
-    # (mapped_q_ends always should, but this guarantees correctness)
-    quarter_start_date = past_q_end
+   # Replace quarter_start_date with the last SIG rebalance
+    if len(hybrid_rebals) > 0:
+        quarter_start_date = hybrid_rebals[-1]
+    else:
+        quarter_start_date = dates[0]  # fallback
 
     # Find next quarter-end (> today)
     future_q_ends = quarter_end_dates[quarter_end_dates > today_date]
