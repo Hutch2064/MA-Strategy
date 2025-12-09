@@ -152,6 +152,7 @@ def run_sig_engine(
     risky_val_series = []
     safe_val_series = []
     rebalance_events = 0
+    rebalance_dates = []
 
     for i in range(n):
         date = dates[i]
@@ -205,6 +206,7 @@ def run_sig_engine(
                             risky_val -= excess
                             safe_val  += excess
                             rebalance_events += 1
+                            rebalance_dates.append(date)
 
                         elif risky_val < goal_risky:
                             needed = goal_risky - risky_val
@@ -212,6 +214,7 @@ def run_sig_engine(
                             safe_val -= move
                             risky_val += move
                             rebalance_events += 1
+                            rebalance_dates.append(date)
 
                         # Quarterly drag fee
                         quarter_fee = flip_cost * target_quarter
@@ -248,7 +251,7 @@ def run_sig_engine(
         pd.Series(equity_curve, index=dates),
         pd.Series(risky_w_series, index=dates),
         pd.Series(safe_w_series, index=dates),
-        rebalance_events
+        rebalance_dates
     )
 # ============================================================
 # BACKTEST ENGINE
@@ -562,7 +565,12 @@ def main():
     )
 
     st.subheader("Strategy Summary")
-    st.write(f"**Quarter start:** {quarter_start_date.date()}")
+    # Display last actual SIG rebalance instead of quarter start
+    if len(hybrid_rebals) > 0:
+        last_reb = hybrid_rebals[-1]
+        st.write(f"**Quarter start (last SIG rebalance):** {last_reb.strftime('%Y-%m-%d')}")
+    else:
+        st.write("**Quarter start (last SIG rebalance):** None yet")
     st.write(f"**Next rebalance date:** {next_q_end.date()} ({days_to_next_q} days)")
 
     # Quarter-progress calculations
