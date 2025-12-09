@@ -122,7 +122,7 @@ def run_sig_engine(
     pure_sig_rw=None,
     pure_sig_sw=None,
     flip_cost=FLIP_COST,
-    quarter_end_dates=None   # <-- NEW ARG
+    quarter_end_dates=None   # <-- must be mapped_q_ends
 ):
 
     dates = risk_on_returns.index
@@ -131,12 +131,14 @@ def run_sig_engine(
     if quarter_end_dates is None:
         raise ValueError("quarter_end_dates must be supplied")
 
-    # Convert to a fast lookup
+    # Fast lookup
     quarter_end_set = set(quarter_end_dates)
 
+    # MA flip detection
     sig_arr = ma_signal.astype(int)
     flip_mask = sig_arr.diff().abs() == 1
 
+    # Init values
     eq = 10000.0
     risky_val = eq * START_RISKY
     safe_val  = eq * START_SAFE
@@ -175,47 +177,60 @@ def run_sig_engine(
             # Rebalance ON quarter-end date
             if date in quarter_end_set:
 
-                # Need previous quarter-end to look up past_risky
-                prev_q = max([qd for qd in quarter_end_dates if qd < date])
-                idx_prev = dates.get_loc(prev_q)
+                # Identify previous quarter-end
+                prev_q_candidates = [qd for qd in quarter_end_dates if qd < date]
 
-                past_risky_val = risky_val_series[idx_prev]
-                goal_risky = past_risky_val * (1 + target_quarter)
+                # If this is the first quarter-end, skip rebalance
+                if not prev_q_candidates:
+                    pass  # no rebalance possible yet
+                else:
+                    # Safe previous Q date
+                    prev_q = max(prev_q_candidates)
+                    idx_prev = dates.get_loc(prev_q)
 
-                if risky_val > goal_risky:
-                    excess = risky_val - goal_risky
-                    risky_val -= excess
-                    safe_val  += excess
-                    rebalance_events += 1
+                    past_risky_val = risky_val_series[idx_prev]
+                    goal_risky = past_risky_val * (1 + target_quarter)
 
-                elif risky_val < goal_risky:
-                    needed = goal_risky - risky_val
-                    move = min(needed, safe_val)
-                    safe_val -= move
-                    risky_val += move
-                    rebalance_events += 1
+                    # Too much risky → move to safe
+                    if risky_val > goal_risky:
+                        excess = risky_val - goal_risky
+                        risky_val -= excess
+                        safe_val  += excess
+                        rebalance_events += 1
 
-                # Quarterly drag fee
-                quarter_fee = flip_cost * target_quarter
-                eq *= (1 - quarter_fee)
+                    # Too little risky → move from safe
+                    elif risky_val < goal_risky:
+                        needed = goal_risky - risky_val
+                        move = min(needed, safe_val)
+                        safe_val -= move
+                        risky_val += move
+                        rebalance_events += 1
 
+                    # Quarterly drag
+                    quarter_fee = flip_cost * target_quarter
+                    eq *= (1 - quarter_fee)
+
+            # Update equity
             eq = risky_val + safe_val
             risky_w = risky_val / eq
             safe_w  = safe_val  / eq
 
+            # Flip cost at MA transition
             if flip_mask.iloc[i]:
                 eq *= (1 - flip_cost)
 
         else:
-            # Freeze values when entering RISK-OFF
+            # Freeze values on entering RISK-OFF
             if frozen_risky is None:
                 frozen_risky = risky_val
                 frozen_safe  = safe_val
 
+            # Only safe sleeve earns returns
             eq *= (1 + r_off)
             risky_w = 0.0
             safe_w  = 1.0
 
+        # Store values
         equity_curve.append(eq)
         risky_w_series.append(risky_w)
         safe_w_series.append(safe_w)
