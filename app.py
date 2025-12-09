@@ -499,20 +499,21 @@ def main():
 
     mapped_q_ends = pd.to_datetime(mapped_q_ends)
 
-    # 3. Most recent quarter-end using REAL calendar logic
+    # -----------------------------------------------------------
+    # FIXED: TRUE CALENDAR QUARTER LOGIC (never depends on prices)
+    # -----------------------------------------------------------
+
     today_date = pd.Timestamp.today().normalize()
-    past_q_end = mapped_q_ends[mapped_q_ends <= today_date].max()
 
-    # 4. Next quarter-end
-    future_q_ends = mapped_q_ends[mapped_q_ends > today_date]
-    if len(future_q_ends) > 0:
-        next_q_end = future_q_ends.min()
-    else:
-        # Extend forward if needed
-        next_q_end = (mapped_q_ends[-1] + pd.offsets.QuarterEnd())
-        # Map forward quarter-end to next trading day
-        next_q_end = dates[dates <= next_q_end].max()
+    # 1. Next calendar quarter-end
+    true_next_q = pd.date_range(start=today_date, periods=2, freq="Q")[0]
+    next_q_end = true_next_q
 
+    # 2. Most recent completed quarter-end
+    true_prev_q = pd.date_range(end=today_date, periods=2, freq="Q")[0]
+    past_q_end = true_prev_q
+
+    # 3. Days remaining until next rebalance
     days_to_next_q = (next_q_end - today_date).days
     
     # ============================================================
