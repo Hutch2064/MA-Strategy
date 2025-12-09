@@ -176,7 +176,7 @@ def run_sig_engine(
             if date in quarter_end_set:
 
                 # Need previous quarter-end to look up past_risky
-                prev_q = quarter_end_dates[quarter_end_dates < date].max()
+                prev_q = max([qd for qd in quarter_end_dates if qd < date])
                 idx_prev = dates.get_loc(prev_q)
 
                 past_risky_val = risky_val_series[idx_prev]
@@ -477,6 +477,16 @@ def main():
     quarter_end_dates = pd.Series(dates, index=dates).groupby(quarters).max()
     quarter_end_dates = quarter_end_dates.sort_values()
 
+    # Map quarter-end dates to actual trading days
+    mapped_q_ends = []
+    for qd in quarter_end_dates:
+        if qd in dates:
+            mapped_q_ends.append(qd)
+        else:
+            mapped_q_ends.append(dates[dates <= qd].max())
+
+    mapped_q_ends = pd.to_datetime(mapped_q_ends)
+    
     # Find most recent quarter-end (≤ today)
     today_date = dates[-1]
     past_q_end = quarter_end_dates[quarter_end_dates <= today_date].max()
@@ -511,7 +521,7 @@ def main():
         risk_off_daily,
         quarterly_target,
         pure_sig_signal,
-        quarter_end_dates=quarter_end_dates
+        quarter_end_dates=mapped_q_ends
     )
 
     # HYBRID SIG (MA Filter)
@@ -522,7 +532,7 @@ def main():
         sig,
         pure_sig_rw=pure_sig_rw,
         pure_sig_sw=pure_sig_sw,
-        quarter_end_dates=quarter_end_dates
+        quarter_end_dates=mapped_q_ends
     )
 
     # Quarter start = most recent quarter-end
