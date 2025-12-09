@@ -558,7 +558,7 @@ def main():
     )
 
     # Quarter start = most recent quarter-end
-    quarter_start_date = past_q_end
+    quarter_start_date = mapped_q_ends[mapped_q_ends <= today_date].max()
 
     st.subheader("Strategy Summary")
     st.write(f"**Quarter start:** {quarter_start_date.date()}")
