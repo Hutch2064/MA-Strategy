@@ -516,12 +516,6 @@ def main():
     today_date = dates[-1]
     past_q_end = mapped_q_ends[mapped_q_ends <= today_date].max()
 
-   # Replace quarter_start_date with the last SIG rebalance
-    if len(hybrid_rebals) > 0:
-        quarter_start_date = hybrid_rebals[-1]
-    else:
-        quarter_start_date = dates[0]  # fallback
-
     # Find next quarter-end (> today)
     future_q_ends = quarter_end_dates[quarter_end_dates > today_date]
     if len(future_q_ends) > 0:
@@ -565,6 +559,12 @@ def main():
         pure_sig_sw=pure_sig_sw,
         quarter_end_dates=mapped_q_ends
     )
+
+    # Quarter start should follow the last actual SIG rebalance
+    if len(hybrid_rebals) > 0:
+        quarter_start_date = hybrid_rebals[-1]
+    else:
+        quarter_start_date = dates[0]
 
     st.subheader("Strategy Summary")
     # Display last actual SIG rebalance instead of quarter start
