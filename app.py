@@ -572,10 +572,10 @@ def main():
     # Display last actual SIG rebalance instead of quarter start
     if len(hybrid_rebals) > 0:
         last_reb = hybrid_rebals[-1]
-        st.write(f"**Quarter start (last SIG rebalance):** {last_reb.strftime('%Y-%m-%d')}")
+        st.write(f"**Last Rebalance:** {last_reb.strftime('%Y-%m-%d')}")
     else:
         st.write("**Quarter start (last SIG rebalance):** None yet")
-    st.write(f"**Next rebalance date:** {next_q_end.date()} ({days_to_next_q} days)")
+    st.write(f"**Next Rebalance:** {next_q_end.date()} ({days_to_next_q} days)")
 
     # Quarter-progress calculations
     def get_sig_progress(qs_cap, today_cap):
