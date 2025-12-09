@@ -500,7 +500,7 @@ def main():
     mapped_q_ends = pd.to_datetime(mapped_q_ends)
 
     # 3. Most recent quarter-end using REAL calendar logic
-    today_date = dates[-1]
+    today_date = pd.Timestamp.today().normalize()
     past_q_end = mapped_q_ends[mapped_q_ends <= today_date].max()
 
     # 4. Next quarter-end
