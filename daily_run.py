@@ -564,26 +564,10 @@ Current MA Regime: {regime}
 
 Next Rebalance (Calendar Quarter-End): {next_reb}  ({days} days)
 
---- ACCOUNT PROGRESS ---
-
-Taxable:
-    Gap: ${t1["Gap ($)"]:.2f}
-    Target Next Rebalance: ${t1["Deployed Capital Target Next Rebalance ($)"]:.2f}
-
-Tax-Sheltered:
-    Gap: ${t2["Gap ($)"]:.2f}
-    Target Next Rebalance: ${t2["Deployed Capital Target Next Rebalance ($)"]:.2f}
-
-Joint:
-    Gap: ${t3["Gap ($)"]:.2f}
-    Target Next Rebalance: ${t3["Deployed Capital Target Next Rebalance ($)"]:.2f}
-
 --- IMPLEMENTATION CHECKLIST ---
-Rebalance whenever the MA regime flips.
-At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
-Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
-Do NOT rebalance intra-quarter unless the MA signal flips.
-Let weights drift naturally day by day—this is part of the model.
+ - Rebalance whenever the MA regime flips.
+ - At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
+ - Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
 """
 
     return body
