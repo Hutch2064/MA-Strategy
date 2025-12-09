@@ -860,6 +860,23 @@ def main():
     ax.grid(alpha=0.3)
     st.pyplot(fig)
 
+    # ============================================================
+    # IMPLEMENTATION CHECKLIST (Displayed at Bottom)
+    # ============================================================
+    st.markdown("""
+---
+
+## **Implementation Checklist**
+
+- Rebalance whenever the MA regime flips.
+- At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
+- Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
+- Do NOT rebalance intra-quarter unless the MA signal flips.
+- Let weights drift naturally day by day—this is part of the model.
+
+---
+    """)
+
 
 # ============================================================
 # LAUNCH APP
