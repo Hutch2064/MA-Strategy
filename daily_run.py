@@ -499,36 +499,6 @@ def run_daily_engine():
     prog_3 = get_sig_progress(qs_cap_3, real_cap_3)
 
     # ============================================================
-    # GENERATE HYBRID SIG EQUITY CURVE PLOT (IDENTICAL LOOK)
-    # ============================================================
-
-    # Normalize curves
-    strat_eq_norm  = normalize(best_result["equity_curve"])
-    sharp_eq_norm  = normalize(sharp_eq)
-    hybrid_eq_norm = normalize(hybrid_eq)
-    pure_sig_norm  = normalize(pure_sig_eq)
-    risk_on_norm   = normalize(risk_on_eq)
-
-    plot_index = build_portfolio_index(prices, risk_on_weights)
-    plot_ma = compute_ma_matrix(plot_index, [best_len], best_type)[best_len]
-    plot_ma_norm = normalize(plot_ma.dropna())
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(strat_eq_norm, label="MA Strategy", linewidth=2)
-    ax.plot(sharp_eq_norm, label="Sharpe-Optimal", linewidth=2, color="magenta")
-    ax.plot(risk_on_norm, label="100% Risk-On", alpha=0.65)
-    ax.plot(hybrid_eq_norm, label="Hybrid SIG", linewidth=2, color="blue")
-    ax.plot(pure_sig_norm, label="Pure SIG", linewidth=2, color="orange")
-    ax.plot(plot_ma_norm, label=f"MA({best_len}) {best_type.upper()}", linestyle="--", color="black", alpha=0.6)
-    ax.legend()
-    ax.grid(alpha=0.3)
-
-    # Save to buffer
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=200, bbox_inches="tight")
-    buf.seek(0)
-
-    # ============================================================
     # BUILD OUTPUT DICTIONARY FOR EMAIL
     # ============================================================
 
@@ -540,8 +510,7 @@ def run_daily_engine():
             "Taxable": prog_1,
             "Tax-Sheltered": prog_2,
             "Joint": prog_3,
-        },
-        "image_bytes": buf.read()
+        }   
     }
 
     return outputs
@@ -614,6 +583,5 @@ if __name__ == "__main__":
     outputs = run_daily_engine()
 
     body_text = build_email_text(outputs)
-    img = outputs["image_bytes"]
 
-    send_email(body_text, img)
+    send_email(body_text)
