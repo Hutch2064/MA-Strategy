@@ -474,7 +474,8 @@ def main():
     quarters = dates.to_period("Q")
 
     # Identify quarter-end trading days
-    quarter_end_dates = dates.groupby(quarters).max()
+    quarter_end_dates = pd.Series(dates, index=dates).groupby(quarters).max()
+    quarter_end_dates = quarter_end_dates.sort_values()
 
     # Find most recent quarter-end (≤ today)
     today_date = dates[-1]
