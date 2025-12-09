@@ -184,31 +184,38 @@ def run_sig_engine(
                 if not prev_q_candidates:
                     pass  # no rebalance possible yet
                 else:
-                    # Safe previous Q date
                     prev_q = max(prev_q_candidates)
-                    idx_prev = dates.get_loc(prev_q)
 
-                    past_risky_val = risky_val_series[idx_prev]
-                    goal_risky = past_risky_val * (1 + target_quarter)
+                    # Safe guard: only rebalance if risky_val_series is long enough
+                    if prev_q not in dates:
+                        pass
+                    else:
+                        idx_prev = dates.get_loc(prev_q)
 
-                    # Too much risky → move to safe
-                    if risky_val > goal_risky:
-                        excess = risky_val - goal_risky
-                        risky_val -= excess
-                        safe_val  += excess
-                        rebalance_events += 1
+                        if idx_prev < len(risky_val_series):
+                            past_risky_val = risky_val_series[idx_prev]
+                        else:
+                            # Not enough history, skip rebalance
+                            past_risky_val = risky_val
 
-                    # Too little risky → move from safe
-                    elif risky_val < goal_risky:
-                        needed = goal_risky - risky_val
-                        move = min(needed, safe_val)
-                        safe_val -= move
-                        risky_val += move
-                        rebalance_events += 1
+                        goal_risky = past_risky_val * (1 + target_quarter)
 
-                    # Quarterly drag
-                    quarter_fee = flip_cost * target_quarter
-                    eq *= (1 - quarter_fee)
+                        if risky_val > goal_risky:
+                            excess = risky_val - goal_risky
+                            risky_val -= excess
+                            safe_val  += excess
+                            rebalance_events += 1
+
+                        elif risky_val < goal_risky:
+                            needed = goal_risky - risky_val
+                            move = min(needed, safe_val)
+                            safe_val -= move
+                            risky_val += move
+                            rebalance_events += 1
+
+                        # Quarterly drag fee
+                        quarter_fee = flip_cost * target_quarter
+                        eq *= (1 - quarter_fee)
 
             # Update equity
             eq = risky_val + safe_val
