@@ -561,12 +561,6 @@ def main():
         quarter_end_dates=mapped_q_ends
     )
 
-    # Quarter start = most recent mapped quarter-end (valid trading day)
-    quarter_start_raw = mapped_q_ends[mapped_q_ends <= today_date].max()
-
-    # Force alignment to real trading-day index (no more fallback)
-    quarter_start_date = risk_on_simple.index[risk_on_simple.index.get_indexer([quarter_start_raw], method="nearest")[0]]
-
     st.subheader("Strategy Summary")
     st.write(f"**Quarter start:** {quarter_start_date.date()}")
     st.write(f"**Next rebalance date:** {next_q_end.date()} ({days_to_next_q} days)")
