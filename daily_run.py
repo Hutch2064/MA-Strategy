@@ -537,7 +537,7 @@ IMPLEMENTATION CHECKLIST
  - Rebalance whenever the MA regime flips.
  - At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
  - Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
-"""
+
 Dashboard Link:
 https://portofliostrategy.streamlit.app/
 """
@@ -553,21 +553,13 @@ from email.message import EmailMessage
 import ssl
 import os
 
-def send_email(body_text, image_bytes):
+def send_email(body_text):
 
     msg = EmailMessage()
     msg["Subject"] = "Daily Portfolio Update"
     msg["From"] = os.environ["EMAIL_USER"]
     msg["To"] = os.environ["EMAIL_TO"]
     msg.set_content(body_text)
-
-    # attach PNG
-    msg.add_attachment(
-        image_bytes,
-        maintype="image",
-        subtype="png",
-        filename="hybrid_sig_equity_curve.png",
-    )
 
     context = ssl.create_default_context()
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as smtp:
