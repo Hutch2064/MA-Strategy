@@ -175,50 +175,39 @@ def run_sig_engine(
             risky_val *= (1 + r_on)
             safe_val  *= (1 + r_off)
 
-            # Rebalance ON quarter-end date
+            # Rebalance ON quarter-end date (correct logic)
             if date in quarter_end_set:
 
-                # Identify previous quarter-end
-                prev_q_candidates = [qd for qd in quarter_end_dates if qd < date]
+                # Identify actual quarter start (previous quarter end)
+                prev_qs = [qd for qd in quarter_end_dates if qd < date]
 
-                # If this is the first quarter-end, skip rebalance
-                if not prev_q_candidates:
-                    pass  # no rebalance possible yet
-                else:
-                    prev_q = max(prev_q_candidates)
+                if prev_qs:
+                    prev_q = prev_qs[-1]
 
-                    # Safe guard: only rebalance if risky_val_series is long enough
-                    if prev_q not in dates:
-                        pass
-                    else:
-                        idx_prev = dates.get_loc(prev_q)
+                    idx_prev = dates.get_loc(prev_q)
 
-                        if idx_prev < len(risky_val_series):
-                            past_risky_val = risky_val_series[idx_prev]
-                        else:
-                            # Not enough history, skip rebalance
-                            past_risky_val = risky_val
+                    # Risky sleeve at the start of this quarter
+                    risky_at_qstart = risky_val_series[idx_prev]
 
-                        goal_risky = past_risky_val * (1 + target_quarter)
+                    # Quarterly growth target
+                    goal_risky = risky_at_qstart * (1 + target_quarter)
 
-                        if risky_val > goal_risky:
-                            excess = risky_val - goal_risky
-                            risky_val -= excess
-                            safe_val  += excess
-                            rebalance_events += 1
-                            rebalance_dates.append(date)
+                    # --- Apply SIG logic (unchanged) ---
+                    if risky_val > goal_risky:
+                        excess = risky_val - goal_risky
+                        risky_val -= excess
+                        safe_val  += excess
+                        rebalance_dates.append(date)
 
-                        elif risky_val < goal_risky:
-                            needed = goal_risky - risky_val
-                            move = min(needed, safe_val)
-                            safe_val -= move
-                            risky_val += move
-                            rebalance_events += 1
-                            rebalance_dates.append(date)
+                    elif risky_val < goal_risky:
+                        needed = goal_risky - risky_val
+                        move = min(needed, safe_val)
+                        safe_val -= move
+                        risky_val += move
+                        rebalance_dates.append(date)
 
-                        # Quarterly drag fee
-                        quarter_fee = flip_cost * target_quarter
-                        eq *= (1 - quarter_fee)
+                    # Apply quarterly fee once
+                    eq *= (1 - flip_cost * target_quarter)
 
             # Update equity
             eq = risky_val + safe_val
