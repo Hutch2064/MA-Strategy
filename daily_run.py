@@ -562,9 +562,9 @@ def build_email_text(outputs):
     body = f"""
 Current MA Regime: {regime}
 
-Next Rebalance (Calendar Quarter-End): {next_reb}  ({days} days)
+Next Rebalance (Calendar Quarter-End): {next_reb}  ({days} days from today)
 
---- IMPLEMENTATION CHECKLIST ---
+IMPLEMENTATION CHECKLIST
  - Rebalance whenever the MA regime flips.
  - At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
  - Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
@@ -585,7 +585,7 @@ import os
 def send_email(body_text, image_bytes):
 
     msg = EmailMessage()
-    msg["Subject"] = "Daily Hybrid SIG Update"
+    msg["Subject"] = "Daily Portfolio Update"
     msg["From"] = os.environ["EMAIL_USER"]
     msg["To"] = os.environ["EMAIL_TO"]
     msg.set_content(body_text)
