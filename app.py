@@ -400,14 +400,14 @@ def main():
     )
 
     st.sidebar.header("Quarterly Portfolio Values")
-    qs_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value at Quarter Start ($)", min_value=0.0, value=73202.85, step=100.0)
-    qs_cap_2 = st.sidebar.number_input("Tax-Sheltered – Portfolio Value at Quarter Start ($)", min_value=0.0, value=9442.15, step=100.0)
-    qs_cap_3 = st.sidebar.number_input("Joint – Portfolio Value at Quarter Start ($)", min_value=0.0, value=4189.76, step=100.0)
+    qs_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=75815.26, step=100.0)
+    qs_cap_2 = st.sidebar.number_input("Tax-Sheltered – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=10074.83, step=100.0)
+    qs_cap_3 = st.sidebar.number_input("Joint – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=4189.76, step=100.0)
 
     st.sidebar.header("Current Portfolio Values (Today)")
-    real_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value Today ($)", min_value=0.0, value=72078.40, step=100.0)
-    real_cap_2 = st.sidebar.number_input("Tax-Sheltered – Portfolio Value Today ($)", min_value=0.0, value=9117.45, step=100.0)
-    real_cap_3 = st.sidebar.number_input("Joint – Portfolio Value Today ($)", min_value=0.0, value=4122.41, step=100.0)
+    real_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value Today ($)", min_value=0.0, value=73165.78, step=100.0)
+    real_cap_2 = st.sidebar.number_input("Tax-Sheltered – Portfolio Value Today ($)", min_value=0.0, value=9264.46, step=100.0)
+    real_cap_3 = st.sidebar.number_input("Joint – Portfolio Value Today ($)", min_value=0.0, value=4191.56, step=100.0)
 
     run_clicked = st.sidebar.button("Run Backtest & Optimize")
     if not run_clicked:
