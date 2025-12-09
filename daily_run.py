@@ -1,32 +1,28 @@
-# ============================================================
-# daily_run.py — Hybrid SIG Daily Update (Standalone Version)
-# Fully replicates the logic of the main Streamlit app,
-# but outputs ONLY: Current MA Regime + Implementation Checklist
-# + Hybrid SIG equity curve PNG for email attachment.
-# ============================================================
-
 import numpy as np
 import pandas as pd
 import yfinance as yf
 import matplotlib.pyplot as plt
+import io
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 from scipy.optimize import minimize
 import datetime
-import smtplib
-from email.message import EmailMessage
-import io
 import os
 
-
 # ============================================================
-# CONFIG (identical to main)
+# CONFIG (IDENTICAL)
 # ============================================================
 
 DEFAULT_START_DATE = "1999-01-01"
+RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "UGL": 0.25,
-    "TQQQ": 0.30,
-    "BTC-USD": 0.45,
+    "UGL": .25,
+    "TQQQ": .30,
+    "BTC-USD": .45,
 }
 
 RISK_OFF_WEIGHTS = {
@@ -34,17 +30,17 @@ RISK_OFF_WEIGHTS = {
 }
 
 FLIP_COST = 0.045
-
 START_RISKY = 0.70
-START_SAFE = 0.30
+START_SAFE  = 0.30
 
 
 # ============================================================
-# DATA LOADING
+# DATA LOADING (Streamlit removed)
 # ============================================================
 
-def load_price_data(tickers, start_date):
-    data = yf.download(tickers, start=start_date, progress=False)
+def load_price_data(tickers, start_date, end_date=None):
+    data = yf.download(tickers, start=start_date, end=end_date, progress=False)
+
     if "Adj Close" in data.columns:
         px = data["Adj Close"].copy()
     else:
@@ -52,20 +48,23 @@ def load_price_data(tickers, start_date):
 
     if isinstance(px, pd.Series):
         px = px.to_frame(name=tickers[0])
+
     return px.dropna(how="all")
 
 
 # ============================================================
-# SIMPLE PORTFOLIO INDEX
+# BUILD PORTFOLIO INDEX — SIMPLE RETURNS
 # ============================================================
 
-def build_portfolio_index(prices, weights):
-    rets = prices.pct_change().fillna(0)
-    idx = pd.Series(0.0, index=rets.index)
-    for a, w in weights.items():
-        if a in rets.columns:
-            idx += rets[a] * w
-    return (1 + idx).cumprod()
+def build_portfolio_index(prices, weights_dict):
+    simple_rets = prices.pct_change().fillna(0)
+    idx_rets = pd.Series(0.0, index=simple_rets.index)
+
+    for a, w in weights_dict.items():
+        if a in simple_rets.columns:
+            idx_rets += simple_rets[a] * w
+
+    return (1 + idx_rets).cumprod()
 
 
 # ============================================================
@@ -76,20 +75,20 @@ def compute_ma_matrix(price_series, lengths, ma_type):
     ma_dict = {}
     if ma_type == "ema":
         for L in lengths:
-            ma = price_series.ewm(span=L, adjust=False).mean().shift(1)
-            ma_dict[L] = ma
+            ma = price_series.ewm(span=L, adjust=False).mean()
+            ma_dict[L] = ma.shift(1)
     else:
         for L in lengths:
-            ma = price_series.rolling(L, min_periods=L).mean().shift(1)
-            ma_dict[L] = ma
+            ma = price_series.rolling(window=L, min_periods=L).mean()
+            ma_dict[L] = ma.shift(1)
     return ma_dict
 
 
 # ============================================================
-# TESTFOL SIGNAL (MA with tolerance)
+# TESTFOL SIGNAL LOGIC
 # ============================================================
 
-def generate_testfol_signal(price, ma, tol):
+def generate_testfol_signal_vectorized(price, ma, tol):
     px = price.shift(1).values
     ma_vals = ma.values
     n = len(px)
@@ -105,7 +104,7 @@ def generate_testfol_signal(price, ma, tol):
     start_index = first_valid + 1
 
     for t in range(start_index, n):
-        if not sig[t-1]:
+        if not sig[t - 1]:
             sig[t] = px[t] > upper[t]
         else:
             sig[t] = not (px[t] < lower[t])
@@ -114,101 +113,174 @@ def generate_testfol_signal(price, ma, tol):
 
 
 # ============================================================
-# SIG ENGINE — IDENTICAL TO MAIN
+# SIG ENGINE — IDENTICAL
 # ============================================================
 
-def run_sig_engine(risk_on, risk_off, target_q, ma_signal, pure_rw=None, pure_sw=None, quarter_ends=None):
-    dates = risk_on.index
+def run_sig_engine(
+    risk_on_returns,
+    risk_off_returns,
+    target_quarter,
+    ma_signal,
+    pure_sig_rw=None,
+    pure_sig_sw=None,
+    flip_cost=FLIP_COST,
+    quarter_end_dates=None
+):
+
+    dates = risk_on_returns.index
     n = len(dates)
 
+    if quarter_end_dates is None:
+        raise ValueError("quarter_end_dates must be supplied")
+
+    quarter_end_set = set(quarter_end_dates)
     sig_arr = ma_signal.astype(int)
     flip_mask = sig_arr.diff().abs() == 1
 
     eq = 10000.0
     risky_val = eq * START_RISKY
-    safe_val = eq * START_SAFE
+    safe_val  = eq * START_SAFE
 
-    frozen_r = None
-    frozen_s = None
+    frozen_risky = None
+    frozen_safe  = None
 
-    eq_curve = []
-    risky_w = []
-    safe_w = []
+    equity_curve = []
+    risky_w_series = []
+    safe_w_series = []
     risky_val_series = []
     safe_val_series = []
-    rebals = []
-
-    qset = set(quarter_ends)
+    rebalance_dates = []
 
     for i in range(n):
         date = dates[i]
-        r_on = risk_on.iloc[i]
-        r_off = risk_off.iloc[i]
+        r_on = risk_on_returns.iloc[i]
+        r_off = risk_off_returns.iloc[i]
         ma_on = bool(ma_signal.iloc[i])
 
         if ma_on:
 
-            if frozen_r is not None:
-                risky_val = eq * pure_rw.iloc[i]
-                safe_val = eq * pure_sw.iloc[i]
-                frozen_r = None
-                frozen_s = None
+            if frozen_risky is not None:
+                w_r = pure_sig_rw.iloc[i]
+                w_s = pure_sig_sw.iloc[i]
+                risky_val = eq * w_r
+                safe_val  = eq * w_s
+                frozen_risky = None
 
             risky_val *= (1 + r_on)
-            safe_val *= (1 + r_off)
+            safe_val  *= (1 + r_off)
 
-            if date in qset:
-                prev_qs = [qd for qd in quarter_ends if qd < date]
+            if date in quarter_end_set:
+                prev_qs = [qd for qd in quarter_end_dates if qd < date]
                 if prev_qs:
                     prev_q = prev_qs[-1]
                     idx_prev = dates.get_loc(prev_q)
-                    risky_qstart = risky_val_series[idx_prev]
-                    goal = risky_qstart * (1 + target_q)
+                    risky_at_qstart = risky_val_series[idx_prev]
+                    goal_risky = risky_at_qstart * (1 + target_quarter)
 
-                    if risky_val > goal:
-                        excess = risky_val - goal
+                    if risky_val > goal_risky:
+                        excess = risky_val - goal_risky
                         risky_val -= excess
-                        safe_val += excess
-                        rebals.append(date)
-                    elif risky_val < goal:
-                        need = goal - risky_val
-                        move = min(need, safe_val)
+                        safe_val  += excess
+                        rebalance_dates.append(date)
+
+                    elif risky_val < goal_risky:
+                        needed = goal_risky - risky_val
+                        move = min(needed, safe_val)
                         safe_val -= move
                         risky_val += move
-                        rebals.append(date)
+                        rebalance_dates.append(date)
 
-                    eq *= (1 - FLIP_COST * target_q)
+                    eq *= (1 - flip_cost * target_quarter)
 
             eq = risky_val + safe_val
-            rw = risky_val / eq
-            sw = safe_val / eq
+            risky_w = risky_val / eq
+            safe_w  = safe_val  / eq
 
             if flip_mask.iloc[i]:
-                eq *= (1 - FLIP_COST)
+                eq *= (1 - flip_cost)
 
         else:
-            if frozen_r is None:
-                frozen_r = risky_val
-                frozen_s = safe_val
-            eq *= (1 + r_off)
-            rw = 0.0
-            sw = 1.0
+            if frozen_risky is None:
+                frozen_risky = risky_val
+                frozen_safe  = safe_val
 
-        eq_curve.append(eq)
-        risky_w.append(rw)
-        safe_w.append(sw)
+            eq *= (1 + r_off)
+            risky_w = 0.0
+            safe_w  = 1.0
+
+        equity_curve.append(eq)
+        risky_w_series.append(risky_w)
+        safe_w_series.append(safe_w)
         risky_val_series.append(risky_val)
         safe_val_series.append(safe_val)
 
     return (
-        pd.Series(eq_curve, index=dates),
-        pd.Series(risky_w, index=dates),
-        pd.Series(safe_w, index=dates),
-        rebals
+        pd.Series(equity_curve, index=dates),
+        pd.Series(risky_w_series, index=dates),
+        pd.Series(safe_w_series, index=dates),
+        rebalance_dates
     )
 
+
 # ============================================================
-# GRID SEARCH — IDENTICAL TO MAIN
+# BACKTEST ENGINE
+# ============================================================
+
+def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
+    weights = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
+
+    for a, w in risk_on_weights.items():
+        if a in prices.columns:
+            weights.loc[signal, a] = w
+
+    for a, w in risk_off_weights.items():
+        if a in prices.columns:
+            weights.loc[~signal, a] = w
+
+    return weights
+
+
+def compute_performance(simple_returns, eq_curve, rf=0.0):
+    cagr = (eq_curve.iloc[-1] / eq_curve.iloc[0]) ** (252 / len(eq_curve)) - 1
+    vol = simple_returns.std() * np.sqrt(252)
+    sharpe = (simple_returns.mean() * 252 - rf) / vol if vol > 0 else np.nan
+    dd = eq_curve / eq_curve.cummax() - 1
+
+    return {
+        "CAGR": cagr,
+        "Volatility": vol,
+        "Sharpe": sharpe,
+        "MaxDrawdown": dd.min(),
+        "TotalReturn": eq_curve.iloc[-1] / eq_curve.iloc[0] - 1,
+        "DD_Series": dd
+    }
+
+
+def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
+    simple = prices.pct_change().fillna(0)
+    weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
+
+    strategy_simple = (weights.shift(1).fillna(0) * simple).sum(axis=1)
+    sig_arr = signal.astype(int)
+    flip_mask = sig_arr.diff().abs() == 1
+
+    flip_costs = np.where(flip_mask, -flip_cost, 0.0)
+    strat_adj = strategy_simple + flip_costs
+
+    eq = (1 + strat_adj).cumprod()
+
+    return {
+        "returns": strat_adj,
+        "equity_curve": eq,
+        "signal": signal,
+        "weights": weights,
+        "performance": compute_performance(strat_adj, eq),
+        "flip_mask": flip_mask,
+    }
+
+
+# ============================================================
+# GRID SEARCH (Streamlit removed, logic identical)
 # ============================================================
 
 def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
@@ -223,47 +295,21 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
     types = ["sma", "ema"]
     tolerances = np.arange(0.0, .0501, .002)
 
+    # removed progress bar
+
     ma_cache = {t: compute_ma_matrix(portfolio_index, lengths, t) for t in types}
 
     for ma_type in types:
         for length in lengths:
             ma = ma_cache[ma_type][length]
             for tol in tolerances:
-                signal = generate_testfol_signal(portfolio_index, ma, tol)
-
-                # Simple returns
-                simple = prices.pct_change().fillna(0)
-
-                # strategy returns using risk-on/off weights
-                risk_on_rets = pd.Series(0.0, index=simple.index)
-                for a, w in risk_on_weights.items():
-                    if a in simple.columns:
-                        risk_on_rets += simple[a] * w
-
-                risk_off_rets = pd.Series(0.0, index=simple.index)
-                for a, w in risk_off_weights.items():
-                    if a in simple.columns:
-                        risk_off_rets += simple[a] * w
-
-                strat_rets = np.where(
-                    signal.shift(1).fillna(False),
-                    risk_on_rets,
-                    risk_off_rets
-                )
+                signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+                result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
 
                 sig_arr = signal.astype(int)
-                flip_mask = sig_arr.diff().abs() == 1
-                strat_rets = strat_rets + np.where(flip_mask, -flip_cost, 0)
-
-                eq = (1 + strat_rets).cumprod()
-
-                # performance metrics
-                cagr = (eq.iloc[-1] / eq.iloc[0]) ** (252 / len(eq)) - 1
-                vol = strat_rets.std() * np.sqrt(252)
-                sharpe = cagr / vol if vol > 0 else -1e9
-
                 switches = sig_arr.diff().abs().sum()
                 trades_per_year = switches / (len(sig_arr) / 252)
+                sharpe = result["performance"]["Sharpe"]
 
                 if sharpe > best_sharpe or (
                     sharpe == best_sharpe and trades_per_year < best_trades
@@ -271,96 +317,152 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
                     best_sharpe = sharpe
                     best_trades = trades_per_year
                     best_cfg = (length, ma_type, tol)
-                    best_result = {
-                        "signal": signal,
-                        "equity_curve": eq,
-                        "returns": pd.Series(strat_rets, index=simple.index),
-                        "flip_mask": flip_mask,
-                        "performance": {
-                            "CAGR": cagr,
-                            "Vol": vol,
-                            "Sharpe": sharpe
-                        }
-                    }
+                    best_result = result
 
     return best_cfg, best_result
+# ============================================================
+# QUARTERLY PROGRESS HELPER
+# ============================================================
+
+def compute_quarter_progress(risky_start, risky_today, quarterly_target):
+    target_risky = risky_start * (1 + quarterly_target)
+    gap = target_risky - risky_today
+    pct_gap = gap / risky_start if risky_start > 0 else 0
+
+    return {
+        "Deployed Capital at Last Rebalance ($)": risky_start,
+        "Deployed Capital Today ($)": risky_today,
+        "Deployed Capital Target Next Rebalance ($)": target_risky,
+        "Gap ($)": gap,
+        "Gap (%)": pct_gap,
+    }
+
+
+def normalize(eq):
+    return eq / eq.iloc[0] * 10000
+
 
 # ============================================================
-# DAILY RUN PIPELINE (Option A — hard-coded default values)
+# MAIN DAILY ENGINE (Streamlit removed)
 # ============================================================
 
-def run_daily():
-    # ---------------------------------------------
-    # 1. Load data identical to main app
-    # ---------------------------------------------
-    tickers = list(RISK_ON_WEIGHTS.keys()) + list(RISK_OFF_WEIGHTS.keys())
-    prices = load_price_data(tickers, DEFAULT_START_DATE)
+def run_daily_engine():
 
-    # Simple returns
-    simple_rets = prices.pct_change().fillna(0)
+    # ------------- identical defaults -------------
+    start = DEFAULT_START_DATE
+    end_val = None
 
-    risk_on_simple = pd.Series(0.0, index=simple_rets.index)
-    for a, w in RISK_ON_WEIGHTS.items():
-        if a in simple_rets.columns:
-            risk_on_simple += simple_rets[a] * w
+    risk_on_tickers = list(RISK_ON_WEIGHTS.keys())
+    risk_on_weights = RISK_ON_WEIGHTS.copy()
 
-    risk_off_daily = pd.Series(0.0, index=simple_rets.index)
-    for a, w in RISK_OFF_WEIGHTS.items():
-        if a in simple_rets.columns:
-            risk_off_daily += simple_rets[a] * w
+    risk_off_tickers = list(RISK_OFF_WEIGHTS.keys())
+    risk_off_weights = RISK_OFF_WEIGHTS.copy()
 
-    # ---------------------------------------------
-    # 2. Run MA grid search EXACTLY like main
-    # ---------------------------------------------
+    qs_cap_1 = 75815.26
+    qs_cap_2 = 10074.83
+    qs_cap_3 = 4189.76
+
+    real_cap_1 = 73165.78
+    real_cap_2 = 9264.46
+    real_cap_3 = 4191.56
+
+    # --------------------------------------------------------
+
+    all_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
+    prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
+
+    # ============================================================
+    # MA GRID SEARCH (IDENTICAL)
+    # ============================================================
+
     best_cfg, best_result = run_grid_search(
-        prices, RISK_ON_WEIGHTS, RISK_OFF_WEIGHTS, FLIP_COST
+        prices, risk_on_weights, risk_off_weights, FLIP_COST
     )
     best_len, best_type, best_tol = best_cfg
     sig = best_result["signal"]
+    perf = best_result["performance"]
 
-    # Current regime
-    current_regime = "RISK-ON" if sig.iloc[-1] else "RISK-OFF"
+    latest_signal = sig.iloc[-1]
+    current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
-    # ---------------------------------------------
-    # 3. Build portfolio index and optimal MA
-    # ---------------------------------------------
-    portfolio_index = build_portfolio_index(prices, RISK_ON_WEIGHTS)
+    # MA line
+    portfolio_index = build_portfolio_index(prices, risk_on_weights)
     opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
 
-    # ---------------------------------------------
-    # 4. TRUE CALENDAR QUARTER LOGIC (identical)
-    # ---------------------------------------------
+    # ============================================================
+    # RISK-ON PERFORMANCE (unchanged)
+    # ============================================================
+
+    simple_rets = prices.pct_change().fillna(0)
+    risk_on_simple = pd.Series(0.0, index=simple_rets.index)
+
+    for a, w in risk_on_weights.items():
+        if a in simple_rets.columns:
+            risk_on_simple += simple_rets[a] * w
+
+    risk_on_eq = (1 + risk_on_simple).cumprod()
+
+    # risk-on μ and cov
+    risk_on_px = prices[risk_on_tickers].dropna()
+    risk_on_rets = risk_on_px.pct_change().dropna()
+
+    mu = risk_on_rets.mean().values
+    cov = risk_on_rets.cov().values + np.eye(len(mu)) * 1e-10
+
+    def neg_sharpe(w):
+        r = np.dot(mu, w)
+        v = np.sqrt(np.dot(w.T, cov @ w))
+        return -(r / v) if v > 0 else 1e9
+
+    n = len(mu)
+    bounds = [(0, 1)] * n
+    cons = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
+
+    res = minimize(neg_sharpe, np.ones(n) / n, bounds=bounds, constraints=cons)
+    w_opt = res.x
+
+    sharp_returns = (risk_on_rets * w_opt).sum(axis=1)
+    sharp_eq = (1 + sharp_returns).cumprod()
+
+    # ============================================================
+    # TRUE CALENDAR QUARTER-ENDS (IDENTICAL)
+    # ============================================================
+
     dates = prices.index
 
     true_q_ends = pd.date_range(start=dates.min(), end=dates.max(), freq='Q')
-
     mapped_q_ends = []
+
     for qd in true_q_ends:
         mapped_q_ends.append(dates[dates <= qd].max())
+
     mapped_q_ends = pd.to_datetime(mapped_q_ends)
 
     today_date = pd.Timestamp.today().normalize()
 
-    # next calendar quarter end
-    next_q_end = pd.date_range(start=today_date, periods=2, freq="Q")[0]
-    # last completed quarter end
-    last_q_end = pd.date_range(end=today_date, periods=2, freq="Q")[0]
+    true_next_q = pd.date_range(start=today_date, periods=2, freq="Q")[0]
+    next_q_end = true_next_q
+
+    true_prev_q = pd.date_range(end=today_date, periods=2, freq="Q")[0]
+    past_q_end = true_prev_q
 
     days_to_next_q = (next_q_end - today_date).days
 
-    # ---------------------------------------------
-    # 5. Quarterly target identical to main code
-    # ---------------------------------------------
-    risk_on_eq = (1 + risk_on_simple).cumprod()
+    # ============================================================
+    # HYBRID SIG ENGINE (IDENTICAL)
+    # ============================================================
+
     bh_cagr = (risk_on_eq.iloc[-1] / risk_on_eq.iloc[0]) ** (252 / len(risk_on_eq)) - 1
     quarterly_target = (1 + bh_cagr) ** (1/4) - 1
 
-    # ---------------------------------------------
-    # 6. PURE SIG + HYBRID SIG (identical logic)
-    # ---------------------------------------------
+    risk_off_daily = pd.Series(0.0, index=simple_rets.index)
+    for a, w in risk_off_weights.items():
+        if a in simple_rets.columns:
+            risk_off_daily += simple_rets[a] * w
+
     pure_sig_signal = pd.Series(True, index=risk_on_simple.index)
 
-    pure_eq, pure_rw, pure_sw, pure_rebals = run_sig_engine(
+    pure_sig_eq, pure_sig_rw, pure_sig_sw, pure_sig_rebals = run_sig_engine(
         risk_on_simple,
         risk_off_daily,
         quarterly_target,
@@ -373,119 +475,159 @@ def run_daily():
         risk_off_daily,
         quarterly_target,
         sig,
-        pure_sig_rw=pure_rw,
-        pure_sig_sw=pure_sw,
+        pure_sig_rw=pure_sig_rw,
+        pure_sig_sw=pure_sig_sw,
         quarter_end_dates=mapped_q_ends
     )
 
-    # Last hybrid SIG rebalance date
+    # ============================================================
+    # QUARTER PROGRESS (IDENTICAL)
+    # ============================================================
+
     if len(hybrid_rebals) > 0:
-        last_reb_date = hybrid_rebals[-1].strftime("%Y-%m-%d")
         quarter_start_date = hybrid_rebals[-1]
     else:
-        last_reb_date = "None yet"
         quarter_start_date = dates[0]
 
-    # ---------------------------------------------
-    # 7. Hard-coded default account values (Option A)
-    # ---------------------------------------------
-    qs_cap_1 = 75815.26
-    qs_cap_2 = 10074.83
-    qs_cap_3 = 4189.76
-
-    real_cap_1 = 73165.78
-    real_cap_2 = 9264.46
-    real_cap_3 = 4191.56
-
-    # ---------------------------------------------
-    # 8. Compute quarter progress EXACTLY like the app
-    # ---------------------------------------------
     def get_sig_progress(qs_cap, today_cap):
         risky_start = qs_cap * float(hybrid_rw.loc[quarter_start_date])
         risky_today = today_cap * float(hybrid_rw.iloc[-1])
         return compute_quarter_progress(risky_start, risky_today, quarterly_target)
 
-    prog1 = get_sig_progress(qs_cap_1, real_cap_1)
-    prog2 = get_sig_progress(qs_cap_2, real_cap_2)
-    prog3 = get_sig_progress(qs_cap_3, real_cap_3)
+    prog_1 = get_sig_progress(qs_cap_1, real_cap_1)
+    prog_2 = get_sig_progress(qs_cap_2, real_cap_2)
+    prog_3 = get_sig_progress(qs_cap_3, real_cap_3)
 
-    # ---------------------------------------------
-    # 9. Build equity curve PNG for email
-    # ---------------------------------------------
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(hybrid_eq / hybrid_eq.iloc[0] * 10000, label="Hybrid SIG", linewidth=2)
-    ax.set_title("Hybrid SIG Equity Curve")
-    ax.grid(alpha=0.3)
+    # ============================================================
+    # GENERATE HYBRID SIG EQUITY CURVE PLOT (IDENTICAL LOOK)
+    # ============================================================
+
+    # Normalize curves
+    strat_eq_norm  = normalize(best_result["equity_curve"])
+    sharp_eq_norm  = normalize(sharp_eq)
+    hybrid_eq_norm = normalize(hybrid_eq)
+    pure_sig_norm  = normalize(pure_sig_eq)
+    risk_on_norm   = normalize(risk_on_eq)
+
+    plot_index = build_portfolio_index(prices, risk_on_weights)
+    plot_ma = compute_ma_matrix(plot_index, [best_len], best_type)[best_len]
+    plot_ma_norm = normalize(plot_ma.dropna())
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(strat_eq_norm, label="MA Strategy", linewidth=2)
+    ax.plot(sharp_eq_norm, label="Sharpe-Optimal", linewidth=2, color="magenta")
+    ax.plot(risk_on_norm, label="100% Risk-On", alpha=0.65)
+    ax.plot(hybrid_eq_norm, label="Hybrid SIG", linewidth=2, color="blue")
+    ax.plot(pure_sig_norm, label="Pure SIG", linewidth=2, color="orange")
+    ax.plot(plot_ma_norm, label=f"MA({best_len}) {best_type.upper()}", linestyle="--", color="black", alpha=0.6)
     ax.legend()
+    ax.grid(alpha=0.3)
 
+    # Save to buffer
     buf = io.BytesIO()
-    fig.savefig(buf, format="png")
+    plt.savefig(buf, format="png", dpi=200, bbox_inches="tight")
     buf.seek(0)
 
-    # ---------------------------------------------
-    # 10. Email text — now includes last + next rebalance
-    # ---------------------------------------------
-    text_output = f"""
-Current MA Regime: {current_regime}
+    # ============================================================
+    # BUILD OUTPUT DICTIONARY FOR EMAIL
+    # ============================================================
 
-Last Rebalance: {last_reb_date}
-Next Rebalance (Calendar Quarter-End): {next_q_end.date()}  ({days_to_next_q} days)
+    outputs = {
+        "regime": current_regime,
+        "next_rebalance": next_q_end.date(),
+        "days_to_rebalance": days_to_next_q,
+        "quarterly_progress": {
+            "Taxable": prog_1,
+            "Tax-Sheltered": prog_2,
+            "Joint": prog_3,
+        },
+        "image_bytes": buf.read()
+    }
 
-Quarterly Target Growth Rate: {quarterly_target:.2%}
+    return outputs
+# ============================================================
+# EMAIL BUILDER
+# ============================================================
+
+def build_email_text(outputs):
+    regime = outputs["regime"]
+    next_reb = outputs["next_rebalance"]
+    days = outputs["days_to_rebalance"]
+    prog = outputs["quarterly_progress"]
+
+    t1 = prog["Taxable"]
+    t2 = prog["Tax-Sheltered"]
+    t3 = prog["Joint"]
+
+    body = f"""
+Current MA Regime: {regime}
+
+Next Rebalance (Calendar Quarter-End): {next_reb}  ({days} days)
 
 --- ACCOUNT PROGRESS ---
 
 Taxable:
-    Gap: ${prog1["Gap ($)"]:.2f}
-    Target Next Rebalance: ${prog1["Deployed Capital Target Next Rebalance ($)"]:.2f}
+    Gap: ${t1["Gap ($)"]:.2f}
+    Target Next Rebalance: ${t1["Deployed Capital Target Next Rebalance ($)"]:.2f}
 
 Tax-Sheltered:
-    Gap: ${prog2["Gap ($)"]:.2f}
-    Target Next Rebalance: ${prog2["Deployed Capital Target Next Rebalance ($)"]:.2f}
+    Gap: ${t2["Gap ($)"]:.2f}
+    Target Next Rebalance: ${t2["Deployed Capital Target Next Rebalance ($)"]:.2f}
 
 Joint:
-    Gap: ${prog3["Gap ($)"]:.2f}
-    Target Next Rebalance: ${prog3["Deployed Capital Target Next Rebalance ($)"]:.2f}
+    Gap: ${t3["Gap ($)"]:.2f}
+    Target Next Rebalance: ${t3["Deployed Capital Target Next Rebalance ($)"]:.2f}
 
 --- IMPLEMENTATION CHECKLIST ---
-- Rebalance whenever the MA regime flips.
-- At each calendar quarter-end, use LAST REBALANCE deployed capital × today's risky weight.
-- Execute the exact dollar increase/decrease on the rebalance date.
-- No intra-quarter rebalancing unless MA flips.
-- Let weights drift day by day.
+Rebalance whenever the MA regime flips.
+At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
+Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
+Do NOT rebalance intra-quarter unless the MA signal flips.
+Let weights drift naturally day by day—this is part of the model.
 """
 
-    return text_output, buf
+    return body
+
 
 # ============================================================
-# EMAIL SENDER (GitHub Action fills env vars)
+# EMAIL SENDER (using GitHub Action secrets)
 # ============================================================
 
-def send_email(body, png_buf):
+import smtplib
+from email.message import EmailMessage
+import ssl
+import os
+
+def send_email(body_text, image_bytes):
 
     msg = EmailMessage()
     msg["Subject"] = "Daily Hybrid SIG Update"
     msg["From"] = os.environ["EMAIL_USER"]
     msg["To"] = os.environ["EMAIL_TO"]
-    msg.set_content(body)
+    msg.set_content(body_text)
 
+    # attach PNG
     msg.add_attachment(
-        png_buf.read(),
+        image_bytes,
         maintype="image",
         subtype="png",
-        filename="hybrid_sig_equity_curve.png"
+        filename="hybrid_sig_equity_curve.png",
     )
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+    context = ssl.create_default_context()
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as smtp:
         smtp.login(os.environ["EMAIL_USER"], os.environ["EMAIL_PASS"])
         smtp.send_message(msg)
 
 
 # ============================================================
-# MAIN
+# MAIN RUNNER
 # ============================================================
 
 if __name__ == "__main__":
-    body, png_buf = run_daily()
-    send_email(body, png_buf)
+    outputs = run_daily_engine()
 
+    body_text = build_email_text(outputs)
+    img = outputs["image_bytes"]
+
+    send_email(body_text, img)
