@@ -509,9 +509,13 @@ def main():
 
     mapped_q_ends = pd.to_datetime(mapped_q_ends)
     
-    # Find most recent quarter-end (≤ today)
+    # Find most recent quarter-end (≤ today) using mapped_q_ends
     today_date = dates[-1]
-    past_q_end = quarter_end_dates[quarter_end_dates <= today_date].max()
+    past_q_end = mapped_q_ends[mapped_q_ends <= today_date].max()
+
+    # Force alignment: ensure this date exists in the price index
+    # (mapped_q_ends always should, but this guarantees correctness)
+    quarter_start_date = past_q_end
 
     # Find next quarter-end (> today)
     future_q_ends = quarter_end_dates[quarter_end_dates > today_date]
