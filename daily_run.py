@@ -207,6 +207,83 @@ def run_sig_engine(risk_on, risk_off, target_q, ma_signal, pure_rw=None, pure_sw
         rebals
     )
 
+# ============================================================
+# GRID SEARCH — IDENTICAL TO MAIN
+# ============================================================
+
+def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
+    best_sharpe = -1e9
+    best_cfg = None
+    best_result = None
+    best_trades = np.inf
+
+    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+
+    lengths = list(range(21, 253))
+    types = ["sma", "ema"]
+    tolerances = np.arange(0.0, .0501, .002)
+
+    ma_cache = {t: compute_ma_matrix(portfolio_index, lengths, t) for t in types}
+
+    for ma_type in types:
+        for length in lengths:
+            ma = ma_cache[ma_type][length]
+            for tol in tolerances:
+                signal = generate_testfol_signal(portfolio_index, ma, tol)
+
+                # Simple returns
+                simple = prices.pct_change().fillna(0)
+
+                # strategy returns using risk-on/off weights
+                risk_on_rets = pd.Series(0.0, index=simple.index)
+                for a, w in risk_on_weights.items():
+                    if a in simple.columns:
+                        risk_on_rets += simple[a] * w
+
+                risk_off_rets = pd.Series(0.0, index=simple.index)
+                for a, w in risk_off_weights.items():
+                    if a in simple.columns:
+                        risk_off_rets += simple[a] * w
+
+                strat_rets = np.where(
+                    signal.shift(1).fillna(False),
+                    risk_on_rets,
+                    risk_off_rets
+                )
+
+                sig_arr = signal.astype(int)
+                flip_mask = sig_arr.diff().abs() == 1
+                strat_rets = strat_rets + np.where(flip_mask, -flip_cost, 0)
+
+                eq = (1 + strat_rets).cumprod()
+
+                # performance metrics
+                cagr = (eq.iloc[-1] / eq.iloc[0]) ** (252 / len(eq)) - 1
+                vol = strat_rets.std() * np.sqrt(252)
+                sharpe = cagr / vol if vol > 0 else -1e9
+
+                switches = sig_arr.diff().abs().sum()
+                trades_per_year = switches / (len(sig_arr) / 252)
+
+                if sharpe > best_sharpe or (
+                    sharpe == best_sharpe and trades_per_year < best_trades
+                ):
+                    best_sharpe = sharpe
+                    best_trades = trades_per_year
+                    best_cfg = (length, ma_type, tol)
+                    best_result = {
+                        "signal": signal,
+                        "equity_curve": eq,
+                        "returns": pd.Series(strat_rets, index=simple.index),
+                        "flip_mask": flip_mask,
+                        "performance": {
+                            "CAGR": cagr,
+                            "Vol": vol,
+                            "Sharpe": sharpe
+                        }
+                    }
+
+    return best_cfg, best_result
 
 # ============================================================
 # DAILY RUN PIPELINE (Option A — hard-coded default values)
