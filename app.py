@@ -494,37 +494,38 @@ def main():
     # ============================================================
 
     dates = prices.index
+    # ============================================================
+    # TRUE CALENDAR QUARTER-ENDS (academically correct)
+    # ============================================================
 
-    # Convert to quarterly periods
-    quarters = dates.to_period("Q")
+    dates = prices.index
 
-    # Identify quarter-end trading days
-    quarter_end_dates = pd.Series(dates, index=dates).groupby(quarters).max()
-    quarter_end_dates = quarter_end_dates.sort_values()
+    # 1. Generate TRUE calendar quarter-end dates
+    true_q_ends = pd.date_range(start=dates.min(), end=dates.max(), freq='Q')
 
-    # Map quarter-end dates to actual trading days
+    # 2. Map each to the actual last trading day
     mapped_q_ends = []
-    for qd in quarter_end_dates:
-        if qd in dates:
-            mapped_q_ends.append(qd)
-        else:
-            mapped_q_ends.append(dates[dates <= qd].max())
+    for qd in true_q_ends:
+        mapped_q_ends.append(dates[dates <= qd].max())
 
     mapped_q_ends = pd.to_datetime(mapped_q_ends)
-    
-    # Find most recent quarter-end (≤ today) using mapped_q_ends
+
+    # 3. Most recent quarter-end using REAL calendar logic
     today_date = dates[-1]
     past_q_end = mapped_q_ends[mapped_q_ends <= today_date].max()
 
-    # Find next quarter-end (> today)
-    future_q_ends = quarter_end_dates[quarter_end_dates > today_date]
+    # 4. Next quarter-end
+    future_q_ends = mapped_q_ends[mapped_q_ends > today_date]
     if len(future_q_ends) > 0:
         next_q_end = future_q_ends.min()
     else:
-        # if out of range, extend quarter logic
-        next_q_end = past_q_end + pd.offsets.QuarterEnd()
+        # Extend forward if needed
+        next_q_end = (mapped_q_ends[-1] + pd.offsets.QuarterEnd())
+        # Map forward quarter-end to next trading day
+        next_q_end = dates[dates <= next_q_end].max()
 
     days_to_next_q = (next_q_end - today_date).days
+    
     # ============================================================
     # HYBRID SIG ENGINE USING REAL CALENDAR QUARTERS
     # ============================================================
