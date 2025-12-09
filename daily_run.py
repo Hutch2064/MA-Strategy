@@ -322,7 +322,7 @@ def send_email(body, png_buf):
 
     msg = EmailMessage()
     msg["Subject"] = "Daily Hybrid SIG Update"
-    msg["From"] = os.environ["EMAIL_FROM"]
+    msg["From"] = os.environ["EMAIL_USER"]
     msg["To"] = os.environ["EMAIL_TO"]
     msg.set_content(body)
 
@@ -334,7 +334,7 @@ def send_email(body, png_buf):
     )
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-        smtp.login(os.environ["EMAIL_FROM"], os.environ["EMAIL_PASS"])
+        smtp.login(os.environ["EMAIL_USER"], os.environ["EMAIL_PASS"])
         smtp.send_message(msg)
 
 
