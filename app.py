@@ -549,6 +549,17 @@ def main():
         pure_sig_sw=pure_sig_sw,
         quarter_end_dates=mapped_q_ends
     )
+    
+    # ============================================================
+    # DISPLAY ACTUAL HYBRID SIG REBALANCE DATES (FULL HISTORY)
+    # ============================================================
+    if len(hybrid_rebals) > 0:
+        reb_df = pd.DataFrame({"Rebalance Date": pd.to_datetime(hybrid_rebals)})
+        st.subheader("Hybrid SIG – Actual Rebalance Dates (Historical)")
+        st.dataframe(reb_df)
+    else:
+        st.subheader("Hybrid SIG – Actual Rebalance Dates (Historical)")
+        st.write("No hybrid SIG rebalances occurred during the backtest.")
 
     # Quarter start should follow the last actual SIG rebalance
     if len(hybrid_rebals) > 0:
