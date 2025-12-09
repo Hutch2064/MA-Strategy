@@ -554,7 +554,8 @@ def main():
     # AUTOMATIC QUARTER START — ACADEMIC CALENDAR QUARTERS
     # ------------------------------------------------------------
 
-    dates = hybrid_rw.index
+    # Force the index into a real DatetimeIndex (fixes PrettyDict bug)
+    dates = pd.DatetimeIndex(hybrid_rw.index.copy())
     today_date = dates[-1]
 
     # Convert to quarter periods (Q1, Q2, Q3, Q4)
