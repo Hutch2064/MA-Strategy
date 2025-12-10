@@ -534,9 +534,11 @@ Current Regime: {regime}
 Next Rebalance (Calendar Quarter-End): {next_reb}  ({days} days from today)
 
 IMPLEMENTATION CHECKLIST
- - Rebalance whenever the MA regime flips.
- - At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
- - Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
+- Rotate 100% of portfolio to treasury sleeve whenever the MA regime flips.
+- At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
+- Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
+- At each rebalance, re-evaluate the Sharpe-optimal portfolio weighting.
+
 
 Dashboard Link:
 https://portofliostrategy.streamlit.app/
