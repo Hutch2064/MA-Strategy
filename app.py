@@ -1131,123 +1131,125 @@ def main():
         ])
         
         with val_tab1:
-            st.subheader("MA Strategy Performance Analysis")
+            st.subheader("Hybrid SIG vs Buy & Hold Analysis")
             
-            # Get returns
+            # Get returns for comparison
             portfolio_index = build_portfolio_index(prices, risk_on_weights)
-            benchmark_returns = portfolio_index.pct_change().dropna()
-            strategy_returns = best_result["returns"]
-            strategy_signal = best_result["signal"]
+            bh_returns = portfolio_index.pct_change().dropna()  # Buy & Hold (always risk-on)
+            hybrid_returns = hybrid_eq.pct_change().fillna(0)   # Hybrid SIG strategy
+            
+            # Get hybrid signal (when in RISK-ON vs RISK-OFF)
+            hybrid_signal = sig  # Use the same MA signal that hybrid SIG uses
             
             # Align dates
-            common_idx = strategy_returns.index.intersection(benchmark_returns.index)
+            common_idx = bh_returns.index.intersection(hybrid_returns.index)
             if len(common_idx) > 0:
-                strategy_returns_aligned = strategy_returns.loc[common_idx]
-                benchmark_returns_aligned = benchmark_returns.loc[common_idx]
-                strategy_signal_aligned = strategy_signal.loc[common_idx]
+                bh_returns_aligned = bh_returns.loc[common_idx]
+                hybrid_returns_aligned = hybrid_returns.loc[common_idx]
+                hybrid_signal_aligned = hybrid_signal.loc[common_idx]
                 
                 # 1. Risk-Adjusted Metrics
                 st.write("### 1. Risk-Adjusted Performance")
                 
                 # Calculate metrics
-                strategy_sharpe = strategy_returns_aligned.mean() / strategy_returns_aligned.std() * np.sqrt(252)
-                benchmark_sharpe = benchmark_returns_aligned.mean() / benchmark_returns_aligned.std() * np.sqrt(252)
+                bh_sharpe = bh_returns_aligned.mean() / bh_returns_aligned.std() * np.sqrt(252) if bh_returns_aligned.std() > 0 else 0
+                hybrid_sharpe = hybrid_returns_aligned.mean() / hybrid_returns_aligned.std() * np.sqrt(252) if hybrid_returns_aligned.std() > 0 else 0
                 
                 # Sortino Ratio (downside risk only)
-                strategy_downside = strategy_returns_aligned[strategy_returns_aligned < 0]
-                benchmark_downside = benchmark_returns_aligned[benchmark_returns_aligned < 0]
+                bh_downside = bh_returns_aligned[bh_returns_aligned < 0]
+                hybrid_downside = hybrid_returns_aligned[hybrid_returns_aligned < 0]
                 
-                strategy_sortino = strategy_returns_aligned.mean() * 252 / (strategy_downside.std() * np.sqrt(252)) if len(strategy_downside) > 0 else 0
-                benchmark_sortino = benchmark_returns_aligned.mean() * 252 / (benchmark_downside.std() * np.sqrt(252)) if len(benchmark_downside) > 0 else 0
+                bh_sortino = bh_returns_aligned.mean() * 252 / (bh_downside.std() * np.sqrt(252)) if len(bh_downside) > 0 else 0
+                hybrid_sortino = hybrid_returns_aligned.mean() * 252 / (hybrid_downside.std() * np.sqrt(252)) if len(hybrid_downside) > 0 else 0
                 
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
                     st.metric("**Sharpe Ratio**", 
-                             f"{strategy_sharpe:.3f}",
-                             delta=f"{strategy_sharpe - benchmark_sharpe:+.3f} vs B&H")
+                             f"{hybrid_sharpe:.3f}",
+                             delta=f"{hybrid_sharpe - bh_sharpe:+.3f} vs B&H")
                 with col2:
                     st.metric("**Sortino Ratio**",
-                             f"{strategy_sortino:.3f}",
-                             delta=f"{strategy_sortino - benchmark_sortino:+.3f} vs B&H")
+                             f"{hybrid_sortino:.3f}",
+                             delta=f"{hybrid_sortino - bh_sortino:+.3f} vs B&H")
                 with col3:
-                    strategy_vol = strategy_returns_aligned.std() * np.sqrt(252)
-                    benchmark_vol = benchmark_returns_aligned.std() * np.sqrt(252)
+                    bh_vol = bh_returns_aligned.std() * np.sqrt(252)
+                    hybrid_vol = hybrid_returns_aligned.std() * np.sqrt(252)
                     st.metric("**Volatility**",
-                             f"{strategy_vol:.2%}",
-                             delta=f"{strategy_vol - benchmark_vol:+.2%}")
+                             f"{hybrid_vol:.2%}",
+                             delta=f"{hybrid_vol - bh_vol:+.2%}")
                 with col4:
-                    strategy_cagr = (1 + strategy_returns_aligned).prod() ** (252/len(strategy_returns_aligned)) - 1
-                    benchmark_cagr = (1 + benchmark_returns_aligned).prod() ** (252/len(benchmark_returns_aligned)) - 1
+                    bh_cagr = (1 + bh_returns_aligned).prod() ** (252/len(bh_returns_aligned)) - 1
+                    hybrid_cagr = (1 + hybrid_returns_aligned).prod() ** (252/len(hybrid_returns_aligned)) - 1
                     st.metric("**CAGR**",
-                             f"{strategy_cagr:.2%}",
-                             delta=f"{strategy_cagr - benchmark_cagr:+.2%}")
+                             f"{hybrid_cagr:.2%}",
+                             delta=f"{hybrid_cagr - bh_cagr:+.2%}")
                 
                 # 2. Drawdown Analysis
                 st.write("### 2. Drawdown Protection")
                 
-                strategy_eq = (1 + strategy_returns_aligned).cumprod()
-                benchmark_eq = (1 + benchmark_returns_aligned).cumprod()
+                bh_eq = (1 + bh_returns_aligned).cumprod()
+                hybrid_eq_aligned = (1 + hybrid_returns_aligned).cumprod()
                 
-                strategy_dd = strategy_eq / strategy_eq.cummax() - 1
-                benchmark_dd = benchmark_eq / benchmark_eq.cummax() - 1
+                bh_dd = bh_eq / bh_eq.cummax() - 1
+                hybrid_dd = hybrid_eq_aligned / hybrid_eq_aligned.cummax() - 1
                 
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("**Max Drawdown**",
-                             f"{strategy_dd.min():.2%}",
-                             delta=f"{strategy_dd.min() - benchmark_dd.min():+.2%}")
+                             f"{hybrid_dd.min():.2%}",
+                             delta=f"{hybrid_dd.min() - bh_dd.min():+.2%}")
                 with col2:
                     st.metric("**Avg Drawdown**",
-                             f"{strategy_dd.mean():.2%}",
-                             delta=f"{strategy_dd.mean() - benchmark_dd.mean():+.2%}")
+                             f"{hybrid_dd.mean():.2%}",
+                             delta=f"{hybrid_dd.mean() - bh_dd.mean():+.2%}")
                 with col3:
                     st.metric("**Time in Drawdown**",
-                             f"{(strategy_dd < 0).mean():.1%}",
-                             delta=f"{(strategy_dd < 0).mean() - (benchmark_dd < 0).mean():+.1%}")
+                             f"{(hybrid_dd < 0).mean():.1%}",
+                             delta=f"{(hybrid_dd < 0).mean() - (bh_dd < 0).mean():+.1%}")
                 
                 # 3. Regime Performance
                 st.write("### 3. Regime-Specific Performance")
                 
-                risk_on_mask = strategy_signal_aligned == True
-                risk_off_mask = strategy_signal_aligned == False
+                risk_on_mask = hybrid_signal_aligned == True
+                risk_off_mask = hybrid_signal_aligned == False
                 
                 col1, col2 = st.columns(2)
                 with col1:
                     if risk_on_mask.any():
                         risk_on_days = risk_on_mask.sum()
-                        strategy_risk_on = strategy_returns_aligned[risk_on_mask].mean() * 252
-                        benchmark_risk_on = benchmark_returns_aligned[risk_on_mask].mean() * 252
+                        hybrid_risk_on = hybrid_returns_aligned[risk_on_mask].mean() * 252
+                        bh_risk_on = bh_returns_aligned[risk_on_mask].mean() * 252
                         
                         st.metric("**RISK-ON Periods**",
-                                 f"{risk_on_days} days ({risk_on_days/len(strategy_signal_aligned):.1%})",
+                                 f"{risk_on_days} days ({risk_on_days/len(hybrid_signal_aligned):.1%})",
                                  help="When MA signal is ON (invested in risky assets)")
                         st.metric("**RISK-ON Returns**",
-                                 f"{strategy_risk_on:.2%}",
-                                 delta=f"{strategy_risk_on - benchmark_risk_on:+.2%} vs B&H")
+                                 f"{hybrid_risk_on:.2%}",
+                                 delta=f"{hybrid_risk_on - bh_risk_on:+.2%} vs B&H")
                 
                 with col2:
                     if risk_off_mask.any():
                         risk_off_days = risk_off_mask.sum()
-                        strategy_risk_off = strategy_returns_aligned[risk_off_mask].mean() * 252
-                        benchmark_risk_off = benchmark_returns_aligned[risk_off_mask].mean() * 252
+                        hybrid_risk_off = hybrid_returns_aligned[risk_off_mask].mean() * 252
+                        bh_risk_off = bh_returns_aligned[risk_off_mask].mean() * 252
                         
                         st.metric("**RISK-OFF Periods**",
-                                 f"{risk_off_days} days ({risk_off_days/len(strategy_signal_aligned):.1%})",
+                                 f"{risk_off_days} days ({risk_off_days/len(hybrid_signal_aligned):.1%})",
                                  help="When MA signal is OFF (in treasuries/cash)")
                         st.metric("**RISK-OFF Protection**",
-                                 f"{benchmark_risk_off:.2%}",
+                                 f"{bh_risk_off:.2%}",
                                  help="Losses avoided during RISK-OFF periods")
                 
                 # 4. Bear Market Performance
                 st.write("### 4. Bear Market Protection")
                 
-                bear_periods = benchmark_returns_aligned < 0
+                bear_periods = bh_returns_aligned < 0
                 if bear_periods.any():
-                    strategy_bear = strategy_returns_aligned[bear_periods]
-                    benchmark_bear = benchmark_returns_aligned[bear_periods]
+                    hybrid_bear = hybrid_returns_aligned[bear_periods]
+                    bh_bear = bh_returns_aligned[bear_periods]
                     
-                    bear_outperformance = (strategy_bear.mean() - benchmark_bear.mean()) * 252
-                    bear_win_rate = (strategy_bear > benchmark_bear).mean()
+                    bear_outperformance = (hybrid_bear.mean() - bh_bear.mean()) * 252
+                    bear_win_rate = (hybrid_bear > bh_bear).mean()
                     
                     col1, col2, col3 = st.columns(3)
                     with col1:
@@ -1266,16 +1268,16 @@ def main():
                 fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
                 
                 # Plot 1: Cumulative returns with regimes
-                ax1.plot(strategy_eq, label='MA Strategy', linewidth=2, color='green')
-                ax1.plot(benchmark_eq, label='Buy & Hold', linewidth=2, color='blue', alpha=0.7)
+                ax1.plot(hybrid_eq_aligned, label='Hybrid SIG', linewidth=2, color='green')
+                ax1.plot(bh_eq, label='Buy & Hold', linewidth=2, color='blue', alpha=0.7)
                 
                 # Shade RISK-OFF periods
-                risk_off_starts = strategy_signal_aligned.diff() == -1
-                risk_on_starts = strategy_signal_aligned.diff() == 1
+                risk_off_starts = hybrid_signal_aligned.diff() == -1
+                risk_on_starts = hybrid_signal_aligned.diff() == 1
                 
                 risk_off_periods = []
                 current_start = None
-                for i, (date, signal) in enumerate(strategy_signal_aligned.items()):
+                for i, (date, signal) in enumerate(hybrid_signal_aligned.items()):
                     if signal == False and current_start is None:
                         current_start = date
                     elif signal == True and current_start is not None:
@@ -1283,7 +1285,7 @@ def main():
                         current_start = None
                 
                 if current_start is not None:
-                    risk_off_periods.append((current_start, strategy_signal_aligned.index[-1]))
+                    risk_off_periods.append((current_start, hybrid_signal_aligned.index[-1]))
                 
                 for start, end in risk_off_periods:
                     ax1.axvspan(start, end, alpha=0.2, color='red', label='RISK-OFF' if start == risk_off_periods[0][0] else "")
@@ -1295,8 +1297,8 @@ def main():
                 ax1.grid(alpha=0.3)
                 
                 # Plot 2: Drawdown comparison
-                ax2.plot(strategy_dd * 100, label='MA Strategy', linewidth=1.5, color='green')
-                ax2.plot(benchmark_dd * 100, label='Buy & Hold', linewidth=1.5, color='blue', alpha=0.7)
+                ax2.plot(hybrid_dd * 100, label='Hybrid SIG', linewidth=1.5, color='green')
+                ax2.plot(bh_dd * 100, label='Buy & Hold', linewidth=1.5, color='blue', alpha=0.7)
                 ax2.set_title('Drawdown Comparison (%)')
                 ax2.set_xlabel('Date')
                 ax2.set_ylabel('Drawdown %')
@@ -1304,13 +1306,13 @@ def main():
                 ax2.grid(alpha=0.3)
                 
                 # Plot 3: Rolling Sharpe (1-year)
-                window = min(252, len(strategy_returns_aligned))
+                window = min(252, len(hybrid_returns_aligned))
                 if window >= 63:
-                    rolling_sharpe_strat = strategy_returns_aligned.rolling(window).mean() / strategy_returns_aligned.rolling(window).std() * np.sqrt(252)
-                    rolling_sharpe_bench = benchmark_returns_aligned.rolling(window).mean() / benchmark_returns_aligned.rolling(window).std() * np.sqrt(252)
+                    rolling_sharpe_hybrid = hybrid_returns_aligned.rolling(window).mean() / hybrid_returns_aligned.rolling(window).std() * np.sqrt(252)
+                    rolling_sharpe_bh = bh_returns_aligned.rolling(window).mean() / bh_returns_aligned.rolling(window).std() * np.sqrt(252)
                     
-                    ax3.plot(rolling_sharpe_strat, label='MA Strategy', linewidth=1.5, color='green')
-                    ax3.plot(rolling_sharpe_bench, label='Buy & Hold', linewidth=1.5, color='blue', alpha=0.7)
+                    ax3.plot(rolling_sharpe_hybrid, label='Hybrid SIG', linewidth=1.5, color='green')
+                    ax3.plot(rolling_sharpe_bh, label='Buy & Hold', linewidth=1.5, color='blue', alpha=0.7)
                     ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
                     ax3.set_title(f'Rolling {window}-Day Sharpe Ratio')
                     ax3.set_xlabel('Date')
@@ -1319,14 +1321,14 @@ def main():
                     ax3.grid(alpha=0.3)
                 
                 # Plot 4: Monthly returns distribution
-                strategy_monthly = strategy_returns_aligned.resample('M').apply(lambda x: (1+x).prod()-1)
-                benchmark_monthly = benchmark_returns_aligned.resample('M').apply(lambda x: (1+x).prod()-1)
+                hybrid_monthly = hybrid_returns_aligned.resample('M').apply(lambda x: (1+x).prod()-1)
+                bh_monthly = bh_returns_aligned.resample('M').apply(lambda x: (1+x).prod()-1)
                 
-                bins = np.linspace(min(strategy_monthly.min(), benchmark_monthly.min()), 
-                                 max(strategy_monthly.max(), benchmark_monthly.max()), 20)
+                bins = np.linspace(min(hybrid_monthly.min(), bh_monthly.min()), 
+                                 max(hybrid_monthly.max(), bh_monthly.max()), 20)
                 
-                ax4.hist(strategy_monthly, bins=bins, alpha=0.7, label='MA Strategy', color='green', density=True)
-                ax4.hist(benchmark_monthly, bins=bins, alpha=0.5, label='Buy & Hold', color='blue', density=True)
+                ax4.hist(hybrid_monthly, bins=bins, alpha=0.7, label='Hybrid SIG', color='green', density=True)
+                ax4.hist(bh_monthly, bins=bins, alpha=0.5, label='Buy & Hold', color='blue', density=True)
                 ax4.axvline(x=0, color='black', linestyle='--', linewidth=1)
                 ax4.set_title('Monthly Returns Distribution')
                 ax4.set_xlabel('Monthly Return')
@@ -1338,25 +1340,46 @@ def main():
                 st.pyplot(fig)
                 
                 # 6. Key Takeaways
-                st.write("### 6. Key Takeaways for MA Strategy")
+                st.write("### 6. Key Takeaways for Hybrid SIG Strategy")
                 
                 takeaways = []
                 
-                if strategy_sharpe > benchmark_sharpe:
+                if hybrid_sharpe > bh_sharpe:
                     takeaways.append("✅ **Higher Sharpe Ratio** - Better risk-adjusted returns")
                 
-                if strategy_dd.min() > benchmark_dd.min():
+                if hybrid_dd.min() > bh_dd.min():
                     takeaways.append("✅ **Smaller Maximum Drawdown** - Better capital preservation")
                 
-                if strategy_vol < benchmark_vol:
+                if hybrid_vol < bh_vol:
                     takeaways.append("✅ **Lower Volatility** - Smoother ride")
                 
-                if bear_periods.any() and strategy_bear.mean() > benchmark_bear.mean():
+                if bear_periods.any() and hybrid_bear.mean() > bh_bear.mean():
                     takeaways.append("✅ **Bear Market Protection** - Outperforms during downturns")
                 
-                if strategy_cagr < benchmark_cagr:
-                    takeaways.append("⚠️ **Lower CAGR** - Expected trade-off for MA strategies")
+                if hybrid_cagr < bh_cagr:
+                    takeaways.append("⚠️ **Lower CAGR** - Expected trade-off for regime strategies")
                     takeaways.append("   *Goal is risk reduction, not maximum returns*")
+                
+                # Additional metrics specific to Hybrid SIG
+                st.write("### 7. Hybrid SIG Specific Metrics")
+                
+                # Quarterly rebalancing impact
+                if len(hybrid_rebals) > 0:
+                    st.metric("**Quarterly Rebalances**", 
+                             f"{len(hybrid_rebals)} rebalances",
+                             help="Number of times SIG engine rebalanced between quarters")
+                
+                # Current allocation
+                current_risky_pct = float(hybrid_rw.iloc[-1]) * 100
+                current_safe_pct = float(hybrid_sw.iloc[-1]) * 100
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("**Current Risky Allocation**",
+                             f"{current_risky_pct:.1f}%")
+                with col2:
+                    st.metric("**Current Safe Allocation**",
+                             f"{current_safe_pct:.1f}%")
                 
                 for takeaway in takeaways:
                     st.write(takeaway)
