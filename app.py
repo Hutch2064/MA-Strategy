@@ -24,7 +24,7 @@ RISK_OFF_WEIGHTS = {
     "SHY": 1.0,
 }
 
-FLIP_COST = 0.00
+FLIP_COST = 0.01
 
 # Starting weights inside the SIG engine (unchanged)
 START_RISKY = 0.70
