@@ -11,7 +11,7 @@ import datetime
 # CONFIG
 # ============================================================
 
-DEFAULT_START_DATE = "1999-01-01"
+DEFAULT_START_DATE = "2000-01-01"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
