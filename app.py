@@ -560,7 +560,7 @@ def run_robust_ma_optimization(prices, risk_on_weights, risk_off_weights,
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     returns = portfolio_index.pct_change().fillna(0)
     
-    # Use global parameters directly (no global declaration needed here)
+    # Use global parameters directly
     candidate_lengths = list(range(MA_MIN_DAYS, MA_MAX_DAYS + 1, 
                                  max(1, (MA_MAX_DAYS - MA_MIN_DAYS) // MA_STEP_FACTOR)))
     candidate_types = ["sma", "ema"]
@@ -1169,7 +1169,7 @@ def main():
         ax.grid(alpha=0.3)
         st.pyplot(fig)
 
-    # PERFORMANCE COMPARISON TABLE (Updated with benchmarks)
+    # PERFORMANCE COMPARISON TABLE (Updated with benchmarks) - FIXED VERSION
     st.subheader("📈 Performance Comparison (After-Tax)")
     
     # Calculate performance for all strategies
@@ -1213,6 +1213,9 @@ def main():
     all_perf = [ma_perf, hybrid_perf, pure_sig_perf] + benchmarks_data
     perf_df = pd.DataFrame(all_perf)
     
+    # Store raw values before formatting
+    perf_df_raw = perf_df.copy()
+    
     # Format for display
     def format_perf_df(df):
         formatted = df.copy()
@@ -1223,19 +1226,29 @@ def main():
             formatted["Sharpe"] = formatted["Sharpe"].apply(lambda x: f"{x:.3f}")
         return formatted
     
-    st.dataframe(format_perf_df(perf_df), use_container_width=True)
+    perf_df_formatted = format_perf_df(perf_df)
+    st.dataframe(perf_df_formatted, use_container_width=True)
     
-    # Highlight best performer in each category
+    # Highlight best performer in each category - FIXED VERSION
     st.write("**Best Performers:**")
     for metric in ["Sharpe", "CAGR", "MaxDD"]:
         if metric in perf_df.columns:
+            # Use raw values for comparison
             if metric == "MaxDD":
                 best_idx = perf_df[metric].idxmax()  # Higher (less negative) is better for MaxDD
             else:
                 best_idx = perf_df[metric].idxmax()
-            best_value = perf_df.loc[best_idx, metric]
+            
+            best_raw_value = perf_df.loc[best_idx, metric]
             best_name = perf_df.loc[best_idx, "Strategy"]
-            st.write(f"- **{metric}:** {best_name} ({best_value:.2% if metric != 'Sharpe' else best_value:.3f})")
+            
+            # Format based on metric type
+            if metric == "Sharpe":
+                formatted_value = f"{best_raw_value:.3f}"
+            else:
+                formatted_value = f"{best_raw_value:.2%}"
+            
+            st.write(f"- **{metric}:** {best_name} ({formatted_value})")
 
     # FINAL PERFORMANCE PLOT
     st.subheader("📊 Performance Comparison Chart")
