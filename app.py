@@ -1131,25 +1131,109 @@ def main():
         ])
         
         with val_tab1:
-            st.subheader("Monte Carlo Significance Test")
-            mc_result = monte_carlo_significance(best_result["returns"])
+            st.subheader("Strategy vs Benchmark Comparison")
             
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Actual Sharpe", f"{mc_result['actual_sharpe']:.3f}")
-            with col2:
-                st.metric("p-value", f"{mc_result['p_value']:.3f}")
-            with col3:
-                st.metric("Statistically Significant", 
-                         "✅ Yes" if mc_result['significance_95'] else "❌ No")
+            # Get benchmark returns (buy & hold of risk-on portfolio)
+            portfolio_index = build_portfolio_index(prices, risk_on_weights)
+            benchmark_returns = portfolio_index.pct_change().dropna()
+            strategy_returns = best_result["returns"]
             
-            st.write(f"**95% Confidence Interval:** [{mc_result['ci_95_lower']:.3f}, {mc_result['ci_95_upper']:.3f}]")
-            st.write(f"**Null Distribution Mean:** {mc_result['null_distribution_mean']:.3f}")
-            
-            if mc_result['p_value'] < 0.05:
-                st.success("The strategy appears to be statistically significant (p < 0.05)")
+            # Align dates
+            common_idx = strategy_returns.index.intersection(benchmark_returns.index)
+            if len(common_idx) > 0:
+                strategy_returns_aligned = strategy_returns.loc[common_idx]
+                benchmark_returns_aligned = benchmark_returns.loc[common_idx]
+                
+                # Calculate basic metrics
+                strategy_sharpe = strategy_returns_aligned.mean() / strategy_returns_aligned.std() * np.sqrt(252) if strategy_returns_aligned.std() > 0 else 0
+                benchmark_sharpe = benchmark_returns_aligned.mean() / benchmark_returns_aligned.std() * np.sqrt(252) if benchmark_returns_aligned.std() > 0 else 0
+                
+                # Information Ratio
+                active_returns = strategy_returns_aligned - benchmark_returns_aligned
+                if active_returns.std() > 0:
+                    info_ratio = active_returns.mean() / active_returns.std() * np.sqrt(252)
+                else:
+                    info_ratio = 0
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Strategy Sharpe", f"{strategy_sharpe:.3f}")
+                with col2:
+                    st.metric("Benchmark Sharpe", f"{benchmark_sharpe:.3f}")
+                with col3:
+                    st.metric("Information Ratio", f"{info_ratio:.3f}")
+                with col4:
+                    st.metric("Outperformance", f"{strategy_sharpe - benchmark_sharpe:.3f}")
+                
+                # Performance comparison
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.plot((1 + strategy_returns_aligned).cumprod(), label='Strategy', linewidth=2)
+                ax.plot((1 + benchmark_returns_aligned).cumprod(), label='Benchmark (Buy & Hold)', linewidth=2)
+                ax.set_title('Strategy vs Benchmark (Normalized)')
+                ax.set_xlabel('Date')
+                ax.set_ylabel('Cumulative Return')
+                ax.legend()
+                ax.grid(alpha=0.3)
+                st.pyplot(fig)
+                
+                # Month-by-month comparison
+                strategy_monthly = strategy_returns_aligned.resample('M').apply(lambda x: (1+x).prod()-1)
+                benchmark_monthly = benchmark_returns_aligned.resample('M').apply(lambda x: (1+x).prod()-1)
+                
+                comparison_df = pd.DataFrame({
+                    'Strategy': strategy_monthly,
+                    'Benchmark': benchmark_monthly,
+                    'Outperformance': strategy_monthly - benchmark_monthly
+                })
+                
+                st.write("### Monthly Performance Comparison")
+                st.dataframe(comparison_df.style.format("{:.2%}"))
+                
+                # Win rate analysis
+                outperformance_months = (strategy_monthly > benchmark_monthly).mean()
+                avg_outperformance = (strategy_monthly - benchmark_monthly).mean()
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Months Outperforming", f"{outperformance_months:.1%}")
+                with col2:
+                    st.metric("Avg Monthly Outperformance", f"{avg_outperformance:.2%}")
+                
+                # Simple statistical test
+                if len(strategy_monthly) > 1 and len(benchmark_monthly) > 1:
+                    # Paired t-test
+                    from scipy import stats
+                    t_stat, p_value = stats.ttest_rel(strategy_monthly.values, benchmark_monthly.values)
+                    
+                    st.write("### Statistical Test")
+                    st.write(f"**Paired t-test:** t = {t_stat:.3f}, p = {p_value:.3f}")
+                    
+                    if p_value < 0.05:
+                        st.success(f"✅ Statistically significant outperformance (p = {p_value:.3f})")
+                    else:
+                        st.warning(f"⚠️ Not statistically significant (p = {p_value:.3f})")
+                
+                # Interpretation
+                st.write("### 📊 Interpretation")
+                if strategy_sharpe > benchmark_sharpe:
+                    if info_ratio > 0.5:
+                        st.success(f"**Excellent:** Strategy Sharpe ({strategy_sharpe:.3f}) > Benchmark Sharpe ({benchmark_sharpe:.3f}) with Information Ratio {info_ratio:.3f}")
+                    else:
+                        st.success(f"**Good:** Strategy Sharpe ({strategy_sharpe:.3f}) > Benchmark Sharpe ({benchmark_sharpe:.3f})")
+                else:
+                    st.warning(f"**Needs Improvement:** Strategy Sharpe ({strategy_sharpe:.3f}) ≤ Benchmark Sharpe ({benchmark_sharpe:.3f})")
+                    
+                # Additional metrics
+                st.write("### Additional Metrics")
+                st.write(f"- **Strategy CAGR:** {(1 + strategy_returns_aligned).prod() ** (252/len(strategy_returns_aligned)) - 1:.2%}")
+                st.write(f"- **Benchmark CAGR:** {(1 + benchmark_returns_aligned).prod() ** (252/len(benchmark_returns_aligned)) - 1:.2%}")
+                st.write(f"- **Strategy Volatility:** {strategy_returns_aligned.std() * np.sqrt(252):.2%}")
+                st.write(f"- **Benchmark Volatility:** {benchmark_returns_aligned.std() * np.sqrt(252):.2%}")
+                
             else:
-                st.warning("The strategy may not be statistically significant (p ≥ 0.05)")
+                st.info("Insufficient overlapping data for comparison")
+                st.write(f"Strategy returns: {len(strategy_returns)} points")
+                st.write(f"Benchmark returns: {len(benchmark_returns)} points")
         
         with val_tab2:
             st.subheader("Walk-Forward Validation (3-Year Train, 1-Year Test)")
