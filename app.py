@@ -371,6 +371,181 @@ def normalize(eq):
 
 
 # ============================================================
+# VALIDATION FUNCTIONS (NEW SECTION)
+# ============================================================
+
+def calculate_max_dd(prices_series):
+    """Calculate maximum drawdown for a price series"""
+    cumulative = (1 + prices_series.pct_change().fillna(0)).cumprod()
+    running_max = cumulative.cummax()
+    drawdown = (cumulative - running_max) / running_max
+    return drawdown.min()
+
+def walk_forward_validation(prices, strategy_returns, window_years=3):
+    """
+    Simple walk-forward validation for 2014+ data
+    """
+    results = []
+    total_days = len(prices)
+    window_days = window_years * 252
+    
+    # Only do WFA if we have enough data
+    if total_days < window_days * 1.5:
+        return pd.DataFrame()  # Not enough data
+    
+    for start in range(0, total_days - window_days, 126):  # Slide every 6 months
+        train_end = start + window_days
+        test_end = min(train_end + 252, total_days)  # 1 year test
+        
+        if test_end - train_end < 63:  # Skip if test too short
+            continue
+            
+        train_data = prices.iloc[start:train_end]
+        test_data = prices.iloc[train_end:test_end]
+        
+        # Simple: just track how strategy performs out-of-sample
+        test_returns = strategy_returns.iloc[train_end:test_end]
+        
+        if len(test_returns) > 0:
+            test_sharpe = test_returns.mean() / test_returns.std() * np.sqrt(252) if test_returns.std() > 0 else 0
+            test_cagr = (1 + test_returns).prod() ** (252/len(test_returns)) - 1
+            
+            results.append({
+                'train_period': f"{train_data.index[0].date()} to {train_data.index[-1].date()}",
+                'test_period': f"{test_data.index[0].date()} to {test_data.index[-1].date()}",
+                'test_sharpe': test_sharpe,
+                'test_cagr': test_cagr,
+                'test_length_days': len(test_returns)
+            })
+    
+    return pd.DataFrame(results)
+
+def monte_carlo_significance(strategy_returns, n_simulations=500):
+    """
+    Check if strategy returns are better than random
+    """
+    actual_sharpe = strategy_returns.mean() / strategy_returns.std() * np.sqrt(252) if strategy_returns.std() > 0 else 0
+    
+    # Generate random Sharpe ratios by shuffling returns
+    null_sharpes = []
+    for _ in range(n_simulations):
+        shuffled = np.random.permutation(strategy_returns.values)
+        if np.std(shuffled) > 0:
+            null_sharpe = np.mean(shuffled) / np.std(shuffled) * np.sqrt(252)
+            null_sharpes.append(null_sharpe)
+    
+    # Calculate p-value
+    if null_sharpes:
+        p_value = (np.array(null_sharpes) >= actual_sharpe).mean()
+        ci_95 = np.percentile(null_sharpes, [2.5, 97.5])
+    else:
+        p_value = 1.0
+        ci_95 = [0, 0]
+    
+    return {
+        'actual_sharpe': actual_sharpe,
+        'p_value': p_value,
+        'ci_95_lower': ci_95[0],
+        'ci_95_upper': ci_95[1],
+        'significance_95': p_value < 0.05,
+        'null_distribution_mean': np.mean(null_sharpes) if null_sharpes else 0
+    }
+
+def calculate_consistency_metrics(strategy_returns):
+    """
+    Calculate hit ratio and other consistency metrics
+    """
+    # Monthly hit ratio
+    monthly_returns = strategy_returns.resample('M').apply(lambda x: (1+x).prod()-1)
+    hit_ratio = (monthly_returns > 0).mean()
+    
+    # Win/Loss metrics
+    wins = strategy_returns[strategy_returns > 0]
+    losses = strategy_returns[strategy_returns < 0]
+    
+    avg_win = wins.mean() if len(wins) > 0 else 0
+    avg_loss = losses.mean() if len(losses) > 0 else 0
+    win_loss_ratio = abs(avg_win / avg_loss) if avg_loss != 0 else np.inf
+    
+    # Consecutive wins/losses
+    positive_streaks = []
+    negative_streaks = []
+    current_streak = 0
+    current_sign = None
+    
+    for ret in monthly_returns:
+        if ret > 0:
+            if current_sign == 1:
+                current_streak += 1
+            else:
+                if current_streak > 0:
+                    if current_sign == -1:
+                        negative_streaks.append(current_streak)
+                current_streak = 1
+                current_sign = 1
+        else:
+            if current_sign == -1:
+                current_streak += 1
+            else:
+                if current_streak > 0:
+                    if current_sign == 1:
+                        positive_streaks.append(current_streak)
+                current_streak = 1
+                current_sign = -1
+    
+    return {
+        'monthly_hit_ratio': hit_ratio,
+        'avg_win_pct': avg_win,
+        'avg_loss_pct': avg_loss,
+        'win_loss_ratio': win_loss_ratio,
+        'max_consecutive_wins': max(positive_streaks) if positive_streaks else 0,
+        'max_consecutive_losses': max(negative_streaks) if negative_streaks else 0,
+        'avg_consecutive_wins': np.mean(positive_streaks) if positive_streaks else 0,
+        'avg_consecutive_losses': np.mean(negative_streaks) if negative_streaks else 0
+    }
+
+def parameter_sensitivity_analysis(prices, base_params, risk_on_weights, risk_off_weights, flip_cost):
+    """
+    Test how sensitive results are to parameter changes
+    """
+    base_len, base_type, base_tol = base_params
+    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+    
+    # Test different MA lengths
+    length_results = []
+    for length in [50, 100, 150, 200, 250, 300]:
+        ma = compute_ma_matrix(portfolio_index, [length], base_type)[length]
+        signal = generate_testfol_signal_vectorized(portfolio_index, ma, base_tol)
+        result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+        perf = result["performance"]
+        length_results.append({
+            'length': length,
+            'sharpe': perf['Sharpe'],
+            'cagr': perf['CAGR'],
+            'max_dd': perf['MaxDrawdown']
+        })
+    
+    # Test different tolerances
+    tol_results = []
+    ma = compute_ma_matrix(portfolio_index, [base_len], base_type)[base_len]
+    for tol in [0.00, 0.01, 0.02, 0.03, 0.04, 0.05]:
+        signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+        result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+        perf = result["performance"]
+        tol_results.append({
+            'tolerance': tol,
+            'sharpe': perf['Sharpe'],
+            'cagr': perf['CAGR'],
+            'max_dd': perf['MaxDrawdown']
+        })
+    
+    return {
+        'length_sensitivity': pd.DataFrame(length_results),
+        'tolerance_sensitivity': pd.DataFrame(tol_results)
+    }
+
+
+# ============================================================
 # STREAMLIT APP
 # ============================================================
 
@@ -408,6 +583,10 @@ def main():
     real_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value Today ($)", min_value=0.0, value=73165.78, step=100.0)
     real_cap_2 = st.sidebar.number_input("Tax-Sheltered – Portfolio Value Today ($)", min_value=0.0, value=9264.46, step=100.0)
     real_cap_3 = st.sidebar.number_input("Joint – Portfolio Value Today ($)", min_value=0.0, value=4191.56, step=100.0)
+
+    # Add validation toggle to sidebar
+    st.sidebar.header("Validation Settings")
+    run_validation = st.sidebar.checkbox("Run Validation Suite", value=True)
 
     run_clicked = st.sidebar.button("Run Backtest & Optimize")
     if not run_clicked:
@@ -832,6 +1011,170 @@ def main():
 
     st.write(f"**Avg RISK-ON duration:** {regime_df[regime_df['Regime']=='RISK-ON']['Duration (days)'].mean():.1f} days")
     st.write(f"**Avg RISK-OFF duration:** {regime_df[regime_df['Regime']=='RISK-OFF']['Duration (days)'].mean():.1f} days")
+
+    # ============================================================
+    # STRATEGY VALIDATION DASHBOARD (NEW SECTION)
+    # ============================================================
+    
+    if run_validation:
+        st.header("🎯 Strategy Validation")
+        
+        # Create tabs for different validation tests
+        val_tab1, val_tab2, val_tab3, val_tab4 = st.tabs([
+            "Statistical Significance", 
+            "Walk-Forward Analysis",
+            "Parameter Sensitivity", 
+            "Consistency Metrics"
+        ])
+        
+        with val_tab1:
+            st.subheader("Monte Carlo Significance Test")
+            mc_result = monte_carlo_significance(best_result["returns"])
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Actual Sharpe", f"{mc_result['actual_sharpe']:.3f}")
+            with col2:
+                st.metric("p-value", f"{mc_result['p_value']:.3f}")
+            with col3:
+                st.metric("Statistically Significant", 
+                         "✅ Yes" if mc_result['significance_95'] else "❌ No")
+            
+            st.write(f"**95% Confidence Interval:** [{mc_result['ci_95_lower']:.3f}, {mc_result['ci_95_upper']:.3f}]")
+            st.write(f"**Null Distribution Mean:** {mc_result['null_distribution_mean']:.3f}")
+            
+            if mc_result['p_value'] < 0.05:
+                st.success("The strategy appears to be statistically significant (p < 0.05)")
+            else:
+                st.warning("The strategy may not be statistically significant (p ≥ 0.05)")
+        
+        with val_tab2:
+            st.subheader("Walk-Forward Validation (3-Year Train, 1-Year Test)")
+            
+            portfolio_index = build_portfolio_index(prices, risk_on_weights)
+            wfa_results = walk_forward_validation(portfolio_index, best_result["returns"])
+            
+            if not wfa_results.empty:
+                # Display summary stats
+                avg_test_sharpe = wfa_results['test_sharpe'].mean()
+                std_test_sharpe = wfa_results['test_sharpe'].std()
+                success_rate = (wfa_results['test_sharpe'] > 0).mean()
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Avg Test Sharpe", f"{avg_test_sharpe:.3f}")
+                with col2:
+                    st.metric("Test Sharpe Std", f"{std_test_sharpe:.3f}")
+                with col3:
+                    st.metric("Success Rate", f"{success_rate:.1%}")
+                
+                # Plot walk-forward results
+                fig, ax = plt.subplots(figsize=(10, 4))
+                ax.plot(wfa_results.index, wfa_results['test_sharpe'], marker='o', linewidth=2)
+                ax.axhline(y=0, color='r', linestyle='--', alpha=0.5)
+                ax.axhline(y=avg_test_sharpe, color='g', linestyle='--', alpha=0.5)
+                ax.set_title('Walk-Forward Test Sharpe Ratios')
+                ax.set_xlabel('Test Period')
+                ax.set_ylabel('Sharpe Ratio')
+                ax.grid(alpha=0.3)
+                st.pyplot(fig)
+                
+                # Show detailed table
+                with st.expander("Show Detailed Walk-Forward Results"):
+                    st.dataframe(wfa_results)
+            else:
+                st.info("Not enough data for walk-forward analysis (need at least 4-5 years)")
+        
+        with val_tab3:
+            st.subheader("Parameter Sensitivity Analysis")
+            
+            sens_results = parameter_sensitivity_analysis(
+                prices, best_cfg, risk_on_weights, risk_off_weights, FLIP_COST
+            )
+            
+            # Plot MA length sensitivity
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+            
+            ax1.plot(sens_results['length_sensitivity']['length'], 
+                    sens_results['length_sensitivity']['sharpe'], 
+                    marker='o', linewidth=2)
+            ax1.axvline(x=best_len, color='r', linestyle='--', label=f'Optimal ({best_len})')
+            ax1.set_title('Sharpe Ratio vs MA Length')
+            ax1.set_xlabel('MA Length (days)')
+            ax1.set_ylabel('Sharpe Ratio')
+            ax1.legend()
+            ax1.grid(alpha=0.3)
+            
+            # Plot tolerance sensitivity
+            ax2.plot(sens_results['tolerance_sensitivity']['tolerance'], 
+                    sens_results['tolerance_sensitivity']['sharpe'], 
+                    marker='o', linewidth=2)
+            ax2.axvline(x=best_tol, color='r', linestyle='--', label=f'Optimal ({best_tol:.2%})')
+            ax2.set_title('Sharpe Ratio vs Tolerance')
+            ax2.set_xlabel('Tolerance')
+            ax2.set_ylabel('Sharpe Ratio')
+            ax2.legend()
+            ax2.grid(alpha=0.3)
+            
+            st.pyplot(fig)
+            
+            # Calculate robustness scores
+            length_std = sens_results['length_sensitivity']['sharpe'].std()
+            length_range = sens_results['length_sensitivity']['sharpe'].max() - sens_results['length_sensitivity']['sharpe'].min()
+            
+            tol_std = sens_results['tolerance_sensitivity']['sharpe'].std()
+            tol_range = sens_results['tolerance_sensitivity']['sharpe'].max() - sens_results['tolerance_sensitivity']['sharpe'].min()
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("MA Length Robustness", f"{1 - (length_std/length_range if length_range > 0 else 0):.2%}")
+            with col2:
+                st.metric("Tolerance Robustness", f"{1 - (tol_std/tol_range if tol_range > 0 else 0):.2%}")
+        
+        with val_tab4:
+            st.subheader("Strategy Consistency Metrics")
+            
+            consistency = calculate_consistency_metrics(best_result["returns"])
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Monthly Hit Ratio", f"{consistency['monthly_hit_ratio']:.1%}")
+                st.metric("Avg Win %", f"{consistency['avg_win_pct']:.2%}")
+            with col2:
+                st.metric("Win/Loss Ratio", f"{consistency['win_loss_ratio']:.2f}")
+                st.metric("Avg Loss %", f"{consistency['avg_loss_pct']:.2%}")
+            with col3:
+                st.metric("Max Consecutive Wins", consistency['max_consecutive_wins'])
+                st.metric("Max Consecutive Losses", consistency['max_consecutive_losses'])
+            
+            # Create consistency visualization
+            monthly_returns = best_result["returns"].resample('M').apply(lambda x: (1+x).prod()-1)
+            
+            fig, ax = plt.subplots(figsize=(10, 4))
+            colors = ['green' if x > 0 else 'red' for x in monthly_returns]
+            ax.bar(range(len(monthly_returns)), monthly_returns.values * 100, color=colors, alpha=0.7)
+            ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+            ax.set_title('Monthly Returns (%)')
+            ax.set_xlabel('Month')
+            ax.set_ylabel('Return %')
+            ax.grid(alpha=0.3, axis='y')
+            
+            # Add cumulative line
+            ax2 = ax.twinx()
+            cumulative = (1 + monthly_returns).cumprod() - 1
+            ax2.plot(range(len(monthly_returns)), cumulative.values * 100, color='blue', linewidth=2)
+            ax2.set_ylabel('Cumulative Return %', color='blue')
+            ax2.tick_params(axis='y', labelcolor='blue')
+            
+            st.pyplot(fig)
+            
+            # Interpretation
+            st.write("### 📊 Interpretation Guide")
+            st.write("- **Hit Ratio > 55%**: Good consistency")
+            st.write("- **Win/Loss Ratio > 1.5**: Good risk/reward")  
+            st.write("- **Max Consecutive Losses < 4**: Manageable drawdowns")
+    
+    st.markdown("---")  # Separator before final plot
 
     # Final Performance Plot (unchanged)
     st.subheader("Portfolio Strategy Performance Comparison")
