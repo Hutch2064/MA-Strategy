@@ -1148,10 +1148,12 @@ def main():
                 strategy_sharpe = strategy_returns_aligned.mean() / strategy_returns_aligned.std() * np.sqrt(252) if strategy_returns_aligned.std() > 0 else 0
                 benchmark_sharpe = benchmark_returns_aligned.mean() / benchmark_returns_aligned.std() * np.sqrt(252) if benchmark_returns_aligned.std() > 0 else 0
                 
-                # Information Ratio
+                # Calculate CORRECT Information Ratio
                 active_returns = strategy_returns_aligned - benchmark_returns_aligned
-                if active_returns.std() > 0:
-                    info_ratio = active_returns.mean() / active_returns.std() * np.sqrt(252)
+                tracking_error = active_returns.std() * np.sqrt(252) if active_returns.std() > 0 else 0
+                
+                if tracking_error > 0:
+                    info_ratio = (strategy_returns_aligned.mean() - benchmark_returns_aligned.mean()) * 252 / tracking_error
                 else:
                     info_ratio = 0
                 
@@ -1161,19 +1163,50 @@ def main():
                 with col2:
                     st.metric("Benchmark Sharpe", f"{benchmark_sharpe:.3f}")
                 with col3:
-                    st.metric("Information Ratio", f"{info_ratio:.3f}")
+                    st.metric("Information Ratio", f"{info_ratio:.3f}", 
+                             delta=f"{'Positive' if info_ratio > 0 else 'Negative'}",
+                             delta_color="normal" if info_ratio > 0.5 else "inverse")
                 with col4:
-                    st.metric("Outperformance", f"{strategy_sharpe - benchmark_sharpe:.3f}")
+                    outperf = strategy_sharpe - benchmark_sharpe
+                    st.metric("Sharpe Outperformance", f"{outperf:.3f}")
+                
+                # Show the components
+                st.write("### Active Return Analysis")
+                
+                active_return_annual = (strategy_returns_aligned.mean() - benchmark_returns_aligned.mean()) * 252
+                tracking_error_annual = active_returns.std() * np.sqrt(252) if active_returns.std() > 0 else 0
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Annual Active Return", f"{active_return_annual:.2%}")
+                with col2:
+                    st.metric("Annual Tracking Error", f"{tracking_error_annual:.2%}")
+                with col3:
+                    st.metric("Return per Unit Risk", f"{active_return_annual/tracking_error_annual:.3f}" if tracking_error_annual > 0 else "N/A")
                 
                 # Performance comparison
-                fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot((1 + strategy_returns_aligned).cumprod(), label='Strategy', linewidth=2)
-                ax.plot((1 + benchmark_returns_aligned).cumprod(), label='Benchmark (Buy & Hold)', linewidth=2)
-                ax.set_title('Strategy vs Benchmark (Normalized)')
-                ax.set_xlabel('Date')
-                ax.set_ylabel('Cumulative Return')
-                ax.legend()
-                ax.grid(alpha=0.3)
+                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+                
+                # Plot 1: Cumulative returns
+                ax1.plot((1 + strategy_returns_aligned).cumprod(), label='Strategy', linewidth=2)
+                ax1.plot((1 + benchmark_returns_aligned).cumprod(), label='Benchmark (Buy & Hold)', linewidth=2)
+                ax1.set_title('Cumulative Returns: Strategy vs Benchmark')
+                ax1.set_xlabel('Date')
+                ax1.set_ylabel('Cumulative Return')
+                ax1.legend()
+                ax1.grid(alpha=0.3)
+                
+                # Plot 2: Active returns over time
+                cumulative_active = (1 + active_returns).cumprod() - 1
+                ax2.plot(cumulative_active * 100, label='Cumulative Active Return', linewidth=2, color='green')
+                ax2.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+                ax2.set_title('Cumulative Active Return (Strategy - Benchmark)')
+                ax2.set_xlabel('Date')
+                ax2.set_ylabel('Active Return %')
+                ax2.legend()
+                ax2.grid(alpha=0.3)
+                
+                plt.tight_layout()
                 st.pyplot(fig)
                 
                 # Month-by-month comparison
@@ -1183,57 +1216,105 @@ def main():
                 comparison_df = pd.DataFrame({
                     'Strategy': strategy_monthly,
                     'Benchmark': benchmark_monthly,
-                    'Outperformance': strategy_monthly - benchmark_monthly
+                    'Active': strategy_monthly - benchmark_monthly
                 })
                 
-                st.write("### Monthly Performance Comparison")
-                st.dataframe(comparison_df.style.format("{:.2%}"))
+                st.write("### Monthly Performance")
+                st.dataframe(comparison_df.tail(12).style.format("{:.2%}"))  # Show last 12 months
                 
                 # Win rate analysis
                 outperformance_months = (strategy_monthly > benchmark_monthly).mean()
                 avg_outperformance = (strategy_monthly - benchmark_monthly).mean()
+                std_outperformance = (strategy_monthly - benchmark_monthly).std()
                 
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("Months Outperforming", f"{outperformance_months:.1%}")
                 with col2:
                     st.metric("Avg Monthly Outperformance", f"{avg_outperformance:.2%}")
+                with col3:
+                    st.metric("Monthly Outperformance Std", f"{std_outperformance:.2%}")
                 
-                # Simple statistical test
-                if len(strategy_monthly) > 1 and len(benchmark_monthly) > 1:
-                    # Paired t-test
-                    from scipy import stats
-                    t_stat, p_value = stats.ttest_rel(strategy_monthly.values, benchmark_monthly.values)
-                    
-                    st.write("### Statistical Test")
-                    st.write(f"**Paired t-test:** t = {t_stat:.3f}, p = {p_value:.3f}")
-                    
-                    if p_value < 0.05:
-                        st.success(f"✅ Statistically significant outperformance (p = {p_value:.3f})")
-                    else:
-                        st.warning(f"⚠️ Not statistically significant (p = {p_value:.3f})")
+                # Risk metrics comparison
+                st.write("### Risk Metrics Comparison")
                 
-                # Interpretation
-                st.write("### 📊 Interpretation")
-                if strategy_sharpe > benchmark_sharpe:
-                    if info_ratio > 0.5:
-                        st.success(f"**Excellent:** Strategy Sharpe ({strategy_sharpe:.3f}) > Benchmark Sharpe ({benchmark_sharpe:.3f}) with Information Ratio {info_ratio:.3f}")
-                    else:
-                        st.success(f"**Good:** Strategy Sharpe ({strategy_sharpe:.3f}) > Benchmark Sharpe ({benchmark_sharpe:.3f})")
+                # Calculate drawdowns
+                strategy_eq = (1 + strategy_returns_aligned).cumprod()
+                benchmark_eq = (1 + benchmark_returns_aligned).cumprod()
+                
+                strategy_dd = strategy_eq / strategy_eq.cummax() - 1
+                benchmark_dd = benchmark_eq / benchmark_eq.cummax() - 1
+                
+                risk_metrics = pd.DataFrame({
+                    'Metric': ['Max Drawdown', 'Volatility', 'CAGR', 'Sharpe Ratio'],
+                    'Strategy': [
+                        f"{strategy_dd.min():.2%}",
+                        f"{strategy_returns_aligned.std() * np.sqrt(252):.2%}",
+                        f"{strategy_eq.iloc[-1] / strategy_eq.iloc[0] ** (252/len(strategy_returns_aligned)) - 1:.2%}",
+                        f"{strategy_sharpe:.3f}"
+                    ],
+                    'Benchmark': [
+                        f"{benchmark_dd.min():.2%}",
+                        f"{benchmark_returns_aligned.std() * np.sqrt(252):.2%}",
+                        f"{benchmark_eq.iloc[-1] / benchmark_eq.iloc[0] ** (252/len(benchmark_returns_aligned)) - 1:.2%}",
+                        f"{benchmark_sharpe:.3f}"
+                    ],
+                    'Difference': [
+                        f"{strategy_dd.min() - benchmark_dd.min():.2%}",
+                        f"{strategy_returns_aligned.std() - benchmark_returns_aligned.std() * np.sqrt(252):.2%}",
+                        f"{(strategy_eq.iloc[-1] / strategy_eq.iloc[0] ** (252/len(strategy_returns_aligned)) - 1) - (benchmark_eq.iloc[-1] / benchmark_eq.iloc[0] ** (252/len(benchmark_returns_aligned)) - 1):.2%}",
+                        f"{strategy_sharpe - benchmark_sharpe:.3f}"
+                    ]
+                })
+                
+                st.dataframe(risk_metrics)
+                
+                # Interpretation based on your specific results
+                st.write("### 📊 Interpretation for YOUR Results")
+                
+                if strategy_sharpe > benchmark_sharpe and info_ratio < 0:
+                    st.info("""
+                    **Analysis:** You have a higher Sharpe ratio but negative Information Ratio.
+                    
+                    **What this means:**
+                    1. ✅ **Your strategy is better** than buy & hold on a risk-adjusted basis (higher Sharpe)
+                    2. ⚠️ **But it's not efficiently tracking** the benchmark
+                    3. 🔍 **Possible reasons:**
+                       - Strategy takes different risks than benchmark
+                       - High tracking error (diverges from benchmark often)
+                       - Strategy might be capturing different market factors
+                    
+                    **Action items:**
+                    - Check if high tracking error comes from MA regime switches
+                    - Consider if the benchmark is appropriate (maybe compare to risk-free instead)
+                    - Look at the "Cumulative Active Return" chart above
+                    """)
+                elif strategy_sharpe > benchmark_sharpe and info_ratio > 0:
+                    st.success("""
+                    **Excellent!** Your strategy beats the benchmark with positive Information Ratio.
+                    This means you're adding alpha efficiently.
+                    """)
+                
+                # Add a simple backtest: what if we followed the strategy?
+                st.write("### What If Analysis")
+                
+                initial_investment = 10000
+                strategy_final = initial_investment * (1 + strategy_returns_aligned).prod()
+                benchmark_final = initial_investment * (1 + benchmark_returns_aligned).prod()
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Strategy Final Value", f"${strategy_final:,.2f}")
+                with col2:
+                    st.metric("Benchmark Final Value", f"${benchmark_final:,.2f}")
+                
+                if strategy_final > benchmark_final:
+                    st.success(f"✅ Strategy would have made **${strategy_final - benchmark_final:,.2f} more** on a ${initial_investment:,.0f} investment")
                 else:
-                    st.warning(f"**Needs Improvement:** Strategy Sharpe ({strategy_sharpe:.3f}) ≤ Benchmark Sharpe ({benchmark_sharpe:.3f})")
-                    
-                # Additional metrics
-                st.write("### Additional Metrics")
-                st.write(f"- **Strategy CAGR:** {(1 + strategy_returns_aligned).prod() ** (252/len(strategy_returns_aligned)) - 1:.2%}")
-                st.write(f"- **Benchmark CAGR:** {(1 + benchmark_returns_aligned).prod() ** (252/len(benchmark_returns_aligned)) - 1:.2%}")
-                st.write(f"- **Strategy Volatility:** {strategy_returns_aligned.std() * np.sqrt(252):.2%}")
-                st.write(f"- **Benchmark Volatility:** {benchmark_returns_aligned.std() * np.sqrt(252):.2%}")
+                    st.warning(f"⚠️ Strategy would have made **${benchmark_final - strategy_final:,.2f} less** on a ${initial_investment:,.0f} investment")
                 
             else:
                 st.info("Insufficient overlapping data for comparison")
-                st.write(f"Strategy returns: {len(strategy_returns)} points")
-                st.write(f"Benchmark returns: {len(benchmark_returns)} points")
         
         with val_tab2:
             st.subheader("Walk-Forward Validation (3-Year Train, 1-Year Test)")
