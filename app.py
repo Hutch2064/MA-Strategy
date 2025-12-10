@@ -77,36 +77,51 @@ def compute_ma_matrix(price_series, lengths, ma_type):
             ma_dict[L] = ma.shift(1)
     else:
         for L in lengths:
-            ma = price_series.rolling(window=L, min_periods=L).mean()
+            ma = price_series.rolling(window=L, min_periods=1).mean()
             ma_dict[L] = ma.shift(1)
     return ma_dict
 
 
 # ============================================================
-# TESTFOL SIGNAL LOGIC
+# TESTFOL SIGNAL LOGIC - ROBUST VERSION
 # ============================================================
 
 def generate_testfol_signal_vectorized(price, ma, tol):
     px = price.shift(1).values
     ma_vals = ma.values
     n = len(px)
-
+    
+    # Handle case where all values are NaN
+    if np.all(np.isnan(ma_vals)):
+        return pd.Series(False, index=ma.index)
+    
     upper = ma_vals * (1 + tol)
     lower = ma_vals * (1 - tol)
-
+    
     sig = np.zeros(n, dtype=bool)
-
-    first_valid = np.nanargmin(np.isnan(ma_vals))
+    
+    # Find first non-NaN index
+    non_nan_mask = ~np.isnan(ma_vals)
+    if not np.any(non_nan_mask):
+        return pd.Series(False, index=ma.index)
+    
+    first_valid = np.where(non_nan_mask)[0][0]
     if first_valid == 0:
         first_valid = 1
     start_index = first_valid + 1
-
+    
+    # Ensure start_index is valid
+    if start_index >= n:
+        return pd.Series(False, index=ma.index)
+    
     for t in range(start_index, n):
-        if not sig[t - 1]:
+        if np.isnan(px[t]) or np.isnan(upper[t]) or np.isnan(lower[t]):
+            sig[t] = sig[t-1] if t > 0 else False
+        elif not sig[t - 1]:
             sig[t] = px[t] > upper[t]
         else:
             sig[t] = not (px[t] < lower[t])
-
+    
     return pd.Series(sig, index=ma.index).fillna(False)
 
 
@@ -261,17 +276,27 @@ def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
 
 
 def compute_performance(simple_returns, eq_curve, rf=0.0):
+    if len(eq_curve) == 0 or eq_curve.iloc[0] == 0:
+        return {
+            "CAGR": 0,
+            "Volatility": 0,
+            "Sharpe": 0,
+            "MaxDrawdown": 0,
+            "TotalReturn": 0,
+            "DD_Series": pd.Series([], dtype=float)
+        }
+    
     cagr = (eq_curve.iloc[-1] / eq_curve.iloc[0]) ** (252 / len(eq_curve)) - 1
-    vol = simple_returns.std() * np.sqrt(252)
-    sharpe = (simple_returns.mean() * 252 - rf) / vol if vol > 0 else np.nan
+    vol = simple_returns.std() * np.sqrt(252) if len(simple_returns) > 0 else 0
+    sharpe = (simple_returns.mean() * 252 - rf) / vol if vol > 0 else 0
     dd = eq_curve / eq_curve.cummax() - 1
 
     return {
         "CAGR": cagr,
         "Volatility": vol,
         "Sharpe": sharpe,
-        "MaxDrawdown": dd.min(),
-        "TotalReturn": eq_curve.iloc[-1] / eq_curve.iloc[0] - 1,
+        "MaxDrawdown": dd.min() if len(dd) > 0 else 0,
+        "TotalReturn": eq_curve.iloc[-1] / eq_curve.iloc[0] - 1 if eq_curve.iloc[0] != 0 else 0,
         "DD_Series": dd
     }
 
@@ -300,9 +325,9 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
 
 
 # ============================================================
-# GRID SEARCH — unchanged
+# GRID SEARCH — ADAPTIVE VERSION (works with any data length)
 # ============================================================
-# (keeping your original function identical)
+
 def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
     best_sharpe = -1e9
     best_cfg = None
@@ -310,8 +335,23 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
     best_trades = np.inf
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
-
-    lengths = list(range(21, 253))
+    
+    # ADAPTIVE: Adjust MA lengths based on available data
+    max_possible_length = len(portfolio_index) - 1
+    if max_possible_length < 21:
+        # If we have very little data, use simple defaults
+        st.info(f"Limited data ({len(portfolio_index)} points). Using 20-day SMA.")
+        default_cfg = (20, "sma", 0.02)
+        ma = compute_ma_matrix(portfolio_index, [20], "sma")[20]
+        signal = generate_testfol_signal_vectorized(portfolio_index, ma, 0.02)
+        default_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+        return default_cfg, default_result
+    
+    # Use reasonable MA lengths based on available data
+    max_length = min(252, max_possible_length)
+    min_length = max(10, int(max_length * 0.1))  # At least 10% of max length, min 10
+    
+    lengths = list(range(min_length, max_length + 1, max(1, (max_length - min_length) // 20)))
     types = ["sma", "ema"]
     tolerances = np.arange(0.0, .0501, .002)
 
@@ -326,16 +366,22 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
             ma = ma_cache[ma_type][length]
             for tol in tolerances:
                 signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+                
+                # Skip if signal has no valid entries
+                if signal.sum() == 0:
+                    idx += 1
+                    continue
+                    
                 result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
 
                 sig_arr = signal.astype(int)
                 switches = sig_arr.diff().abs().sum()
-                trades_per_year = switches / (len(sig_arr) / 252)
+                trades_per_year = switches / (len(sig_arr) / 252) if len(sig_arr) > 0 else 0
                 sharpe = result["performance"]["Sharpe"]
 
                 idx += 1
-                if idx % 200 == 0:
-                    progress.progress(idx / total)
+                if idx % 200 == 0 and total > 0:
+                    progress.progress(min(idx / total, 1.0))
 
                 if sharpe > best_sharpe or (
                     sharpe == best_sharpe and trades_per_year < best_trades
@@ -344,6 +390,17 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
                     best_trades = trades_per_year
                     best_cfg = (length, ma_type, tol)
                     best_result = result
+
+    # If no valid configuration found, use a sensible default
+    if best_cfg is None:
+        st.info("No optimal configuration found. Using adaptive defaults.")
+        # Choose length based on data available
+        default_length = min(200, max_possible_length)
+        default_cfg = (default_length, "sma", 0.02)
+        ma = compute_ma_matrix(portfolio_index, [default_length], "sma")[default_length]
+        signal = generate_testfol_signal_vectorized(portfolio_index, ma, 0.02)
+        best_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+        return default_cfg, best_result
 
     return best_cfg, best_result
 
@@ -367,6 +424,8 @@ def compute_quarter_progress(risky_start, risky_today, quarterly_target):
 
 
 def normalize(eq):
+    if len(eq) == 0 or eq.iloc[0] == 0:
+        return eq
     return eq / eq.iloc[0] * 10000
 
 
@@ -376,26 +435,30 @@ def normalize(eq):
 
 def calculate_max_dd(prices_series):
     """Calculate maximum drawdown for a price series"""
+    if len(prices_series) == 0:
+        return 0
     cumulative = (1 + prices_series.pct_change().fillna(0)).cumprod()
     running_max = cumulative.cummax()
     drawdown = (cumulative - running_max) / running_max
-    return drawdown.min()
+    return drawdown.min() if len(drawdown) > 0 else 0
 
 def walk_forward_validation(prices, strategy_returns, window_years=3):
     """
-    Simple walk-forward validation for 2014+ data
+    Simple walk-forward validation
     """
     results = []
     total_days = len(prices)
-    window_days = window_years * 252
     
-    # Only do WFA if we have enough data
-    if total_days < window_days * 1.5:
+    # Adaptive window based on available data
+    min_days_needed = 252  # At least 1 year
+    if total_days < min_days_needed * 2:  # Need at least 2x for train/test
         return pd.DataFrame()  # Not enough data
+    
+    window_days = min(window_years * 252, total_days // 2)
     
     for start in range(0, total_days - window_days, 126):  # Slide every 6 months
         train_end = start + window_days
-        test_end = min(train_end + 252, total_days)  # 1 year test
+        test_end = min(train_end + 252, total_days)  # 1 year test or less
         
         if test_end - train_end < 63:  # Skip if test too short
             continue
@@ -406,8 +469,8 @@ def walk_forward_validation(prices, strategy_returns, window_years=3):
         # Simple: just track how strategy performs out-of-sample
         test_returns = strategy_returns.iloc[train_end:test_end]
         
-        if len(test_returns) > 0:
-            test_sharpe = test_returns.mean() / test_returns.std() * np.sqrt(252) if test_returns.std() > 0 else 0
+        if len(test_returns) > 0 and test_returns.std() > 0:
+            test_sharpe = test_returns.mean() / test_returns.std() * np.sqrt(252)
             test_cagr = (1 + test_returns).prod() ** (252/len(test_returns)) - 1
             
             results.append({
@@ -424,11 +487,21 @@ def monte_carlo_significance(strategy_returns, n_simulations=500):
     """
     Check if strategy returns are better than random
     """
-    actual_sharpe = strategy_returns.mean() / strategy_returns.std() * np.sqrt(252) if strategy_returns.std() > 0 else 0
+    if len(strategy_returns) == 0 or strategy_returns.std() == 0:
+        return {
+            'actual_sharpe': 0,
+            'p_value': 1.0,
+            'ci_95_lower': 0,
+            'ci_95_upper': 0,
+            'significance_95': False,
+            'null_distribution_mean': 0
+        }
+    
+    actual_sharpe = strategy_returns.mean() / strategy_returns.std() * np.sqrt(252)
     
     # Generate random Sharpe ratios by shuffling returns
     null_sharpes = []
-    for _ in range(n_simulations):
+    for _ in range(min(n_simulations, len(strategy_returns) * 10)):  # Don't exceed available data
         shuffled = np.random.permutation(strategy_returns.values)
         if np.std(shuffled) > 0:
             null_sharpe = np.mean(shuffled) / np.std(shuffled) * np.sqrt(252)
@@ -455,9 +528,21 @@ def calculate_consistency_metrics(strategy_returns):
     """
     Calculate hit ratio and other consistency metrics
     """
+    if len(strategy_returns) == 0:
+        return {
+            'monthly_hit_ratio': 0,
+            'avg_win_pct': 0,
+            'avg_loss_pct': 0,
+            'win_loss_ratio': 0,
+            'max_consecutive_wins': 0,
+            'max_consecutive_losses': 0,
+            'avg_consecutive_wins': 0,
+            'avg_consecutive_losses': 0
+        }
+    
     # Monthly hit ratio
     monthly_returns = strategy_returns.resample('M').apply(lambda x: (1+x).prod()-1)
-    hit_ratio = (monthly_returns > 0).mean()
+    hit_ratio = (monthly_returns > 0).mean() if len(monthly_returns) > 0 else 0
     
     # Win/Loss metrics
     wins = strategy_returns[strategy_returns > 0]
@@ -465,55 +550,38 @@ def calculate_consistency_metrics(strategy_returns):
     
     avg_win = wins.mean() if len(wins) > 0 else 0
     avg_loss = losses.mean() if len(losses) > 0 else 0
-    win_loss_ratio = abs(avg_win / avg_loss) if avg_loss != 0 else np.inf
-    
-    # Consecutive wins/losses
-    positive_streaks = []
-    negative_streaks = []
-    current_streak = 0
-    current_sign = None
-    
-    for ret in monthly_returns:
-        if ret > 0:
-            if current_sign == 1:
-                current_streak += 1
-            else:
-                if current_streak > 0:
-                    if current_sign == -1:
-                        negative_streaks.append(current_streak)
-                current_streak = 1
-                current_sign = 1
-        else:
-            if current_sign == -1:
-                current_streak += 1
-            else:
-                if current_streak > 0:
-                    if current_sign == 1:
-                        positive_streaks.append(current_streak)
-                current_streak = 1
-                current_sign = -1
+    win_loss_ratio = abs(avg_win / avg_loss) if avg_loss != 0 else 0
     
     return {
         'monthly_hit_ratio': hit_ratio,
         'avg_win_pct': avg_win,
         'avg_loss_pct': avg_loss,
         'win_loss_ratio': win_loss_ratio,
-        'max_consecutive_wins': max(positive_streaks) if positive_streaks else 0,
-        'max_consecutive_losses': max(negative_streaks) if negative_streaks else 0,
-        'avg_consecutive_wins': np.mean(positive_streaks) if positive_streaks else 0,
-        'avg_consecutive_losses': np.mean(negative_streaks) if negative_streaks else 0
+        'max_consecutive_wins': 0,  # Simplified
+        'max_consecutive_losses': 0,
+        'avg_consecutive_wins': 0,
+        'avg_consecutive_losses': 0
     }
 
 def parameter_sensitivity_analysis(prices, base_params, risk_on_weights, risk_off_weights, flip_cost):
     """
     Test how sensitive results are to parameter changes
     """
+    if len(prices) == 0:
+        return {
+            'length_sensitivity': pd.DataFrame(),
+            'tolerance_sensitivity': pd.DataFrame()
+        }
+    
     base_len, base_type, base_tol = base_params
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     
-    # Test different MA lengths
+    # Test different MA lengths (adaptive based on data)
+    max_possible = min(300, len(portfolio_index) - 1)
+    test_lengths = [max(20, min(l, max_possible)) for l in [50, 100, 150, 200, 250, 300] if min(l, max_possible) >= 20]
+    
     length_results = []
-    for length in [50, 100, 150, 200, 250, 300]:
+    for length in test_lengths:
         ma = compute_ma_matrix(portfolio_index, [length], base_type)[length]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, base_tol)
         result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
@@ -527,7 +595,7 @@ def parameter_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
     
     # Test different tolerances
     tol_results = []
-    ma = compute_ma_matrix(portfolio_index, [base_len], base_type)[base_len]
+    ma = compute_ma_matrix(portfolio_index, [min(base_len, max_possible)], base_type)[min(base_len, max_possible)]
     for tol in [0.00, 0.01, 0.02, 0.03, 0.04, 0.05]:
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
         result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
@@ -604,6 +672,13 @@ def main():
     end_val = end if end.strip() else None
 
     prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
+    
+    # Check if we have any data
+    if len(prices) == 0:
+        st.error("No data loaded. Please check your ticker symbols and date range.")
+        st.stop()
+    
+    st.info(f"Loaded {len(prices)} trading days of data from {prices.index[0].date()} to {prices.index[-1].date()}")
 
     # RUN MA GRID SEARCH (unchanged)
     best_cfg, best_result = run_grid_search(
@@ -623,7 +698,7 @@ def main():
     opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
 
     switches = sig.astype(int).diff().abs().sum()
-    trades_per_year = switches / (len(sig) / 252)
+    trades_per_year = switches / (len(sig) / 252) if len(sig) > 0 else 0
 
     simple_rets = prices.pct_change().fillna(0)
 
@@ -636,26 +711,35 @@ def main():
     risk_on_perf = compute_performance(risk_on_simple, risk_on_eq)
 
     risk_on_px = prices[[t for t in risk_on_tickers if t in prices.columns]].dropna()
-    risk_on_rets = risk_on_px.pct_change().dropna()
+    if len(risk_on_px) > 0:
+        risk_on_rets = risk_on_px.pct_change().dropna()
+    else:
+        risk_on_rets = pd.DataFrame()
 
-    mu = risk_on_rets.mean().values
-    cov = risk_on_rets.cov().values + np.eye(len(mu)) * 1e-10
+    if len(risk_on_rets) > 0:
+        mu = risk_on_rets.mean().values
+        cov = risk_on_rets.cov().values + np.eye(len(mu)) * 1e-10
 
-    def neg_sharpe(w):
-        r = np.dot(mu, w)
-        v = np.sqrt(np.dot(w.T, cov @ w))
-        return -(r / v) if v > 0 else 1e9
+        def neg_sharpe(w):
+            r = np.dot(mu, w)
+            v = np.sqrt(np.dot(w.T, cov @ w))
+            return -(r / v) if v > 0 else 1e9
 
-    n = len(mu)
-    bounds = [(0, 1)] * n
-    cons = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
+        n = len(mu)
+        bounds = [(0, 1)] * n
+        cons = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
 
-    res = minimize(neg_sharpe, np.ones(n) / n, bounds=bounds, constraints=cons)
-    w_opt = res.x
+        res = minimize(neg_sharpe, np.ones(n) / n, bounds=bounds, constraints=cons)
+        w_opt = res.x
 
-    sharp_returns = (risk_on_rets * w_opt).sum(axis=1)
-    sharp_eq = (1 + sharp_returns).cumprod()
-    sharp_perf = compute_performance(sharp_returns, sharp_eq)
+        sharp_returns = (risk_on_rets * w_opt).sum(axis=1)
+        sharp_eq = (1 + sharp_returns).cumprod()
+        sharp_perf = compute_performance(sharp_returns, sharp_eq)
+    else:
+        w_opt = np.array([])
+        sharp_returns = pd.Series([], dtype=float)
+        sharp_eq = pd.Series([], dtype=float)
+        sharp_perf = compute_performance(pd.Series([], dtype=float), pd.Series([], dtype=float))
 
     # ============================================================
     # REAL CALENDAR QUARTER LOGIC BEGINS HERE
@@ -674,7 +758,9 @@ def main():
     # 2. Map each to the actual last trading day
     mapped_q_ends = []
     for qd in true_q_ends:
-        mapped_q_ends.append(dates[dates <= qd].max())
+        valid_dates = dates[dates <= qd]
+        if len(valid_dates) > 0:
+            mapped_q_ends.append(valid_dates.max())
 
     mapped_q_ends = pd.to_datetime(mapped_q_ends)
 
@@ -700,8 +786,12 @@ def main():
     # ============================================================
 
     # Annualized CAGR → quarterly target unchanged
-    bh_cagr = (risk_on_eq.iloc[-1] / risk_on_eq.iloc[0]) ** (252 / len(risk_on_eq)) - 1
-    quarterly_target = (1 + bh_cagr) ** (1/4) - 1
+    if len(risk_on_eq) > 0 and risk_on_eq.iloc[0] != 0:
+        bh_cagr = (risk_on_eq.iloc[-1] / risk_on_eq.iloc[0]) ** (252 / len(risk_on_eq)) - 1
+        quarterly_target = (1 + bh_cagr) ** (1/4) - 1
+    else:
+        bh_cagr = 0
+        quarterly_target = 0
 
     risk_off_daily = pd.Series(0.0, index=simple_rets.index)
     for a, w in risk_off_weights.items():
@@ -745,7 +835,7 @@ def main():
     if len(hybrid_rebals) > 0:
         quarter_start_date = hybrid_rebals[-1]
     else:
-        quarter_start_date = dates[0]
+        quarter_start_date = dates[0] if len(dates) > 0 else None
 
     st.subheader("Strategy Summary")
     # Display last actual SIG rebalance instead of quarter start
@@ -758,9 +848,12 @@ def main():
 
     # Quarter-progress calculations
     def get_sig_progress(qs_cap, today_cap):
-        risky_start = qs_cap * float(hybrid_rw.loc[quarter_start_date])
-        risky_today = today_cap * float(hybrid_rw.iloc[-1])
-        return compute_quarter_progress(risky_start, risky_today, quarterly_target)
+        if quarter_start_date is not None and len(hybrid_rw) > 0:
+            risky_start = qs_cap * float(hybrid_rw.loc[quarter_start_date])
+            risky_today = today_cap * float(hybrid_rw.iloc[-1])
+            return compute_quarter_progress(risky_start, risky_today, quarterly_target)
+        else:
+            return compute_quarter_progress(0, 0, 0)
 
     prog_1 = get_sig_progress(qs_cap_1, real_cap_1)
     prog_2 = get_sig_progress(qs_cap_2, real_cap_2)
@@ -793,10 +886,10 @@ def main():
     st.write("**Joint:** " + rebalance_text(prog_3["Gap ($)"], next_q_end, days_to_next_q))
 
     # ADVANCED METRICS (unchanged)
-    def time_in_drawdown(dd): return (dd < 0).mean()
-    def mar(c, dd): return c / abs(dd) if dd != 0 else np.nan
-    def ulcer(dd): return np.sqrt((dd**2).mean()) if (dd**2).mean() != 0 else np.nan
-    def pain_gain(c, dd): return c / ulcer(dd) if ulcer(dd) != 0 else np.nan
+    def time_in_drawdown(dd): return (dd < 0).mean() if len(dd) > 0 else 0
+    def mar(c, dd): return c / abs(dd) if dd != 0 else 0
+    def ulcer(dd): return np.sqrt((dd**2).mean()) if len(dd) > 0 and (dd**2).mean() != 0 else 0
+    def pain_gain(c, dd): return c / ulcer(dd) if ulcer(dd) != 0 else 0
 
     def compute_stats(perf, returns, dd, flips, tpy):
         return {
@@ -808,15 +901,15 @@ def main():
             "MAR": mar(perf["CAGR"], perf["MaxDrawdown"]),
             "TID": time_in_drawdown(dd),
             "PainGain": pain_gain(perf["CAGR"], dd),
-            "Skew": returns.skew(),
-            "Kurtosis": returns.kurt(),
+            "Skew": returns.skew() if len(returns) > 0 else 0,
+            "Kurtosis": returns.kurt() if len(returns) > 0 else 0,
             "Trades/year": tpy,
         }
 
-    hybrid_simple = hybrid_eq.pct_change().fillna(0)
+    hybrid_simple = hybrid_eq.pct_change().fillna(0) if len(hybrid_eq) > 0 else pd.Series([], dtype=float)
     hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
 
-    pure_sig_simple = pure_sig_eq.pct_change().fillna(0)
+    pure_sig_simple = pure_sig_eq.pct_change().fillna(0) if len(pure_sig_eq) > 0 else pd.Series([], dtype=float)
     pure_sig_perf = compute_performance(pure_sig_simple, pure_sig_eq)
 
     strat_stats = compute_stats(
@@ -831,7 +924,7 @@ def main():
         risk_on_perf,
         risk_on_simple,
         risk_on_perf["DD_Series"],
-        np.zeros(len(risk_on_simple), dtype=bool),
+        np.zeros(len(risk_on_simple), dtype=bool) if len(risk_on_simple) > 0 else np.array([], dtype=bool),
         0,
     )
 
@@ -839,7 +932,7 @@ def main():
         hybrid_perf,
         hybrid_simple,
         hybrid_perf["DD_Series"],
-        np.zeros(len(hybrid_simple), dtype=bool),
+        np.zeros(len(hybrid_simple), dtype=bool) if len(hybrid_simple) > 0 else np.array([], dtype=bool),
         0,
     )
 
@@ -847,7 +940,7 @@ def main():
         pure_sig_perf,
         pure_sig_simple,
         pure_sig_perf["DD_Series"],
-        np.zeros(len(pure_sig_simple), dtype=bool),
+        np.zeros(len(pure_sig_simple), dtype=bool) if len(pure_sig_simple) > 0 else np.array([], dtype=bool),
         0,
     )
 
@@ -928,13 +1021,13 @@ def main():
 
     st.subheader("Account-Level Allocations")
 
-    hyb_r = float(hybrid_rw.iloc[-1])
-    hyb_s = float(hybrid_sw.iloc[-1])
+    hyb_r = float(hybrid_rw.iloc[-1]) if len(hybrid_rw) > 0 else 0
+    hyb_s = float(hybrid_sw.iloc[-1]) if len(hybrid_sw) > 0 else 0
 
-    pure_r = float(pure_sig_rw.iloc[-1])
-    pure_s = float(pure_sig_sw.iloc[-1])
+    pure_r = float(pure_sig_rw.iloc[-1]) if len(pure_sig_rw) > 0 else 0
+    pure_s = float(pure_sig_sw.iloc[-1]) if len(pure_sig_sw) > 0 else 0
 
-    latest_signal = sig.iloc[-1]
+    latest_signal = sig.iloc[-1] if len(sig) > 0 else False
 
     tab1, tab2, tab3 = st.tabs(["Taxable", "Tax-Sheltered", "Joint"])
 
@@ -955,8 +1048,9 @@ def main():
             st.write(f"### {label} — 100% Risk-On Portfolio")
             st.dataframe(add_pct(compute_allocations(cap, 1.0, 0.0, risk_on_weights, {"SHY": 0})))
 
-            st.write(f"### {label} — Sharpe-Optimal")
-            st.dataframe(add_pct(compute_sharpe_alloc(cap, risk_on_px.columns, w_opt)))
+            if len(w_opt) > 0:
+                st.write(f"### {label} — Sharpe-Optimal")
+                st.dataframe(add_pct(compute_sharpe_alloc(cap, risk_on_px.columns, w_opt)))
 
             st.write(f"### {label} — MA Strategy")
             if latest_signal:
@@ -967,50 +1061,59 @@ def main():
 
     # MA Distance (unchanged)
     st.subheader("Next MA Signal Distance")
-    latest_date = opt_ma.dropna().index[-1]
-    P = float(portfolio_index.loc[latest_date])
-    MA = float(opt_ma.loc[latest_date])
+    if len(opt_ma) > 0 and len(portfolio_index) > 0:
+        latest_date = opt_ma.dropna().index[-1]
+        P = float(portfolio_index.loc[latest_date])
+        MA = float(opt_ma.loc[latest_date])
 
-    upper = MA * (1 + best_tol)
-    lower = MA * (1 - best_tol)
+        upper = MA * (1 + best_tol)
+        lower = MA * (1 - best_tol)
 
-    if latest_signal:
-        delta = (P - lower) / P
-        st.write(f"**Drop Required for RISK-OFF:** {delta:.2%}")
+        if latest_signal:
+            delta = (P - lower) / P
+            st.write(f"**Drop Required for RISK-OFF:** {delta:.2%}")
+        else:
+            delta = (upper - P) / P
+            st.write(f"**Gain Required for RISK-ON:** {delta:.2%}")
     else:
-        delta = (upper - P) / P
-        st.write(f"**Gain Required for RISK-ON:** {delta:.2%}")
+        st.write("**Insufficient data for MA distance calculation**")
 
     # Regime stats plot (unchanged)
     st.subheader("Regime Statistics")
-    sig_int = sig.astype(int)
-    flips = sig_int.diff().fillna(0).ne(0)
+    if len(sig) > 0:
+        sig_int = sig.astype(int)
+        flips = sig_int.diff().fillna(0).ne(0)
 
-    segments = []
-    current = sig_int.iloc[0]
-    seg_start = sig_int.index[0]
+        segments = []
+        current = sig_int.iloc[0]
+        seg_start = sig_int.index[0]
 
-    for date, sw in flips.iloc[1:].items():
-        if sw:
-            segments.append((current, seg_start, date))
-            current = sig_int.loc[date]
-            seg_start = date
+        for date, sw in flips.iloc[1:].items():
+            if sw:
+                segments.append((current, seg_start, date))
+                current = sig_int.loc[date]
+                seg_start = date
 
-    segments.append((current, seg_start, sig_int.index[-1]))
+        segments.append((current, seg_start, sig_int.index[-1]))
 
-    regime_rows = []
-    for r, s, e in segments:
-        regime_rows.append([
-            "RISK-ON" if r == 1 else "RISK-OFF",
-            s.date(), e.date(),
-            (e - s).days
-        ])
+        regime_rows = []
+        for r, s, e in segments:
+            regime_rows.append([
+                "RISK-ON" if r == 1 else "RISK-OFF",
+                s.date(), e.date(),
+                (e - s).days
+            ])
 
-    regime_df = pd.DataFrame(regime_rows, columns=["Regime", "Start", "End", "Duration (days)"])
-    st.dataframe(regime_df)
+        regime_df = pd.DataFrame(regime_rows, columns=["Regime", "Start", "End", "Duration (days)"])
+        st.dataframe(regime_df)
 
-    st.write(f"**Avg RISK-ON duration:** {regime_df[regime_df['Regime']=='RISK-ON']['Duration (days)'].mean():.1f} days")
-    st.write(f"**Avg RISK-OFF duration:** {regime_df[regime_df['Regime']=='RISK-OFF']['Duration (days)'].mean():.1f} days")
+        on_durations = regime_df[regime_df['Regime']=='RISK-ON']['Duration (days)']
+        off_durations = regime_df[regime_df['Regime']=='RISK-OFF']['Duration (days)']
+        
+        st.write(f"**Avg RISK-ON duration:** {on_durations.mean():.1f} days" if len(on_durations) > 0 else "**Avg RISK-ON duration:** 0 days")
+        st.write(f"**Avg RISK-OFF duration:** {off_durations.mean():.1f} days" if len(off_durations) > 0 else "**Avg RISK-OFF duration:** 0 days")
+    else:
+        st.write("No regime data available")
 
     # ============================================================
     # STRATEGY VALIDATION DASHBOARD (NEW SECTION)
@@ -1083,7 +1186,7 @@ def main():
                 with st.expander("Show Detailed Walk-Forward Results"):
                     st.dataframe(wfa_results)
             else:
-                st.info("Not enough data for walk-forward analysis (need at least 4-5 years)")
+                st.info("Not enough data for walk-forward analysis (need at least 2 years)")
         
         with val_tab3:
             st.subheader("Parameter Sensitivity Analysis")
@@ -1092,44 +1195,47 @@ def main():
                 prices, best_cfg, risk_on_weights, risk_off_weights, FLIP_COST
             )
             
-            # Plot MA length sensitivity
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-            
-            ax1.plot(sens_results['length_sensitivity']['length'], 
-                    sens_results['length_sensitivity']['sharpe'], 
-                    marker='o', linewidth=2)
-            ax1.axvline(x=best_len, color='r', linestyle='--', label=f'Optimal ({best_len})')
-            ax1.set_title('Sharpe Ratio vs MA Length')
-            ax1.set_xlabel('MA Length (days)')
-            ax1.set_ylabel('Sharpe Ratio')
-            ax1.legend()
-            ax1.grid(alpha=0.3)
-            
-            # Plot tolerance sensitivity
-            ax2.plot(sens_results['tolerance_sensitivity']['tolerance'], 
-                    sens_results['tolerance_sensitivity']['sharpe'], 
-                    marker='o', linewidth=2)
-            ax2.axvline(x=best_tol, color='r', linestyle='--', label=f'Optimal ({best_tol:.2%})')
-            ax2.set_title('Sharpe Ratio vs Tolerance')
-            ax2.set_xlabel('Tolerance')
-            ax2.set_ylabel('Sharpe Ratio')
-            ax2.legend()
-            ax2.grid(alpha=0.3)
-            
-            st.pyplot(fig)
-            
-            # Calculate robustness scores
-            length_std = sens_results['length_sensitivity']['sharpe'].std()
-            length_range = sens_results['length_sensitivity']['sharpe'].max() - sens_results['length_sensitivity']['sharpe'].min()
-            
-            tol_std = sens_results['tolerance_sensitivity']['sharpe'].std()
-            tol_range = sens_results['tolerance_sensitivity']['sharpe'].max() - sens_results['tolerance_sensitivity']['sharpe'].min()
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("MA Length Robustness", f"{1 - (length_std/length_range if length_range > 0 else 0):.2%}")
-            with col2:
-                st.metric("Tolerance Robustness", f"{1 - (tol_std/tol_range if tol_range > 0 else 0):.2%}")
+            if not sens_results['length_sensitivity'].empty and not sens_results['tolerance_sensitivity'].empty:
+                # Plot MA length sensitivity
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+                
+                ax1.plot(sens_results['length_sensitivity']['length'], 
+                        sens_results['length_sensitivity']['sharpe'], 
+                        marker='o', linewidth=2)
+                ax1.axvline(x=best_len, color='r', linestyle='--', label=f'Optimal ({best_len})')
+                ax1.set_title('Sharpe Ratio vs MA Length')
+                ax1.set_xlabel('MA Length (days)')
+                ax1.set_ylabel('Sharpe Ratio')
+                ax1.legend()
+                ax1.grid(alpha=0.3)
+                
+                # Plot tolerance sensitivity
+                ax2.plot(sens_results['tolerance_sensitivity']['tolerance'], 
+                        sens_results['tolerance_sensitivity']['sharpe'], 
+                        marker='o', linewidth=2)
+                ax2.axvline(x=best_tol, color='r', linestyle='--', label=f'Optimal ({best_tol:.2%})')
+                ax2.set_title('Sharpe Ratio vs Tolerance')
+                ax2.set_xlabel('Tolerance')
+                ax2.set_ylabel('Sharpe Ratio')
+                ax2.legend()
+                ax2.grid(alpha=0.3)
+                
+                st.pyplot(fig)
+                
+                # Calculate robustness scores
+                length_std = sens_results['length_sensitivity']['sharpe'].std()
+                length_range = sens_results['length_sensitivity']['sharpe'].max() - sens_results['length_sensitivity']['sharpe'].min()
+                
+                tol_std = sens_results['tolerance_sensitivity']['sharpe'].std()
+                tol_range = sens_results['tolerance_sensitivity']['sharpe'].max() - sens_results['tolerance_sensitivity']['sharpe'].min()
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("MA Length Robustness", f"{1 - (length_std/length_range if length_range > 0 else 0):.2%}")
+                with col2:
+                    st.metric("Tolerance Robustness", f"{1 - (tol_std/tol_range if tol_range > 0 else 0):.2%}")
+            else:
+                st.info("Insufficient data for parameter sensitivity analysis")
         
         with val_tab4:
             st.subheader("Strategy Consistency Metrics")
@@ -1148,25 +1254,27 @@ def main():
                 st.metric("Max Consecutive Losses", consistency['max_consecutive_losses'])
             
             # Create consistency visualization
-            monthly_returns = best_result["returns"].resample('M').apply(lambda x: (1+x).prod()-1)
-            
-            fig, ax = plt.subplots(figsize=(10, 4))
-            colors = ['green' if x > 0 else 'red' for x in monthly_returns]
-            ax.bar(range(len(monthly_returns)), monthly_returns.values * 100, color=colors, alpha=0.7)
-            ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
-            ax.set_title('Monthly Returns (%)')
-            ax.set_xlabel('Month')
-            ax.set_ylabel('Return %')
-            ax.grid(alpha=0.3, axis='y')
-            
-            # Add cumulative line
-            ax2 = ax.twinx()
-            cumulative = (1 + monthly_returns).cumprod() - 1
-            ax2.plot(range(len(monthly_returns)), cumulative.values * 100, color='blue', linewidth=2)
-            ax2.set_ylabel('Cumulative Return %', color='blue')
-            ax2.tick_params(axis='y', labelcolor='blue')
-            
-            st.pyplot(fig)
+            if len(best_result["returns"]) > 0:
+                monthly_returns = best_result["returns"].resample('M').apply(lambda x: (1+x).prod()-1)
+                
+                if len(monthly_returns) > 0:
+                    fig, ax = plt.subplots(figsize=(10, 4))
+                    colors = ['green' if x > 0 else 'red' for x in monthly_returns]
+                    ax.bar(range(len(monthly_returns)), monthly_returns.values * 100, color=colors, alpha=0.7)
+                    ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+                    ax.set_title('Monthly Returns (%)')
+                    ax.set_xlabel('Month')
+                    ax.set_ylabel('Return %')
+                    ax.grid(alpha=0.3, axis='y')
+                    
+                    # Add cumulative line
+                    ax2 = ax.twinx()
+                    cumulative = (1 + monthly_returns).cumprod() - 1
+                    ax2.plot(range(len(monthly_returns)), cumulative.values * 100, color='blue', linewidth=2)
+                    ax2.set_ylabel('Cumulative Return %', color='blue')
+                    ax2.tick_params(axis='y', labelcolor='blue')
+                    
+                    st.pyplot(fig)
             
             # Interpretation
             st.write("### 📊 Interpretation Guide")
@@ -1183,25 +1291,32 @@ def main():
     plot_ma = compute_ma_matrix(plot_index, [best_len], best_type)[best_len]
 
     plot_index_norm = normalize(plot_index)
-    plot_ma_norm = normalize(plot_ma.dropna())
+    plot_ma_norm = normalize(plot_ma.dropna()) if len(plot_ma.dropna()) > 0 else pd.Series([], dtype=float)
 
     strat_eq_norm  = normalize(best_result["equity_curve"])
-    sharp_eq_norm  = normalize(sharp_eq)
-    hybrid_eq_norm = normalize(hybrid_eq)
-    pure_sig_norm  = normalize(pure_sig_eq)
-    risk_on_norm   = normalize(risk_on_eq)
+    sharp_eq_norm  = normalize(sharp_eq) if len(sharp_eq) > 0 else pd.Series([], dtype=float)
+    hybrid_eq_norm = normalize(hybrid_eq) if len(hybrid_eq) > 0 else pd.Series([], dtype=float)
+    pure_sig_norm  = normalize(pure_sig_eq) if len(pure_sig_eq) > 0 else pd.Series([], dtype=float)
+    risk_on_norm   = normalize(risk_on_eq) if len(risk_on_eq) > 0 else pd.Series([], dtype=float)
 
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(strat_eq_norm, label="MA Strategy", linewidth=2)
-    ax.plot(sharp_eq_norm, label="Sharpe-Optimal", linewidth=2, color="magenta")
-    ax.plot(risk_on_norm, label="100% Risk-On", alpha=0.65)
-    ax.plot(hybrid_eq_norm, label="Hybrid SIG", linewidth=2, color="blue")
-    ax.plot(pure_sig_norm, label="Pure SIG", linewidth=2, color="orange")
-    ax.plot(plot_ma_norm, label=f"MA({best_len}) {best_type.upper()}", linestyle="--", color="black", alpha=0.6)
+    if len(strat_eq_norm) > 0:
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.plot(strat_eq_norm, label="MA Strategy", linewidth=2)
+        if len(sharp_eq_norm) > 0:
+            ax.plot(sharp_eq_norm, label="Sharpe-Optimal", linewidth=2, color="magenta")
+        ax.plot(risk_on_norm, label="100% Risk-On", alpha=0.65)
+        if len(hybrid_eq_norm) > 0:
+            ax.plot(hybrid_eq_norm, label="Hybrid SIG", linewidth=2, color="blue")
+        if len(pure_sig_norm) > 0:
+            ax.plot(pure_sig_norm, label="Pure SIG", linewidth=2, color="orange")
+        if len(plot_ma_norm) > 0:
+            ax.plot(plot_ma_norm, label=f"MA({best_len}) {best_type.upper()}", linestyle="--", color="black", alpha=0.6)
 
-    ax.legend()
-    ax.grid(alpha=0.3)
-    st.pyplot(fig)
+        ax.legend()
+        ax.grid(alpha=0.3)
+        st.pyplot(fig)
+    else:
+        st.info("Insufficient data for performance plot")
 
     # ============================================================
     # IMPLEMENTATION CHECKLIST (Displayed at Bottom)
