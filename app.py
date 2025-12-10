@@ -873,6 +873,7 @@ def main():
 - Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
 - At each rebalance, re-evaluate the Sharpe-optimal portfolio weighting.
 
+Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=9TIGHucZuaJ
 
 ---
     """)
