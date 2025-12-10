@@ -868,11 +868,11 @@ def main():
 
 ## **Implementation Checklist**
 
-- Rebalance whenever the MA regime flips.
+- Rotate 100% of portfolio to treasury sleeve whenever the MA regime flips.
 - At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
 - Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
-- Do NOT rebalance intra-quarter unless the MA signal flips.
-- Let weights drift naturally day by day—this is part of the model.
+- At each rebalance, re-evaluate the Sharpe-optimal portfolio weighting.
+
 
 ---
     """)
