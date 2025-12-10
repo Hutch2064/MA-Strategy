@@ -529,7 +529,7 @@ def build_email_text(outputs):
     t3 = prog["Joint"]
 
     body = f"""
-Current MA Regime: {regime}
+Current Regime: {regime}
 
 Next Rebalance (Calendar Quarter-End): {next_reb}  ({days} days from today)
 
