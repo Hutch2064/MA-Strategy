@@ -528,7 +528,7 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
     
     # Test different MA lengths (using MA Strategy backtest, not Hybrid SIG)
     length_results = []
-    for L in range(63,301):
+    for L in range(64,301,2):
         if L > len(portfolio_index) * 0.5:  # Don't use MA longer than 50% of data
             continue
             
@@ -580,9 +580,9 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     
     # Fixed parameter grid
-    ma_lengths = list(range(63, 301))
+    ma_lengths = list(range(64, 301,2))
     ma_types = ["sma", "ema"]
-    tolerances = [0.01, 0.02, 0.03, 0.04]
+    tolerances = range(.01,.05,.01):
     
     # Generate all combinations
     param_combinations = []
