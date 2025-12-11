@@ -26,7 +26,7 @@ RISK_OFF_WEIGHTS = {
     "SHY": 1.0,
 }
 
-FLIP_COST = 0.0015
+FLIP_COST = 0.00
 
 # Starting weights inside the SIG engine (unchanged)
 START_RISKY = 0.70
@@ -167,8 +167,8 @@ def run_sig_engine(
     pure_sig_sw=None,
     flip_cost=FLIP_COST,
     quarter_end_dates=None,   # <-- must be mapped_q_ends
-    quarterly_multiplier=1.0,  # NEW: 2x for Pure SIG, 2x for Hybrid SIG (quarterly part)
-    ma_flip_multiplier=2.0     # NEW: 4x for Hybrid SIG when MA flips
+    quarterly_multiplier=2.0,  # NEW: 2x for Pure SIG, 2x for Hybrid SIG (quarterly part)
+    ma_flip_multiplier=4.0     # NEW: 4x for Hybrid SIG when MA flips
 ):
 
     dates = risk_on_returns.index
@@ -337,7 +337,7 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
     }
 
 
-def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=2.0):
+def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=4.0):
     simple = prices.pct_change().fillna(0)
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
@@ -346,7 +346,7 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_fl
     flip_mask = sig_arr.diff().abs() == 1
 
     # MA flip costs with 4x multiplier for MA Strategy
-    flip_costs = np.where(flip_mask, -flip_cost * ma_flip_multiplier, 2.0)
+    flip_costs = np.where(flip_mask, -flip_cost * ma_flip_multiplier, 0.0)
     strat_adj = strategy_simple + flip_costs
 
     eq = (1 + strat_adj).cumprod()
@@ -598,7 +598,7 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
         
         # Use MA Strategy backtest (NOT Hybrid SIG!)
         result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
-                         flip_cost, ma_flip_multiplier=2.0)
+                         flip_cost, ma_flip_multiplier=4.0)
         perf = result["performance"]
         
         length_results.append({
@@ -618,7 +618,7 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
         
         # Use MA Strategy backtest (NOT Hybrid SIG!)
         result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
-                         flip_cost, ma_flip_multiplier=2.0)
+                         flip_cost, ma_flip_multiplier=4.0)
         perf = result["performance"]
         
         tol_results.append({
@@ -649,7 +649,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
         ma = compute_ma_matrix(portfolio_index, [best_params[0]], best_params[1])[best_params[0]]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, best_params[2])
         result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
-                         flip_cost, ma_flip_multiplier=2.0)
+                         flip_cost, ma_flip_multiplier=4.0)
         
         return best_params, result, {
             "method": "in_sample_fallback",
@@ -685,14 +685,14 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
             
             # Backtest on TEST data only (this is what we optimize for)
             test_result = backtest(test_prices, signal_test, risk_on_weights, 
-                                 risk_off_weights, flip_cost, ma_flip_multiplier=2.0)
+                                 risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
             
             oos_sharpe = test_result["performance"]["Sharpe"]
             
             # Also calculate in-sample for reference
             signal_train = generate_testfol_signal_vectorized(portfolio_index_train, ma_train, tol)
             train_result = backtest(train_prices, signal_train, risk_on_weights,
-                                  risk_off_weights, flip_cost, ma_flip_multiplier=2.0)
+                                  risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
             train_sharpe = train_result["performance"]["Sharpe"]
             
             # Store additional metrics
@@ -731,7 +731,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     
     # Final backtest on full data
     final_result = backtest(prices, signal_full, risk_on_weights, risk_off_weights,
-                           flip_cost, ma_flip_multiplier=2.0)
+                           flip_cost, ma_flip_multiplier=4.0)
     
     # Calculate OOS performance metrics
     best_oos_sharpe = -study.best_value  # Convert back from negative
@@ -758,7 +758,7 @@ def _optimize_in_sample(prices, portfolio_index, risk_on_weights, risk_off_weigh
         ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
         result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
-                         flip_cost, ma_flip_multiplier=2.0)
+                         flip_cost, ma_flip_multiplier=4.0)
         sharpe = result["performance"]["Sharpe"]
         
         if sharpe > best_sharpe:
@@ -861,7 +861,7 @@ def main():
             sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, best_tol)
         
             # Run backtest with default parameters
-            best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=2.0)
+            best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=4.0)
             optimization_summary = {
                 'selected_params': (best_len, best_type, best_tol),
                 'method': 'fallback_defaults',
@@ -893,7 +893,7 @@ def main():
                 ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
                 signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
                 result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
-                             flip_cost, ma_flip_multiplier=2.0)
+                             flip_cost, ma_flip_multiplier=4.0)
                 sharpe = result["performance"]["Sharpe"]
             
                 if sharpe > best_sharpe:
@@ -908,7 +908,7 @@ def main():
         portfolio_index = build_portfolio_index(prices, risk_on_weights)
         opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
         sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, best_tol)
-        best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=2.0)
+        best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=4.0)
     
         optimization_summary = {
             'selected_params': (best_len, best_type, best_tol),
