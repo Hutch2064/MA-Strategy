@@ -376,84 +376,294 @@ def buy_and_hold_with_rebalance(prices, weights_dict, flip_cost, quarter_end_dat
 
 
 # ============================================================
-# GRID SEARCH — ADAPTIVE VERSION (works with any data length)
+# WALK-FORWARD OPTIMIZATION (REPLACES GRID SEARCH)
 # ============================================================
 
-def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
+def _simple_optimization_with_holdout(prices, risk_on_weights, risk_off_weights, flip_cost, holdout_years=2):
+    """
+    Simple train-test split for very limited data
+    """
+    dates = prices.index
+    holdout_days = int(holdout_years * 252)
+    
+    if len(prices) < holdout_days * 2:
+        # Not enough for holdout, use all data
+        return _robust_simple_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
+    
+    # Split: older data for training, recent for testing
+    split_idx = -holdout_days
+    train_prices = prices.iloc[:split_idx]
+    test_prices = prices.iloc[split_idx:]
+    
+    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+    train_portfolio = portfolio_index.iloc[:split_idx]
+    
+    # Optimize on training
     best_sharpe = -1e9
-    best_cfg = None
-    best_result = None
-    best_trades = np.inf
+    best_params = (200, "sma", 0.02)
+    best_train_result = None
+    
+    for L in range(100, 253, 25):  # Sparse grid for speed
+        for ma_type in ["sma", "ema"]:
+            ma = compute_ma_matrix(train_portfolio, [L], ma_type)[L]
+            signal = generate_testfol_signal_vectorized(train_portfolio, ma, 0.02)
+            
+            if signal.sum() == 0:
+                continue
+            
+            result = backtest(train_prices, signal, risk_on_weights, 
+                             risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
+            sharpe = result["performance"]["Sharpe"]
+            
+            if sharpe > best_sharpe:
+                best_sharpe = sharpe
+                best_params = (L, ma_type, 0.02)
+                best_train_result = result
+    
+    # Test on holdout
+    L, ma_type, tol = best_params
+    full_ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
+    full_signal = generate_testfol_signal_vectorized(portfolio_index, full_ma, tol)
+    
+    # Use full signal for backtest
+    final_result = backtest(prices, full_signal, risk_on_weights, 
+                           risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
+    
+    # Create params_df for consistency
+    params_df = pd.DataFrame([{
+        'period': 0,
+        'test_start': test_prices.index[0].date(),
+        'test_end': test_prices.index[-1].date(),
+        'train_days': len(train_prices),
+        'test_days': len(test_prices),
+        'ma_length': L,
+        'ma_type': ma_type,
+        'train_sharpe': best_sharpe,
+        'holdout_sharpe': final_result["performance"]["Sharpe"]
+    }])
+    
+    return best_params, final_result, params_df
 
+
+def _robust_simple_optimization(prices, risk_on_weights, risk_off_weights, flip_cost):
+    """
+    Most robust fallback: simple optimization with cross-validation
+    """
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     
-    # ADAPTIVE: Adjust MA lengths based on available data
-    max_possible_length = len(portfolio_index) - 1
-    if max_possible_length < 21:
-        # If we have very little data, use simple defaults
-        st.info(f"Limited data ({len(portfolio_index)} points). Using 20-day SMA.")
-        default_cfg = (20, "sma", 0.02)
-        ma = compute_ma_matrix(portfolio_index, [20], "sma")[20]
-        signal = generate_testfol_signal_vectorized(portfolio_index, ma, 0.02)
-        default_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
-        return default_cfg, default_result
+    # Use k-fold cross-validation for robustness
+    k = min(5, len(prices) // 252)  # At least 1 year per fold
+    if k < 2:
+        k = 2
     
-    # Use reasonable MA lengths based on available data
-    max_length = min(252, max_possible_length)
-    min_length = max(100, int(max_length * 0.1))  # At least 10% of max length, min 10
+    fold_size = len(prices) // k
+    cv_scores = {}
     
-    lengths = list(range(min_length, max_length + 1, max(1, (max_length - min_length) // 20)))
-    types = ["sma", "ema"]
-    tolerances = np.arange(0.0, .0501, .002)
-
-    progress = st.progress(0.0)
-    total = len(lengths) * len(types) * len(tolerances)
-    idx = 0
-
-    ma_cache = {t: compute_ma_matrix(portfolio_index, lengths, t) for t in types}
-
-    for ma_type in types:
-        for length in lengths:
-            ma = ma_cache[ma_type][length]
-            for tol in tolerances:
-                signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+    for L in range(100, 253, 25):  # Sparse grid
+        for ma_type in ["sma", "ema"]:
+            sharpe_scores = []
+            
+            for fold in range(k):
+                test_start = fold * fold_size
+                test_end = (fold + 1) * fold_size if fold < k - 1 else len(prices)
                 
-                # Skip if signal has no valid entries
-                if signal.sum() == 0:
-                    idx += 1
+                # Train on other folds
+                train_indices = list(range(0, test_start)) + list(range(test_end, len(prices)))
+                if len(train_indices) < 180:  # Minimum training data
                     continue
-                    
-                result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
+                
+                train_portfolio = portfolio_index.iloc[train_indices]
+                train_prices = prices.iloc[train_indices]
+                
+                ma = compute_ma_matrix(train_portfolio, [L], ma_type)[L]
+                signal = generate_testfol_signal_vectorized(train_portfolio, ma, 0.02)
+                
+                if signal.sum() == 0:
+                    continue
+                
+                result = backtest(train_prices, signal, risk_on_weights, 
+                                 risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
+                sharpe_scores.append(result["performance"]["Sharpe"])
+            
+            if sharpe_scores:
+                cv_scores[(L, ma_type)] = np.mean(sharpe_scores)
+    
+    # Select best parameters
+    if cv_scores:
+        best_key = max(cv_scores.items(), key=lambda x: x[1])[0]
+        L, ma_type = best_key
+        best_params = (L, ma_type, 0.02)
+    else:
+        best_params = (200, "sma", 0.02)  # Default fallback
+    
+    # Final backtest with selected parameters
+    L, ma_type, tol = best_params
+    ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
+    signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+    final_result = backtest(prices, signal, risk_on_weights, risk_off_weights,
+                           flip_cost, ma_flip_multiplier=4.0)
+    
+    return best_params, final_result, None
 
-                sig_arr = signal.astype(int)
-                switches = sig_arr.diff().abs().sum()
-                trades_per_year = switches / (len(sig_arr) / 252) if len(sig_arr) > 0 else 0
+
+def adaptive_wfa_optimization(prices, risk_on_weights, risk_off_weights, flip_cost):
+    """
+    Adaptive walk-forward optimization that handles limited data
+    - Adjusts lookback based on available data
+    - Uses expanding window when data is scarce
+    - Includes robustness checks for short histories
+    """
+    
+    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+    dates = prices.index
+    total_years = len(prices) / 252
+    
+    st.info(f"Data length: {len(prices)} days (~{total_years:.1f} years)")
+    
+    # ADAPTIVE SETTINGS BASED ON DATA LENGTH
+    if total_years < 5:
+        # Very limited data: Use simple optimization with holdout
+        return _simple_optimization_with_holdout(
+            prices, risk_on_weights, risk_off_weights, flip_cost,
+            holdout_years=min(2, total_years/2)
+        )
+    
+    elif total_years < 8:
+        # Limited data: Use shorter lookback and fewer optimizations
+        lookback_years = max(2, int(total_years * 0.4))  # 40% of data for training
+        test_period_months = 6  # Test for 6 months instead of 3
+    else:
+        # Adequate data: Standard WFA
+        lookback_years = 3
+        test_period_months = 3
+    
+    # Generate optimization dates based on available data
+    if total_years < 6:
+        # Fewer optimizations for limited data
+        opt_dates = pd.date_range(start=dates[0] + pd.DateOffset(years=lookback_years), 
+                                 end=dates[-1], freq='6M')  # Every 6 months
+    else:
+        # Standard quarterly optimization
+        opt_dates = pd.date_range(start=dates[0] + pd.DateOffset(years=lookback_years), 
+                                 end=dates[-1], freq='Q')
+    
+    opt_dates = [d for d in opt_dates if d in dates]
+    
+    if len(opt_dates) < 3:
+        st.warning(f"Only {len(opt_dates)} optimization periods. Using simplified approach.")
+        return _robust_simple_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
+    
+    # WFA with adaptive parameters
+    selected_params = []
+    all_signals = pd.Series(False, index=dates)
+    
+    for i in range(len(opt_dates) - 1):
+        test_start = opt_dates[i]
+        test_end = opt_dates[i + 1]
+        
+        # Training: expanding or rolling window based on data
+        if total_years < 7:
+            # Expanding window for very limited data
+            train_start = dates[0]
+        else:
+            # Rolling window
+            train_start = test_start - pd.DateOffset(years=lookback_years)
+        
+        train_mask = (dates >= train_start) & (dates < test_start)
+        test_mask = (dates >= test_start) & (dates < test_end)
+        
+        if sum(train_mask) < 180 or sum(test_mask) < 20:  # Minimum days
+            continue
+        
+        # 1. OPTIMIZE ON TRAINING DATA
+        train_portfolio = portfolio_index[train_mask]
+        train_prices = prices[train_mask]
+        
+        best_sharpe = -1e9
+        best_params = (200, "sma", 0.02)  # Sensible default
+        
+        # Adaptive MA testing based on data available
+        if len(train_prices) < 500:  # Less than 2 years
+            ma_lengths = [100, 150, 200, 250]
+        elif len(train_prices) < 1000:  # 2-4 years
+            ma_lengths = range(100, 253, 25)
+        else:
+            ma_lengths = range(100, 253, 10)  # Full grid
+        
+        for L in ma_lengths:
+            for ma_type in ["sma", "ema"]:
+                ma = compute_ma_matrix(train_portfolio, [L], ma_type)[L]
+                signal = generate_testfol_signal_vectorized(train_portfolio, ma, 0.02)
+                
+                if signal.sum() == 0:
+                    continue
+                
+                result = backtest(train_prices, signal, risk_on_weights, 
+                                 risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
                 sharpe = result["performance"]["Sharpe"]
-
-                idx += 1
-                if idx % 200 == 0 and total > 0:
-                    progress.progress(min(idx / total, 1.0))
-
-                if sharpe > best_sharpe or (
-                    sharpe == best_sharpe and trades_per_year < best_trades
-                ):
+                
+                # Penalize extreme parameters with limited data
+                if len(train_prices) < 1000 and L > 200:
+                    sharpe *= 0.9  # Penalize very long MAs with short data
+                
+                if sharpe > best_sharpe:
                     best_sharpe = sharpe
-                    best_trades = trades_per_year
-                    best_cfg = (length, ma_type, tol)
-                    best_result = result
+                    best_params = (L, ma_type, 0.02)
+        
+        # 2. APPLY TO TEST PERIOD
+        L, ma_type, tol = best_params
+        full_ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
+        full_signal = generate_testfol_signal_vectorized(portfolio_index, full_ma, tol)
+        
+        all_signals.loc[test_mask] = full_signal.loc[test_mask]
+        
+        selected_params.append({
+            'period': i,
+            'test_start': test_start.date(),
+            'test_end': test_end.date(),
+            'train_days': sum(train_mask),
+            'test_days': sum(test_mask),
+            'ma_length': L,
+            'ma_type': ma_type,
+            'train_sharpe': best_sharpe
+        })
+    
+    # 3. FALLBACK IF WFA FAILED
+    if len(selected_params) == 0 or all_signals.sum() == 0:
+        return _robust_simple_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
+    
+    # 4. FINAL BACKTEST
+    wfa_result = backtest(prices, all_signals, risk_on_weights, 
+                         risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
+    
+    # 5. SELECT FINAL PARAMETERS (weighted by test period length)
+    params_df = pd.DataFrame(selected_params)
+    
+    # Weight by test period duration (longer test = more weight)
+    weights = params_df['test_days'] / params_df['test_days'].sum()
+    
+    best_length = int(np.average(params_df['ma_length'], weights=weights))
+    best_type = params_df['ma_type'].mode().iloc[0]
+    best_tol = 0.02
+    
+    return (best_length, best_type, best_tol), wfa_result, params_df
 
-    # If no valid configuration found, use a sensible default
-    if best_cfg is None:
-        st.info("No optimal configuration found. Using adaptive defaults.")
-        # Choose length based on data available
-        default_length = min(200, max_possible_length)
-        default_cfg = (default_length, "sma", 0.02)
-        ma = compute_ma_matrix(portfolio_index, [default_length], "sma")[default_length]
-        signal = generate_testfol_signal_vectorized(portfolio_index, ma, 0.02)
-        best_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
-        return default_cfg, best_result
 
-    return best_cfg, best_result
+def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
+    """
+    Main optimization function - uses adaptive WFA based on data length
+    """
+    # Check data length and use appropriate method
+    total_days = len(prices)
+    total_years = total_days / 252
+    
+    if total_years >= 6:
+        # Use full WFA for adequate data
+        return adaptive_wfa_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
+    else:
+        # Use robust methods for limited data
+        st.warning(f"Limited data ({total_years:.1f} years). Using robust optimization.")
+        return _robust_simple_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
 
 
 # ============================================================
@@ -731,8 +941,8 @@ def main():
     
     st.info(f"Loaded {len(prices)} trading days of data from {prices.index[0].date()} to {prices.index[-1].date()}")
 
-    # RUN MA GRID SEARCH (4x flip costs for MA Strategy)
-    best_cfg, best_result = run_grid_search(
+    # RUN ADAPTIVE WALK-FORWARD OPTIMIZATION
+    best_cfg, best_result, wfa_params_df = run_grid_search(
         prices, risk_on_weights, risk_off_weights, FLIP_COST
     )
     best_len, best_type, best_tol = best_cfg
@@ -743,7 +953,35 @@ def main():
     current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
     st.subheader(f"Current MA Regime: {current_regime}")
+    
+    # Display optimization method info
+    total_years = len(prices) / 252
+    if total_years >= 8:
+        st.write(f"**Optimization Method:** Full Walk-Forward Analysis (3-year lookback)")
+    elif total_years >= 5:
+        st.write(f"**Optimization Method:** Adaptive WFA ({int(total_years*0.4)}-year lookback)")
+    else:
+        st.write(f"**Optimization Method:** Robust Cross-Validation (limited data)")
+    
     st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
+    
+    # Show WFA details if available
+    if wfa_params_df is not None and len(wfa_params_df) > 0:
+        with st.expander("View Walk-Forward Optimization Details"):
+            st.dataframe(wfa_params_df)
+            
+            # Plot MA length evolution
+            if len(wfa_params_df) > 1:
+                fig, ax = plt.subplots(figsize=(10, 3))
+                ax.plot(range(len(wfa_params_df)), wfa_params_df['ma_length'], 'o-', linewidth=1.5)
+                ax.axhline(y=best_len, color='r', linestyle='--', alpha=0.7, 
+                          label=f'Selected MA: {best_len}')
+                ax.set_title('MA Length Selection Over Time (Walk-Forward)')
+                ax.set_xlabel('Optimization Period')
+                ax.set_ylabel('MA Length')
+                ax.legend()
+                ax.grid(alpha=0.3)
+                st.pyplot(fig)
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
@@ -867,7 +1105,7 @@ def main():
         risk_on_simple,
         risk_off_daily,
         quarterly_target,
-        sig,
+        sig,  # <-- CRITICAL: Uses the SAME WFA-optimized signal
         pure_sig_rw=pure_sig_rw,
         pure_sig_sw=pure_sig_sw,
         quarter_end_dates=mapped_q_ends,
