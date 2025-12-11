@@ -322,7 +322,7 @@ def robust_ma_validation(prices, risk_on_weights, risk_off_weights, flip_cost,
         # Academic penalty: balance performance and stability
         robustness_penalty = 1.0 / (1.0 + scores['std_sharpe'])
         length_penalty = 1.0 - (L / 500)  # Penalize very long MAs (>250 days)
-        adjusted_score = scores['mean_sharpe'] * robustness_penalty * length_penalty
+        adjusted_score = scores['mean_sharpe'] 
         
         if adjusted_score > best_score:
             best_score = adjusted_score
