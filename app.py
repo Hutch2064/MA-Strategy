@@ -591,13 +591,12 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
             for tol in tolerances:
                 param_combinations.append((L, ma_type, tol))
     
-    # Need at least 3 years of data for proper train/test split
+    # Need at least 2 years of data for proper train/test split
     total_days = len(prices)
-    min_days_for_test = 252 * 3  # 3 years
+    min_days_total = 504  # 2 years total minimum
     
-    if total_days < min_days_for_test:
-        # Not enough data for proper OOS testing
-        # Use simple in-sample optimization with warning
+    if total_days < min_days_total:
+        # Not enough data for ANY testing
         best_params = _optimize_in_sample(prices, portfolio_index, risk_on_weights, 
                                          risk_off_weights, flip_cost, param_combinations)
         
@@ -612,12 +611,31 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
     
     else:
         # PROPER OUT-OF-SAMPLE TESTING
-        # Split: 70% train, 30% test
-        split_idx = int(0.7 * total_days)
+        # Split: 70% train, 30% test (or 80/20 if data is limited)
+        if total_days >= 1008:  # 4 years or more
+            split_ratio = 0.7
+        else:
+            split_ratio = 0.8  # Use more for training if data is limited
+        
+        split_idx = int(split_ratio * total_days)
         train_prices = prices.iloc[:split_idx]
         test_prices = prices.iloc[split_idx:]
         
-        # Train on first 70%
+        # Ensure test set has at least 6 months of data
+        if (total_days - split_idx) < 126:
+            # Test set too small, use in-sample
+            best_params = _optimize_in_sample(prices, portfolio_index, risk_on_weights, 
+                                            risk_off_weights, flip_cost, param_combinations)
+            
+            L, ma_type, tol = best_params
+            ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
+            signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+            result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
+                            flip_cost, ma_flip_multiplier=4.0)
+            
+            return best_params, result, {"method": "in_sample", "oos_available": False}
+        
+        # Train on first portion
         train_portfolio = build_portfolio_index(train_prices, risk_on_weights)
         
         best_score = -1e9
@@ -680,7 +698,8 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
         return best_params, final_result, {
             "method": "out_of_sample",
             "train_test_split": f"{split_idx}/{total_days - split_idx} days",
-            "oos_performance": oos_perf if 'oos_perf' in locals() else None
+            "oos_performance": oos_perf if 'oos_perf' in locals() else None,
+            "oos_available": True
         }
 
 def _optimize_in_sample(prices, portfolio_index, risk_on_weights, risk_off_weights, 
@@ -848,8 +867,10 @@ def main():
             oos_perf = optimization_summary['oos_performance']
             st.write(f"**OOS Sharpe:** {oos_perf.get('Sharpe', 0):.3f}")
             st.write(f"**OOS CAGR:** {oos_perf.get('CAGR', 0):.2%}")
+            st.write(f"**Train/Test Split:** {optimization_summary.get('train_test_split', 'N/A')}")
     else:
-        st.warning("⚠️ Limited data - parameters not validated out-of-sample")
+        st.warning("⚠️ Parameters optimized in-sample only")
+        st.info(f"*For out-of-sample validation, need at least 2 years of data*")
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
@@ -1577,41 +1598,56 @@ def main():
                 st.info("Insufficient overlapping data for comparison")
         
         with val_tab2:
-            st.subheader("Walk-Forward Validation (3-Year Train, 1-Year Test)")
+            st.subheader("Out-of-Sample Performance")
             
-            portfolio_index = build_portfolio_index(prices, risk_on_weights)
-            wfa_results = walk_forward_validation(portfolio_index, best_result["returns"])
-            
-            if not wfa_results.empty:
-                # Display summary stats
-                avg_test_sharpe = wfa_results['test_sharpe'].mean()
-                std_test_sharpe = wfa_results['test_sharpe'].std()
-                success_rate = (wfa_results['test_sharpe'] > 0).mean()
+            if optimization_summary.get('oos_available', False) and 'oos_performance' in optimization_summary:
+                oos_perf = optimization_summary['oos_performance']
                 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("Avg Test Sharpe", f"{avg_test_sharpe:.3f}")
+                    st.metric("OOS Sharpe", f"{oos_perf.get('Sharpe', 0):.3f}")
                 with col2:
-                    st.metric("Test Sharpe Std", f"{std_test_sharpe:.3f}")
+                    st.metric("OOS CAGR", f"{oos_perf.get('CAGR', 0):.2%}")
                 with col3:
-                    st.metric("Success Rate", f"{success_rate:.1%}")
+                    st.metric("OOS Volatility", f"{oos_perf.get('Volatility', 0):.2%}")
+                with col4:
+                    st.metric("OOS Max DD", f"{oos_perf.get('MaxDrawdown', 0):.2%}")
                 
-                # Plot walk-forward results
-                fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot(wfa_results.index, wfa_results['test_sharpe'], marker='o', linewidth=2)
-                ax.axhline(y=0, color='r', linestyle='--', alpha=0.5)
-                ax.axhline(y=avg_test_sharpe, color='g', linestyle='--', alpha=0.5)
-                ax.set_title('Walk-Forward Test Sharpe Ratios')
-                ax.set_xlabel('Test Period')
-                ax.set_ylabel('Sharpe Ratio')
-                ax.grid(alpha=0.3)
-                st.pyplot(fig)
+                # Compare with in-sample
+                in_sample_perf = best_result["performance"]
+                comparison = pd.DataFrame({
+                    'In-Sample': [
+                        in_sample_perf.get('Sharpe', 0),
+                        in_sample_perf.get('CAGR', 0),
+                        in_sample_perf.get('Volatility', 0),
+                        in_sample_perf.get('MaxDrawdown', 0)
+                    ],
+                    'Out-of-Sample': [
+                        oos_perf.get('Sharpe', 0),
+                        oos_perf.get('CAGR', 0),
+                        oos_perf.get('Volatility', 0),
+                        oos_perf.get('MaxDrawdown', 0)
+                    ]
+                }, index=['Sharpe', 'CAGR', 'Volatility', 'Max DD'])
                 
-                # Show detailed table
-                with st.expander("Show Detailed Walk-Forward Results"):
-                    st.dataframe(wfa_results)
+                st.write("**In-Sample vs Out-of-Sample Comparison:**")
+                st.dataframe(comparison.style.format("{:.3f}"))
+                
+                # Check for overfitting
+                if in_sample_perf.get('Sharpe', 0.001) != 0:
+                    sharpe_ratio = oos_perf.get('Sharpe', 0) / in_sample_perf.get('Sharpe', 0.001)
+                    if sharpe_ratio < 0.5:
+                        st.warning("⚠️ Potential overfitting: OOS performance is less than 50% of in-sample")
+                    elif sharpe_ratio > 0.8:
+                        st.success("✅ Good generalization: OOS performance > 80% of in-sample")
+                    else:
+                        st.info("ℹ️ Reasonable generalization: OOS performance between 50-80% of in-sample")
             else:
-                st.info("Not enough data for walk-forward analysis (need at least 2 years)")
+                st.info("Out-of-sample validation was not performed due to limited data")
+                st.write("**Requirements for out-of-sample testing:**")
+                st.write("- At least 2 years of total data")
+                st.write("- At least 6 months for test set after 70/30 split")
+                st.write(f"**Your data:** {len(prices)} days ({(len(prices)/252):.1f} years)")
         
         with val_tab3:
             st.subheader("Parameter Sensitivity Analysis (MA Strategy)")  # Changed
