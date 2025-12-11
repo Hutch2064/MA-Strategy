@@ -182,7 +182,7 @@ def calculate_data_quality_metrics(prices, portfolio_index):
     
     # 3. Check trend strength (ADF test for stationarity)
     try:
-        if len(daily_returns) > 100:
+        if len(daily_returns) > 63:
             adf_result = adfuller(daily_returns.dropna())
             metrics['stationarity_p'] = adf_result[1]
         else:
@@ -210,8 +210,8 @@ def regime_adaptive_ma_selection(prices, risk_on_weights, flip_cost, regime_hist
     
     # Determine adaptive MA length bounds
     total_days = len(portfolio_index)
-    min_ma_days = max(20, int(0.1 * total_days))  # At least 10% of data
-    max_ma_days = min(300, int(0.5 * total_days))  # At most 50% of data
+    min_ma_days = 20
+    max_ma_days = min(300, int(0.25 * total_days))  # At most 50% of data
     
     # Adjust based on data quality
     if metrics['completeness'] < 0.8:
@@ -220,7 +220,7 @@ def regime_adaptive_ma_selection(prices, risk_on_weights, flip_cost, regime_hist
     
     if metrics['stationarity_p'] < 0.05:
         # Stationary returns: longer MA for smoother signals
-        min_ma_days = max(min_ma_days, 50)
+        target_ma = min(100, max(50, min_ma_days + max_ma_days) // 2))
     
     # If we have regime history, use it to inform selection
     if regime_history is not None and len(regime_history) > 0:
@@ -229,7 +229,7 @@ def regime_adaptive_ma_selection(prices, risk_on_weights, flip_cost, regime_hist
         target_ma = min(max_ma_days, max(min_ma_days, int(avg_regime_duration * 0.5)))
     else:
         # Default to middle of range
-        target_ma = (min_ma_days + max_ma_days) // 2
+        target_ma = min(150, max(100, (min_ma_days + max_ma_days) // 3))
     
     # Determine MA type based on volatility
     if metrics['vol_stability'] < 0.6:
@@ -275,7 +275,7 @@ def robust_ma_validation(prices, risk_on_weights, risk_off_weights, flip_cost,
             
             # Training data: everything before test
             train_indices = list(range(test_start))
-            if len(train_indices) < 100:  # Need minimum training data
+            if len(train_indices) < max(90, L * 2): # Need minimum training data
                 continue
             
             train_portfolio = portfolio_index.iloc[train_indices]
@@ -316,9 +316,12 @@ def robust_ma_validation(prices, risk_on_weights, risk_off_weights, flip_cost,
     best_params = None
     
     for params, scores in cv_scores.items():
-        # Penalize parameters with high variance
+
+        # To:
+        # Academic penalty: balance performance and stability
         robustness_penalty = 1.0 / (1.0 + scores['std_sharpe'])
-        adjusted_score = scores['mean_sharpe'] * robustness_penalty
+        length_penalty = 1.0 - (L / 500)  # Penalize very long MAs (>250 days)
+        adjusted_score = scores['mean_sharpe'] * robustness_penalty * length_penalty
         
         if adjusted_score > best_score:
             best_score = adjusted_score
@@ -371,8 +374,8 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
         
         # Add tolerance variations
         tolerance_variants = []
-        for L, ma_type, _ in candidate_params[:10]:  # Limit to first 10 to keep manageable
-            for tol in [0.01, 0.02, 0.03, 0.04]:
+        for L, ma_type, _ in candidate_params[:12]:  # Limit to first 10 to keep manageable
+            for tol in [0.01, 0.02, 0.03, 0.04, 0.05]:
                 tolerance_variants.append((L, ma_type, tol))
         
         candidate_params.extend(tolerance_variants[:min(10, len(tolerance_variants))])
@@ -451,13 +454,15 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
     except Exception as e:
         print(f"Optimization error: {e}")
         return None, None, None
-    
-    # Center around adaptive MA
-    base_lengths = [adaptive_ma]
-    if adaptive_ma > 50:
-        base_lengths.extend([adaptive_ma - 25, adaptive_ma + 25])
-    if adaptive_ma > 100:
-        base_lengths.extend([adaptive_ma - 50, adaptive_ma + 50])
+
+    # To:
+    # Academic testing grid: test meaningful discrete intervals
+    base_lengths = [20, 50, 100, 150, 200, 250, 300]
+    # Filter to within bounds
+    base_lengths = [L for L in base_lengths if min_len <= L <= max_len]
+    # Include adaptive MA if not already in list
+    if adaptive_ma not in base_lengths and min_len <= adaptive_ma <= max_len:
+        base_lengths.append(adaptive_ma)
     
     # Ensure reasonable bounds
     min_len = max(20, int(0.1 * total_days))
@@ -472,8 +477,8 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
     
     # Add tolerance variations
     tolerance_variants = []
-    for L, ma_type, _ in candidate_params[:10]:  # Limit to first 10 to keep manageable
-        for tol in [0.01, 0.02, 0.03, 0.04]:
+    for L, ma_type, _ in candidate_params[:12]:  # Limit to first 10 to keep manageable
+        for tol in [0.01, 0.02, 0.03, 0.04, 0.05]:
             tolerance_variants.append((L, ma_type, tol))
     
     candidate_params.extend(tolerance_variants[:min(10, len(tolerance_variants))])
