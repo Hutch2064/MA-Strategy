@@ -640,6 +640,7 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
         
         best_score = -1e9
         best_params = None
+        best_oos_perf = None  # Initialize
         
         for L, ma_type, tol in param_combinations:
             try:
@@ -679,7 +680,7 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
                 if adjusted_score > best_score:
                     best_score = adjusted_score
                     best_params = (L, ma_type, tol)
-                    oos_perf = test_result["performance"]
+                    best_oos_perf = test_result["performance"]  # Store OOS performance
                     
             except Exception as e:
                 continue
@@ -687,6 +688,7 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
         if best_params is None:
             # Fallback
             best_params = (100, "sma", 0.02)
+            best_oos_perf = None
         
         # Final backtest with selected params on FULL dataset
         L, ma_type, tol = best_params
@@ -698,7 +700,7 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
         return best_params, final_result, {
             "method": "out_of_sample",
             "train_test_split": f"{split_idx}/{total_days - split_idx} days",
-            "oos_performance": oos_perf if 'oos_perf' in locals() else None,
+            "oos_performance": best_oos_perf,  # Use the stored variable
             "oos_available": True
         }
 
@@ -863,11 +865,13 @@ def main():
     
     if optimization_summary.get('oos_available', False):
         st.success("✅ Parameters validated with out-of-sample testing")
-        if 'oos_performance' in optimization_summary and optimization_summary['oos_performance']:
-            oos_perf = optimization_summary['oos_performance']
+        oos_perf = optimization_summary.get('oos_performance')
+        if oos_perf is not None:
             st.write(f"**OOS Sharpe:** {oos_perf.get('Sharpe', 0):.3f}")
             st.write(f"**OOS CAGR:** {oos_perf.get('CAGR', 0):.2%}")
             st.write(f"**Train/Test Split:** {optimization_summary.get('train_test_split', 'N/A')}")
+        else:
+            st.warning("⚠️ OOS performance data not available")
     else:
         st.warning("⚠️ Parameters optimized in-sample only")
         st.info(f"*For out-of-sample validation, need at least 2 years of data*")
@@ -1600,53 +1604,60 @@ def main():
         with val_tab2:
             st.subheader("Out-of-Sample Performance")
             
-            if optimization_summary.get('oos_available', False) and 'oos_performance' in optimization_summary:
-                oos_perf = optimization_summary['oos_performance']
+            if optimization_summary.get('oos_available', False):
+                oos_perf = optimization_summary.get('oos_performance')
                 
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("OOS Sharpe", f"{oos_perf.get('Sharpe', 0):.3f}")
-                with col2:
-                    st.metric("OOS CAGR", f"{oos_perf.get('CAGR', 0):.2%}")
-                with col3:
-                    st.metric("OOS Volatility", f"{oos_perf.get('Volatility', 0):.2%}")
-                with col4:
-                    st.metric("OOS Max DD", f"{oos_perf.get('MaxDrawdown', 0):.2%}")
-                
-                # Compare with in-sample
-                in_sample_perf = best_result["performance"]
-                comparison = pd.DataFrame({
-                    'In-Sample': [
-                        in_sample_perf.get('Sharpe', 0),
-                        in_sample_perf.get('CAGR', 0),
-                        in_sample_perf.get('Volatility', 0),
-                        in_sample_perf.get('MaxDrawdown', 0)
-                    ],
-                    'Out-of-Sample': [
-                        oos_perf.get('Sharpe', 0),
-                        oos_perf.get('CAGR', 0),
-                        oos_perf.get('Volatility', 0),
-                        oos_perf.get('MaxDrawdown', 0)
-                    ]
-                }, index=['Sharpe', 'CAGR', 'Volatility', 'Max DD'])
-                
-                st.write("**In-Sample vs Out-of-Sample Comparison:**")
-                st.dataframe(comparison.style.format("{:.3f}"))
-                
-                # Check for overfitting
-                if in_sample_perf.get('Sharpe', 0.001) != 0:
-                    sharpe_ratio = oos_perf.get('Sharpe', 0) / in_sample_perf.get('Sharpe', 0.001)
-                    if sharpe_ratio < 0.5:
-                        st.warning("⚠️ Potential overfitting: OOS performance is less than 50% of in-sample")
-                    elif sharpe_ratio > 0.8:
-                        st.success("✅ Good generalization: OOS performance > 80% of in-sample")
-                    else:
-                        st.info("ℹ️ Reasonable generalization: OOS performance between 50-80% of in-sample")
+                if oos_perf is not None:
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("OOS Sharpe", f"{oos_perf.get('Sharpe', 0):.3f}")
+                    with col2:
+                        st.metric("OOS CAGR", f"{oos_perf.get('CAGR', 0):.2%}")
+                    with col3:
+                        st.metric("OOS Volatility", f"{oos_perf.get('Volatility', 0):.2%}")
+                    with col4:
+                        st.metric("OOS Max DD", f"{oos_perf.get('MaxDrawdown', 0):.2%}")
+                    
+                    # Compare with in-sample
+                    in_sample_perf = best_result["performance"]
+                    comparison = pd.DataFrame({
+                        'In-Sample': [
+                            in_sample_perf.get('Sharpe', 0),
+                            in_sample_perf.get('CAGR', 0),
+                            in_sample_perf.get('Volatility', 0),
+                            in_sample_perf.get('MaxDrawdown', 0)
+                        ],
+                        'Out-of-Sample': [
+                            oos_perf.get('Sharpe', 0),
+                            oos_perf.get('CAGR', 0),
+                            oos_perf.get('Volatility', 0),
+                            oos_perf.get('MaxDrawdown', 0)
+                        ]
+                    }, index=['Sharpe', 'CAGR', 'Volatility', 'Max DD'])
+                    
+                    st.write("**In-Sample vs Out-of-Sample Comparison:**")
+                    st.dataframe(comparison.style.format("{:.3f}"))
+                    
+                    # Check for overfitting
+                    if in_sample_perf.get('Sharpe', 0.001) != 0:
+                        sharpe_ratio = oos_perf.get('Sharpe', 0) / in_sample_perf.get('Sharpe', 0.001)
+                        if sharpe_ratio < 0.5:
+                            st.warning("⚠️ Potential overfitting: OOS performance is less than 50% of in-sample")
+                        elif sharpe_ratio > 0.8:
+                            st.success("✅ Good generalization: OOS performance > 80% of in-sample")
+                        else:
+                            st.info("ℹ️ Reasonable generalization: OOS performance between 50-80% of in-sample")
+                else:
+                    st.info("Out-of-sample performance data not available")
+                    st.write("This can happen if:")
+                    st.write("- No parameters passed the optimization criteria")
+                    st.write("- Test set performance couldn't be calculated")
+                    st.write(f"**Train/Test Split:** {optimization_summary.get('train_test_split', 'N/A')}")
             else:
                 st.info("Out-of-sample validation was not performed due to limited data")
                 st.write("**Requirements for out-of-sample testing:**")
                 st.write("- At least 2 years of total data")
-                st.write("- At least 6 months for test set after 70/30 split")
+                st.write("- At least 6 months for test set after split")
                 st.write(f"**Your data:** {len(prices)} days ({(len(prices)/252):.1f} years)")
         
         with val_tab3:
