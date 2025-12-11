@@ -560,7 +560,7 @@ def run_robust_ma_optimization(prices, risk_on_weights, risk_off_weights,
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     returns = portfolio_index.pct_change().fillna(0)
     
-    # Use global parameters directly (no global declaration needed here)
+    # Define candidate parameters
     candidate_lengths = list(range(MA_MIN_DAYS, MA_MAX_DAYS + 1, 
                                  max(1, (MA_MAX_DAYS - MA_MIN_DAYS) // MA_STEP_FACTOR)))
     candidate_types = ["sma", "ema"]
@@ -973,17 +973,18 @@ def main():
     
     st.info(f"Loaded {len(prices)} trading days of data from {prices.index[0].date()} to {prices.index[-1].date()}")
 
-    # Use local variables instead of modifying globals
-    current_ma_min_days = ma_min_days
-    current_ma_max_days = ma_max_days
-    current_flip_cost = flip_cost_input
-    current_tax_rate = tax_rate_input
+    # Update global parameters
+    global MA_MIN_DAYS, MA_MAX_DAYS, FLIP_COST, ANNUAL_TAX_RATE
+    MA_MIN_DAYS = ma_min_days
+    MA_MAX_DAYS = ma_max_days
+    FLIP_COST = flip_cost_input
+    ANNUAL_TAX_RATE = tax_rate_input
 
     # RUN ROBUST MA OPTIMIZATION WITH TAXES
     st.subheader("🔍 MA Optimization (Tax-Aware)")
     with st.spinner("Optimizing MA parameters with tax-aware evaluation..."):
         best_cfg, best_result, best_metrics = run_robust_ma_optimization(
-            prices, risk_on_weights, risk_off_weights, current_flip_cost, current_tax_rate
+            prices, risk_on_weights, risk_off_weights, FLIP_COST, ANNUAL_TAX_RATE
         )
     
     best_len, best_type, best_tol = best_cfg
@@ -1056,8 +1057,8 @@ def main():
         risk_off_daily,
         quarterly_target,
         pure_sig_signal,
-        flip_cost=current_flip_cost,
-        tax_rate=current_tax_rate,
+        flip_cost=FLIP_COST,
+        tax_rate=ANNUAL_TAX_RATE,
         quarter_end_dates=mapped_q_ends
     )
 
@@ -1068,15 +1069,15 @@ def main():
         sig,
         pure_sig_rw=pure_sig_rw,
         pure_sig_sw=pure_sig_sw,
-        flip_cost=current_flip_cost,
-        tax_rate=current_tax_rate,
+        flip_cost=FLIP_COST,
+        tax_rate=ANNUAL_TAX_RATE,
         quarter_end_dates=mapped_q_ends
     )
 
     # Create benchmarks
     st.subheader("📊 Benchmark Creation")
     benchmarks = create_benchmarks(prices, risk_on_weights, risk_off_weights, 
-                                  mapped_q_ends, current_flip_cost, current_tax_rate)
+                                  mapped_q_ends, FLIP_COST, ANNUAL_TAX_RATE)
 
     # Display rebalance dates
     if len(hybrid_rebals) > 0:
@@ -1300,7 +1301,7 @@ def main():
             mc_results = monte_carlo_significance_with_costs(
                 best_result["returns"], 
                 best_result["signal"],
-                current_flip_cost
+                FLIP_COST
             )
             
             col1, col2, col3 = st.columns(3)
@@ -1420,7 +1421,7 @@ def main():
 Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=9TIGHucZuaJ
 
 ---
-    """.format(current_tax_rate, current_flip_cost, best_len, best_type.upper(), best_tol,
+    """.format(ANNUAL_TAX_RATE, FLIP_COST, best_len, best_type.upper(), best_tol,
               best_result.get('annual_turnover', 0), 
               best_metrics['trades_per_year'] if best_metrics else 0))
 
