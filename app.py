@@ -744,13 +744,6 @@ def main():
 
     st.subheader(f"Current MA Regime: {current_regime}")
     st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
-    
-    # Display flip cost information
-    st.write(f"**Flip Cost Multipliers Applied:**")
-    st.write(f"- Buy & Hold: 1x (quarterly rebalance to target weights)")
-    st.write(f"- Pure SIG: 2x (quarterly rebalance)")
-    st.write(f"- MA Strategy: 4x (when MA flips)")
-    st.write(f"- Hybrid SIG: 6x total (2x quarterly + 4x MA flips)")
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
