@@ -400,7 +400,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
     
     # Use reasonable MA lengths based on available data
     max_length = min(252, max_possible_length)
-    min_length = max(10, int(max_length * 0.1))  # At least 10% of max length, min 10
+    min_length = max(100, int(max_length * 0.1))  # At least 10% of max length, min 10
     
     lengths = list(range(min_length, max_length + 1, max(1, (max_length - min_length) // 20)))
     types = ["sma", "ema"]
