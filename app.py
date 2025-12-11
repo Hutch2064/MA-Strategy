@@ -134,12 +134,12 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 
 
 # ============================================================
-# TAX CALCULATION FUNCTIONS (UPDATED WITH FIXES)
+# TAX CALCULATION FUNCTIONS (NEW)
 # ============================================================
 
 def calculate_tax_liability_at_realization(returns, signal_changes, tax_rate=ANNUAL_TAX_RATE):
     """
-    Calculate taxes when gains are realized (FIXED VERSION)
+    Calculate taxes when gains are realized (academically correct)
     Taxes applied immediately when:
     1. MA signal flips from RISK-ON to RISK-OFF
     2. Quarterly rebalancing triggers partial realization
@@ -147,48 +147,44 @@ def calculate_tax_liability_at_realization(returns, signal_changes, tax_rate=ANN
     if len(returns) == 0:
         return pd.Series(0.0, index=returns.index)
     
-    # Convert to equity curve
+    # Convert to equity curve to track cost basis
     equity_pre_tax = (1 + returns).cumprod()
     tax_payments = pd.Series(0.0, index=returns.index)
     
-    # Track cost basis
-    cost_basis = equity_pre_tax.iloc[0] if len(equity_pre_tax) > 0 else 1.0
-    in_position = True
+    # Track cost basis and entry prices
+    cost_basis = equity_pre_tax.iloc[0]  # Initial investment
     last_entry_idx = 0
+    in_position = True
     
     for i in range(1, len(returns)):
-        current_value = equity_pre_tax.iloc[i]
-        
-        # Check for RISK-ON → RISK-OFF transition (sell all risky)
-        if signal_changes.iloc[i] == -1 and in_position:
-            # Calculate gain
-            gain = max(0, current_value - cost_basis)
-            
-            if gain > 0:
-                # Apply tax
-                tax_amount = gain * tax_rate
-                tax_payments.iloc[i] = -tax_amount
-                
-                # Reduce equity proportionally
-                reduction_factor = (current_value - tax_amount) / current_value
-                if current_value > 0:
-                    equity_pre_tax.iloc[i:] *= reduction_factor
-                
-                # Update current_value after tax
+        # Check for signal change from RISK-ON to RISK-OFF
+        if i > 0 and signal_changes.iloc[i] == -1:  # RISK-ON → RISK-OFF
+            if in_position:
+                # Calculate gain since last entry
                 current_value = equity_pre_tax.iloc[i]
-            
-            # Reset cost basis to post-tax value
-            cost_basis = current_value
-            in_position = False
+                gain = max(0, current_value - cost_basis)
+                
+                if gain > 0:
+                    # Apply tax immediately
+                    tax_amount = gain * tax_rate
+                    tax_payments.iloc[i] = -tax_amount
+                    
+                    # Reduce equity by tax amount
+                    equity_pre_tax.iloc[i:] *= (1 - tax_amount / current_value)
+                    
+                    # Reset cost basis
+                    cost_basis = equity_pre_tax.iloc[i]
+                
+                in_position = False
+                last_entry_idx = i
         
-        # Check for RISK-OFF → RISK-ON transition (buy risky)
-        elif signal_changes.iloc[i] == 1 and not in_position:
-            cost_basis = current_value
-            in_position = True
-        
-        # Update last_entry_idx if we're in a position
-        if in_position:
-            last_entry_idx = i
+        # Check for signal change from RISK-OFF to RISK-ON
+        elif i > 0 and signal_changes.iloc[i] == 1:  # RISK-OFF → RISK-ON
+            if not in_position:
+                # New position - set new cost basis
+                cost_basis = equity_pre_tax.iloc[i]
+                last_entry_idx = i
+                in_position = True
     
     return tax_payments
 
@@ -411,39 +407,18 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
             "DD_Series": pd.Series([], dtype=float)
         }
     
-    # Ensure equity curve doesn't go negative
-    eq_curve = eq_curve.clip(lower=0.01)  # Prevent divide by zero
-    
-    if eq_curve.iloc[-1] <= 0:
-        return {
-            "CAGR": -1.0,  # -100% CAGR for total loss
-            "Volatility": simple_returns.std() * np.sqrt(252) if len(simple_returns) > 0 else 0,
-            "Sharpe": 0,
-            "MaxDrawdown": -1.0,
-            "TotalReturn": -1.0,
-            "DD_Series": pd.Series([-1.0], index=eq_curve.index)
-        }
-    
     cagr = (eq_curve.iloc[-1] / eq_curve.iloc[0]) ** (252 / len(eq_curve)) - 1
     vol = simple_returns.std() * np.sqrt(252) if len(simple_returns) > 0 else 0
     sharpe = (simple_returns.mean() * 252 - rf) / vol if vol > 0 else 0
-    
-    # Calculate drawdown safely
-    if eq_curve.iloc[0] > 0:
-        cumulative = eq_curve / eq_curve.iloc[0]
-        running_max = cumulative.cummax()
-        drawdown = (cumulative - running_max) / running_max
-        max_dd = drawdown.min() if len(drawdown) > 0 else 0
-    else:
-        max_dd = -1.0
-    
+    dd = eq_curve / eq_curve.cummax() - 1
+
     return {
         "CAGR": cagr,
         "Volatility": vol,
         "Sharpe": sharpe,
-        "MaxDrawdown": max_dd,
+        "MaxDrawdown": dd.min() if len(dd) > 0 else 0,
         "TotalReturn": eq_curve.iloc[-1] / eq_curve.iloc[0] - 1 if eq_curve.iloc[0] != 0 else 0,
-        "DD_Series": drawdown if 'drawdown' in locals() else pd.Series([], dtype=float)
+        "DD_Series": dd
     }
 
 def backtest_with_taxes(prices, signal, risk_on_weights, risk_off_weights, 
@@ -462,7 +437,7 @@ def backtest_with_taxes(prices, signal, risk_on_weights, risk_off_weights,
     # 1. Apply slippage costs
     flip_costs = np.where(flip_mask, -flip_cost, 0.0)
     
-    # 2. Calculate taxes (realization-based) - USING FIXED VERSION
+    # 2. Calculate taxes (realization-based)
     tax_payments = calculate_tax_liability_at_realization(
         strategy_simple + flip_costs, 
         signal_changes,
