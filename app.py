@@ -620,19 +620,6 @@ def visualize_optuna_results(study, best_params):
 # ======== END OF ADDED FUNCTION ========
 
 def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_off_weights, flip_cost):
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_off_weights, flip_cost):
     """
     Sensitivity analysis for MA Strategy (NOT Hybrid SIG - uses the same backtest as MA optimization)
     """
