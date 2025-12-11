@@ -580,9 +580,9 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     
     # Fixed parameter grid
-    ma_lengths = [63, 100, 125, 150, 175, 200, 225, 250, 275, 300]
+    ma_lengths = [50, 100, 150, 200, 250, 300]
     ma_types = ["sma", "ema"]
-    tolerances = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.1]
+    tolerances = [0.01, 0.02, 0.03, 0.04]
     
     # Generate all combinations
     param_combinations = []
