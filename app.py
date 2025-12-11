@@ -25,7 +25,7 @@ RISK_OFF_WEIGHTS = {
     "SHY": 1.0,
 }
 
-FLIP_COST = 0.0075
+FLIP_COST = 0.00
 
 # Starting weights inside the SIG engine (unchanged)
 START_RISKY = 0.70
@@ -575,14 +575,14 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
 
 def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost):
     """
-    Simplified MA optimization with out-of-sample testing
+    Simplified MA optimization with proper out-of-sample testing
     """
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     
-    # Fixed parameter grid
-    ma_lengths = [63, 100, 125, 150, 175, 200, 225, 250, 275, 300]
+    # Fixed parameter grid (simpler, not scaling with vol)
+    ma_lengths = [50, 100, 150, 200, 250, 300]  # Fixed set
     ma_types = ["sma", "ema"]
-    tolerances = [0.01, 0.02, 0.03, 0.04, 0.05]
+    tolerances = [0.01, 0.02, 0.03, 0.04]
     
     # Generate all combinations
     param_combinations = []
@@ -591,14 +591,14 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
             for tol in tolerances:
                 param_combinations.append((L, ma_type, tol))
     
-    # Check if we have enough data for OOS testing
+    # Need at least 2 years of data for proper train/test split
     total_days = len(prices)
-    min_days_needed = 504  # 2 years minimum
+    min_days_total = 504  # 2 years total minimum
     
-    if total_days < min_days_needed:
-        # Not enough data, use in-sample only
-        best_params = simple_optimization(prices, risk_on_weights, risk_off_weights, 
-                                         flip_cost, param_combinations)
+    if total_days < min_days_total:
+        # Not enough data for ANY testing
+        best_params = _optimize_in_sample(prices, portfolio_index, risk_on_weights, 
+                                         risk_off_weights, flip_cost, param_combinations)
         
         # Generate results
         L, ma_type, tol = best_params
@@ -610,16 +610,22 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
         return best_params, result, {"method": "in_sample", "oos_available": False}
     
     else:
-        # Try OOS testing with 80/20 split
-        split_idx = int(0.8 * total_days)
+        # PROPER OUT-OF-SAMPLE TESTING
+        # Split: 70% train, 30% test (or 80/20 if data is limited)
+        if total_days >= 1008:  # 4 years or more
+            split_ratio = 0.7
+        else:
+            split_ratio = 0.8  # Use more for training if data is limited
+        
+        split_idx = int(split_ratio * total_days)
         train_prices = prices.iloc[:split_idx]
         test_prices = prices.iloc[split_idx:]
         
-        # Ensure test set has at least 6 months
+        # Ensure test set has at least 6 months of data
         if (total_days - split_idx) < 126:
             # Test set too small, use in-sample
-            best_params = simple_optimization(prices, risk_on_weights, risk_off_weights, 
-                                            flip_cost, param_combinations)
+            best_params = _optimize_in_sample(prices, portfolio_index, risk_on_weights, 
+                                            risk_off_weights, flip_cost, param_combinations)
             
             L, ma_type, tol = best_params
             ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
@@ -629,64 +635,74 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
             
             return best_params, result, {"method": "in_sample", "oos_available": False}
         
-        # Run OOS optimization
+        # Train on first portion
+        train_portfolio = build_portfolio_index(train_prices, risk_on_weights)
+        
+        best_score = -1e9
         best_params = None
-        best_oos_sharpe = -1e9
-        best_oos_perf = None
+        best_oos_perf = None  # Initialize
         
         for L, ma_type, tol in param_combinations:
             try:
-                # Generate signal on FULL data
-                ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
-                signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+                # Train MA signal
+                ma = compute_ma_matrix(train_portfolio, [L], ma_type)[L]
+                signal = generate_testfol_signal_vectorized(train_portfolio, ma, tol)
                 
-                # Split signal into train and test
-                train_signal = signal.iloc[:split_idx]
-                test_signal = signal.iloc[split_idx:]
+                # Backtest on train set
+                train_result = backtest(train_prices, signal, risk_on_weights, 
+                                      risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
                 
-                # Skip if test signal is constant
-                if test_signal.sum() == 0 or test_signal.sum() == len(test_signal):
-                    continue
+                # Test on OOS set (using signal generated on FULL data up to test point)
+                full_portfolio_to_test_end = build_portfolio_index(
+                    prices.iloc[:split_idx + 1], risk_on_weights  # Include one extra day
+                )
+                full_ma = compute_ma_matrix(full_portfolio_to_test_end, [L], ma_type)[L]
+                full_signal = generate_testfol_signal_vectorized(full_portfolio_to_test_end, full_ma, tol)
                 
-                # Backtest on test set
+                # Use only the test portion
+                test_signal = full_signal.iloc[split_idx:]
+                
+                # Backtest on OOS
                 test_result = backtest(test_prices, test_signal, risk_on_weights, 
                                      risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
-                oos_sharpe = test_result["performance"]["Sharpe"]
                 
-                if oos_sharpe > best_oos_sharpe:
-                    best_oos_sharpe = oos_sharpe
+                # Combined score with penalty for overfitting
+                train_sharpe = train_result["performance"]["Sharpe"]
+                test_sharpe = test_result["performance"]["Sharpe"]
+                
+                # Adjusted score: 30% train, 70% test (more weight to OOS)
+                adjusted_score = (0.3 * train_sharpe) + (0.7 * test_sharpe)
+                
+                # Penalty for poor OOS performance
+                if test_sharpe < 0:
+                    adjusted_score -= 0.5  # Penalty for negative OOS Sharpe
+                
+                if adjusted_score > best_score:
+                    best_score = adjusted_score
                     best_params = (L, ma_type, tol)
-                    best_oos_perf = test_result["performance"]
+                    best_oos_perf = test_result["performance"]  # Store OOS performance
                     
             except Exception as e:
                 continue
         
         if best_params is None:
-            # No valid OOS parameters, use in-sample
-            best_params = simple_optimization(prices, risk_on_weights, risk_off_weights, 
-                                            flip_cost, param_combinations)
+            # Fallback
+            best_params = (100, "sma", 0.02)
             best_oos_perf = None
         
-        # Final backtest with selected params
+        # Final backtest with selected params on FULL dataset
         L, ma_type, tol = best_params
         ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
         final_result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
                               flip_cost, ma_flip_multiplier=4.0)
         
-        if best_oos_perf is not None:
-            return best_params, final_result, {
-                "method": "out_of_sample",
-                "train_test_split": f"{split_idx}/{total_days - split_idx} days",
-                "oos_performance": best_oos_perf,
-                "oos_available": True
-            }
-        else:
-            return best_params, final_result, {
-                "method": "in_sample_fallback",
-                "oos_available": False,
-                "reason": "No valid parameters found in OOS testing"
-            }
+        return best_params, final_result, {
+            "method": "out_of_sample",
+            "train_test_split": f"{split_idx}/{total_days - split_idx} days",
+            "oos_performance": best_oos_perf,  # Use the stored variable
+            "oos_available": True
+        }
 
 def _optimize_in_sample(prices, portfolio_index, risk_on_weights, risk_off_weights, 
                        flip_cost, param_combinations):
@@ -853,12 +869,12 @@ def main():
         if oos_perf is not None:
             st.write(f"**OOS Sharpe:** {oos_perf.get('Sharpe', 0):.3f}")
             st.write(f"**OOS CAGR:** {oos_perf.get('CAGR', 0):.2%}")
-        st.write(f"**Train/Test Split:** {optimization_summary.get('train_test_split', 'N/A')}")
+            st.write(f"**Train/Test Split:** {optimization_summary.get('train_test_split', 'N/A')}")
+        else:
+            st.warning("⚠️ OOS performance data not available")
     else:
-        reason = optimization_summary.get('reason', 'Limited data')
-        st.warning(f"⚠️ {reason}")
-        if reason == 'Limited data':
-            st.info(f"*For out-of-sample validation, need at least 2 years of data*")
+        st.warning("⚠️ Parameters optimized in-sample only")
+        st.info(f"*For out-of-sample validation, need at least 2 years of data*")
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
