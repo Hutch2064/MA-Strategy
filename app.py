@@ -395,14 +395,13 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
             candidate_params.append((L, "sma", tolerance))
             candidate_params.append((L, "ema", tolerance))
         
-        # Test ALL combos of MA length, type, and tolerance
-        full_candidates = []
-        for L in base_lengths:
-            for ma_type in ["sma", "ema"]:
-                for tol in [0.00, 0.01, 0.02, 0.03, 0.04, 0.05]:
-                    full_candidates.append((L, ma_type, tol))
+        # Add tolerance variations
+        tolerance_variants = []
+        for L, ma_type, _ in candidate_params[:12]:  # Limit to first 10 to keep manageable
+            for tol in [0.01, 0.02, 0.03, 0.04, 0.05]:
+                tolerance_variants.append((L, ma_type, tol))
 
-        candidate_params = full_candidates[:200]  # Limit total to avoid explosion
+        candidate_params.extend(tolerance_variants[:min(10, len(tolerance_variants))])
 
         # STAGE 2: 80/20 Validation (academically valid for regime strategies)
         cv_scores = {}
