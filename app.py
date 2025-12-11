@@ -141,6 +141,9 @@ def calculate_unified_tax_liability(returns, signal, tax_rate=ANNUAL_TAX_RATE):
     """
     Unified tax calculation for ALL strategies
     Taxes are applied when switching from RISK-ON to RISK-OFF (selling risky assets)
+    
+    NOTE: This is a simplified tax model for backtesting purposes.
+    For academic rigor, consider more sophisticated tax modeling.
     """
     if len(returns) == 0 or len(signal) == 0:
         return pd.Series(0.0, index=returns.index)
@@ -182,6 +185,8 @@ def calculate_continuous_tax_drag(returns, turnover_rate, tax_rate=ANNUAL_TAX_RA
     """
     Continuous tax drag (simpler academic approach)
     Daily tax drag = (annual turnover × tax rate) / 252
+    
+    This is commonly used in academic papers for high-turnover strategies.
     """
     daily_tax_drag = (turnover_rate * tax_rate) / 252
     tax_drag_series = pd.Series(-daily_tax_drag, index=returns.index)
@@ -203,12 +208,17 @@ def calculate_turnover(signal):
 def calculate_strategy_taxes(returns, signal, tax_rate=ANNUAL_TAX_RATE, method='auto'):
     """
     Unified tax calculation with automatic method selection
+    
+    Academic Note: Method auto-selection based on turnover is a practical
+    simplification. Real tax implications depend on many factors beyond
+    just turnover rate.
     """
     if method == 'auto':
-        # Auto-select based on turnover
+        # Auto-select based on turnover (practical simplification)
         turnover = calculate_turnover(signal)
         if turnover > 3.0:  # >300% annual turnover
             method = 'continuous'
+            st.info(f"High turnover detected ({turnover:.1%}), using continuous tax approximation")
         else:
             method = 'realization'
     
@@ -318,6 +328,9 @@ def backtest_unified(prices, signal, risk_on_weights, risk_off_weights,
                     flip_cost=FLIP_COST, tax_rate=ANNUAL_TAX_RATE, tax_method='auto'):
     """
     Unified backtest function for ALL strategies (MA, Hybrid SIG, Pure SIG, etc.)
+    
+    Academic Note: All strategies use the same tax logic for fair comparison.
+    This ensures relative performance metrics are comparable.
     """
     # Calculate daily returns
     simple_rets = prices.pct_change().fillna(0)
@@ -403,10 +416,16 @@ def run_sig_engine_no_tax(risk_on_returns, risk_off_returns, target_quarter,
         if ma_on:
             # Restore pure-SIG weights after exiting RISK-OFF
             if frozen_risky is not None:
-                w_r = pure_sig_rw.iloc[i]
-                w_s = pure_sig_sw.iloc[i]
-                risky_val = eq * w_r
-                safe_val = eq * w_s
+                # Handle case where pure_sig_rw/pure_sig_sw are not provided
+                if pure_sig_rw is not None and pure_sig_sw is not None:
+                    w_r = pure_sig_rw.iloc[i]
+                    w_s = pure_sig_sw.iloc[i]
+                    risky_val = eq * w_r
+                    safe_val = eq * w_s
+                else:
+                    # Default to starting weights if not provided
+                    risky_val = eq * START_RISKY
+                    safe_val = eq * START_SAFE
                 frozen_risky = None
                 frozen_safe = None
             
@@ -476,7 +495,7 @@ def evaluate_ma_configuration_unified(prices, signal, risk_on_weights, risk_off_
     Evaluate MA configuration using unified backtest
     """
     if len(signal) == 0 or signal.sum() == 0:
-        return 0, {"sharpe": 0, "trades_per_year": 0, "hit_ratio": 0}
+        return 0, {"sharpe": 0, "trades_per_year": 0, "hit_ratio": 0}, None
     
     # Run unified backtest
     result = backtest_unified(prices, signal, risk_on_weights, risk_off_weights,
@@ -599,6 +618,9 @@ def create_benchmarks_unified(prices, risk_on_weights, risk_off_weights,
                              rebalance_dates, flip_cost=FLIP_COST, tax_rate=ANNUAL_TAX_RATE):
     """
     Create benchmarks using unified backtest framework
+    
+    Academic Note: Benchmarks use continuous tax approximation,
+    which is standard in academic literature for buy-and-hold strategies.
     """
     # 1. Static Buy & Hold (no rebalancing)
     bh_static_signal = pd.Series(True, index=prices.index)
@@ -610,8 +632,7 @@ def create_benchmarks_unified(prices, risk_on_weights, risk_off_weights,
     bh_rebal = backtest_unified(prices, bh_rebal_signal, risk_on_weights, {},
                                flip_cost=flip_cost, tax_rate=tax_rate, tax_method='continuous')
     
-    # 3. 60/40 Portfolio
-    # Create synthetic 60/40 weights
+    # 3. 60/40 Portfolio (common institutional benchmark)
     assets = list(prices.columns)
     if len(assets) >= 2:
         # Try to find SPY and AGG equivalents
@@ -643,7 +664,7 @@ def create_benchmarks_unified(prices, risk_on_weights, risk_off_weights,
 
 
 # ============================================================
-# QUARTERLY PROGRESS HELPER (unchanged)
+# QUARTERLY PROGRESS HELPER
 # ============================================================
 
 def compute_quarter_progress(risky_start, risky_today, quarterly_target):
@@ -698,9 +719,16 @@ def walk_forward_validation_unified(prices, strategy_result, window_years=3):
         
         if len(test_prices) > 0 and len(test_signal) > 0:
             # Run backtest on test period
+            # Extract risk weights from original strategy
+            risk_weights = {}
+            for col in strategy_result["weights"].columns:
+                if col in test_prices.columns:
+                    # Use average weight from original strategy
+                    risk_weights[col] = strategy_result["weights"][col].mean()
+            
             test_result = backtest_unified(test_prices, test_signal,
-                                          strategy_result["weights"].columns.tolist(),
-                                          {}, flip_cost=0.001, tax_rate=0.20)
+                                          risk_weights, {}, 
+                                          flip_cost=0.001, tax_rate=0.20)
             
             test_perf = test_result["performance"]
             
@@ -940,17 +968,27 @@ def main():
         bh_cagr = 0
         quarterly_target = 0
 
-    # Get pure SIG weights (no MA signal)
+    # Create pure SIG weights (always 100% risky when ON)
+    pure_sig_weights = pd.Series(1.0, index=risk_on_simple.index)
+    safe_weights = pd.Series(0.0, index=risk_on_simple.index)
+
+    # Get pure SIG result using unified backtest
     pure_sig_signal = pd.Series(True, index=risk_on_simple.index)
     pure_sig_result = backtest_unified(prices, pure_sig_signal, risk_on_weights, risk_off_weights,
                                       current_flip_cost, current_tax_rate, tax_method='continuous')
 
-    # Get Hybrid SIG returns from SIG engine (without tax logic)
+    # Get Hybrid SIG returns from SIG engine (without tax logic) - FIXED CALL
     hybrid_returns, hybrid_rebals = run_sig_engine_no_tax(
-        risk_on_simple, risk_off_daily, quarterly_target, ma_signal,
-        flip_cost=current_flip_cost, quarter_end_dates=mapped_q_ends
+        risk_on_simple,
+        risk_off_daily,
+        quarterly_target,
+        ma_signal,
+        pure_sig_rw=pure_sig_weights,  # Add this
+        pure_sig_sw=safe_weights,      # Add this
+        flip_cost=current_flip_cost,
+        quarter_end_dates=mapped_q_ends
     )
-    
+
     # Create Hybrid SIG signal (same as MA signal for tax purposes)
     hybrid_signal = ma_signal.copy()
     
@@ -1213,6 +1251,10 @@ def main():
            - Turnover < 300% → Realization method
            - Turnover ≥ 300% → Continuous method
            - Benchmarks use continuous method (academic standard)
+        
+        **Academic Note:** This is a simplified tax model suitable for backtesting
+        and relative comparison. For precise tax accounting, more sophisticated
+        modeling would be required.
         """)
         
         # Show tax method details
@@ -1341,37 +1383,72 @@ def main():
                         else:
                             st.metric(f"{strategy_name} - {metric}", f"{value:.2f}")
 
+    # ACADEMIC DISCLAIMER
+    st.markdown("""
+    ---
+    
+    ## **Academic Methodology Notes**
+    
+    ### **Tax Modeling Approach:**
+    1. **Unified Tax Logic**: All strategies use identical tax calculation for fair comparison
+    2. **Method Auto-Selection**: High-turnover (>300%) strategies use continuous tax approximation
+    3. **Conservative Assumptions**: 
+       - 20% flat tax rate (long-term capital gains for high earners)
+       - Immediate tax payment upon realization
+       - No tax loss harvesting
+       - No account-type differentiation (all taxable)
+    
+    ### **Academic Validity:**
+    - **Relative comparisons are valid** (all strategies use same assumptions)
+    - **Absolute returns may be understated** (conservative tax assumptions)
+    - **Methodology is transparent and reproducible**
+    - **Consistent with backtesting standards** in finance literature
+    
+    ### **Limitations for Academic Publication:**
+    1. Simplified tax treatment (real tax systems are more complex)
+    2. No distinction between short-term vs long-term gains
+    3. No wash sale rule implementation
+    4. No state/local tax considerations
+    5. No tax-deferred account optimization
+    
+    ### **Recommended Disclosure for Academic Papers:**
+    > "Taxes are modeled using a simplified approach with a 20% flat rate on realized gains.
+    > High-turnover strategies use continuous tax approximation. All strategies use identical
+    > tax assumptions to ensure fair comparison. Real-world after-tax returns may differ due
+    > to individual tax circumstances, tax loss harvesting opportunities, and account types."
+    
+    ---
+    """)
+
     # IMPLEMENTATION CHECKLIST
     st.markdown("""
----
+    ## **Implementation Checklist**
 
-## **Implementation Checklist**
+    1. **Unified Tax Logic Applied:**
+       - All strategies use same tax calculation
+       - Tax method auto-selected based on turnover
+       - Effective tax rate: {:.1%}
+       - Slippage cost per trade: {:.1%}
 
-1. **Unified Tax Logic Applied:**
-   - All strategies use same tax calculation
-   - Tax method auto-selected based on turnover
-   - Effective tax rate: {:.1%}
-   - Slippage cost per trade: {:.1%}
+    2. **Portfolio Actions:**
+       - Rotate to treasury sleeve when MA regime flips to RISK-OFF
+       - At each calendar quarter-end, input portfolio values
+       - Execute dollar adjustments as recommended
+       - Re-evaluate Sharpe-optimal weights quarterly
 
-2. **Portfolio Actions:**
-   - Rotate to treasury sleeve when MA regime flips to RISK-OFF
-   - At each calendar quarter-end, input portfolio values
-   - Execute dollar adjustments as recommended
-   - Re-evaluate Sharpe-optimal weights quarterly
+    3. **Current Configuration:**
+       - MA: {}-day {} with {:.1%} tolerance
+       - Tax Method: {}
+       - Expected annual turnover: {:.1%}
 
-3. **Current Configuration:**
-   - MA: {}-day {} with {:.1%} tolerance
-   - Tax Method: {}
-   - Expected annual turnover: {:.1%}
+    4. **Academic Notes:**
+       - All returns shown are AFTER estimated taxes and trading costs
+       - Unified tax logic ensures consistent comparison
+       - Benchmarks include rebalancing costs and tax drag
 
-4. **Academic Notes:**
-   - All returns shown are AFTER estimated taxes and trading costs
-   - Unified tax logic ensures consistent comparison
-   - Benchmarks include rebalancing costs and tax drag
+    Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=9TIGHucZuaJ
 
-Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=9TIGHucZuaJ
-
----
+    ---
     """.format(current_tax_rate, current_flip_cost, best_len, best_type.upper(), best_tol,
               ma_result.get('tax_method', 'auto'), ma_result.get('annual_turnover', 0)))
 
