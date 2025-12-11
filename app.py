@@ -402,18 +402,6 @@ def buy_and_hold_with_rebalance(prices, weights_dict, flip_cost, quarter_end_dat
         "performance": compute_performance(returns, eq_series)
     }
 
-
-# ============================================================
-# WALK-FORWARD OPTIMIZATION (UPDATED)
-# ============================================================
-
-def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
-    """
-    Updated main optimization - uses adaptive, robust MA selection
-    """
-    return adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
-
-
 # ============================================================
 # QUARTERLY PROGRESS HELPER (unchanged)
 # ============================================================
@@ -491,35 +479,6 @@ def walk_forward_validation(prices, strategy_returns, window_years=3):
             })
     
     return pd.DataFrame(results)
-    
-    window_days = min(window_years * 252, total_days // 2)
-    
-    for start in range(0, total_days - window_days, 126):  # Slide every 6 months
-        train_end = start + window_days
-        test_end = min(train_end + 252, total_days)  # 1 year test or less
-        
-        if test_end - train_end < 63:  # Skip if test too short
-            continue
-            
-        train_data = prices.iloc[start:train_end]
-        test_data = prices.iloc[train_end:test_end]
-        
-        # Simple: just track how strategy performs out-of-sample
-        test_returns = strategy_returns.iloc[train_end:test_end]
-        
-        if len(test_returns) > 0 and test_returns.std() > 0:
-            test_sharpe = test_returns.mean() / test_returns.std() * np.sqrt(252)
-            test_cagr = (1 + test_returns).prod() ** (252/len(test_returns)) - 1
-            
-            results.append({
-                'train_period': f"{train_data.index[0].date()} to {train_data.index[-1].date()}",
-                'test_period': f"{test_data.index[0].date()} to {test_data.index[-1].date()}",
-                'test_sharpe': test_sharpe,
-                'test_cagr': test_cagr,
-                'test_length_days': len(test_returns)
-            })
-    
-    return pd.DataFrame(results)
 
 def calculate_consistency_metrics(strategy_returns):
     """
@@ -562,42 +521,12 @@ def calculate_consistency_metrics(strategy_returns):
 
 def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_off_weights, flip_cost):
     """
-    Sensitivity analysis using the SAME SIG engine as main strategy
+    Sensitivity analysis for MA Strategy (NOT Hybrid SIG - uses the same backtest as MA optimization)
     """
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
-    simple_rets = prices.pct_change().fillna(0)
-    
-    # Get SIG engine components
-    risk_on_simple = pd.Series(0.0, index=simple_rets.index)
-    for a, w in risk_on_weights.items():
-        if a in simple_rets.columns:
-            risk_on_simple += simple_rets[a] * w
-    
-    risk_off_daily = pd.Series(0.0, index=simple_rets.index)
-    for a, w in risk_off_weights.items():
-        if a in simple_rets.columns:
-            risk_off_daily += simple_rets[a] * w
-    
-    # Quarterly target
-    risk_on_eq = (1 + risk_on_simple).cumprod()
-    if len(risk_on_eq) > 0 and risk_on_eq.iloc[0] != 0:
-        bh_cagr = (risk_on_eq.iloc[-1] / risk_on_eq.iloc[0]) ** (252 / len(risk_on_eq)) - 1
-        quarterly_target = (1 + bh_cagr) ** (1/4) - 1
-    else:
-        quarterly_target = 0
-    
-    # Quarter-end dates
-    dates = prices.index
-    true_q_ends = pd.date_range(start=dates.min(), end=dates.max(), freq='Q')
-    mapped_q_ends = []
-    for qd in true_q_ends:
-        valid_dates = dates[dates <= qd]
-        if len(valid_dates) > 0:
-            mapped_q_ends.append(valid_dates.max())
-    
     base_len, base_type, base_tol = base_params
     
-    # Test different MA lengths
+    # Test different MA lengths (using MA Strategy backtest, not Hybrid SIG)
     length_results = []
     for L in [50, 100, 150, 200, 250, 300]:
         if L > len(portfolio_index) * 0.5:  # Don't use MA longer than 50% of data
@@ -606,28 +535,16 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
         ma = compute_ma_matrix(portfolio_index, [L], base_type)[L]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, base_tol)
         
-        # Run through SIG engine
-        eq, rw, sw, _ = run_sig_engine(
-            risk_on_simple,
-            risk_off_daily,
-            quarterly_target,
-            signal,
-            quarter_end_dates=mapped_q_ends,
-            quarterly_multiplier=2.0,
-            ma_flip_multiplier=4.0
-        )
-        
-        # Calculate performance
-        returns = eq.pct_change().fillna(0)
-        sharpe = returns.mean() / returns.std() * np.sqrt(252) if returns.std() > 0 else 0
-        cagr = (eq.iloc[-1] / eq.iloc[0]) ** (252 / len(eq)) - 1
-        dd = eq / eq.cummax() - 1
+        # Use MA Strategy backtest (NOT Hybrid SIG!)
+        result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
+                         flip_cost, ma_flip_multiplier=4.0)
+        perf = result["performance"]
         
         length_results.append({
             'length': L,
-            'sharpe': sharpe,
-            'cagr': cagr,
-            'max_dd': dd.min() if len(dd) > 0 else 0,
+            'sharpe': perf['Sharpe'],
+            'cagr': perf['CAGR'],
+            'max_dd': perf['MaxDrawdown'],
             'switches': signal.astype(int).diff().abs().sum()
         })
     
@@ -638,27 +555,16 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
     for tol in [0.00, 0.01, 0.02, 0.03, 0.04, 0.05]:
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
         
-        # Run through SIG engine
-        eq, rw, sw, _ = run_sig_engine(
-            risk_on_simple,
-            risk_off_daily,
-            quarterly_target,
-            signal,
-            quarter_end_dates=mapped_q_ends,
-            quarterly_multiplier=2.0,
-            ma_flip_multiplier=4.0
-        )
-        
-        returns = eq.pct_change().fillna(0)
-        sharpe = returns.mean() / returns.std() * np.sqrt(252) if returns.std() > 0 else 0
-        cagr = (eq.iloc[-1] / eq.iloc[0]) ** (252 / len(eq)) - 1
-        dd = eq / eq.cummax() - 1
+        # Use MA Strategy backtest (NOT Hybrid SIG!)
+        result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
+                         flip_cost, ma_flip_multiplier=4.0)
+        perf = result["performance"]
         
         tol_results.append({
             'tolerance': tol,
-            'sharpe': sharpe,
-            'cagr': cagr,
-            'max_dd': dd.min() if len(dd) > 0 else 0,
+            'sharpe': perf['Sharpe'],
+            'cagr': perf['CAGR'],
+            'max_dd': perf['MaxDrawdown'],
             'switches': signal.astype(int).diff().abs().sum()
         })
     
@@ -666,116 +572,6 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
         'length_sensitivity': pd.DataFrame(length_results),
         'tolerance_sensitivity': pd.DataFrame(tol_results)
     }
-
-def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost):
-    """
-    Simplified MA optimization with proper out-of-sample testing
-    """
-    portfolio_index = build_portfolio_index(prices, risk_on_weights)
-    
-    # Fixed parameter grid (simpler, not scaling with vol)
-    ma_lengths = [50, 100, 150, 200, 250, 300]  # Fixed set
-    ma_types = ["sma", "ema"]
-    tolerances = [0.01, 0.02, 0.03, 0.04]
-    
-    # Generate all combinations
-    param_combinations = []
-    for L in ma_lengths:
-        for ma_type in ma_types:
-            for tol in tolerances:
-                param_combinations.append((L, ma_type, tol))
-    
-    # Need at least 3 years of data for proper train/test split
-    total_days = len(prices)
-    min_days_for_test = 252 * 3  # 3 years
-    
-    if total_days < min_days_for_test:
-        # Not enough data for proper OOS testing
-        # Use simple in-sample optimization with warning
-        best_params = _optimize_in_sample(prices, portfolio_index, risk_on_weights, 
-                                         risk_off_weights, flip_cost, param_combinations)
-        
-        # Generate results
-        L, ma_type, tol = best_params
-        ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
-        signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-        result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
-                         flip_cost, ma_flip_multiplier=4.0)
-        
-        return best_params, result, {"method": "in_sample", "oos_available": False}
-    
-    else:
-        # PROPER OUT-OF-SAMPLE TESTING
-        # Split: 70% train, 30% test
-        split_idx = int(0.7 * total_days)
-        train_prices = prices.iloc[:split_idx]
-        test_prices = prices.iloc[split_idx:]
-        
-        # Train on first 70%
-        train_portfolio = build_portfolio_index(train_prices, risk_on_weights)
-        
-        best_score = -1e9
-        best_params = None
-        
-        for L, ma_type, tol in param_combinations:
-            try:
-                # Train MA signal
-                ma = compute_ma_matrix(train_portfolio, [L], ma_type)[L]
-                signal = generate_testfol_signal_vectorized(train_portfolio, ma, tol)
-                
-                # Backtest on train set
-                train_result = backtest(train_prices, signal, risk_on_weights, 
-                                      risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
-                
-                # Test on OOS set (using signal generated on FULL data up to test point)
-                full_portfolio_to_test_end = build_portfolio_index(
-                    prices.iloc[:split_idx + 1], risk_on_weights  # Include one extra day
-                )
-                full_ma = compute_ma_matrix(full_portfolio_to_test_end, [L], ma_type)[L]
-                full_signal = generate_testfol_signal_vectorized(full_portfolio_to_test_end, full_ma, tol)
-                
-                # Use only the test portion
-                test_signal = full_signal.iloc[split_idx:]
-                
-                # Backtest on OOS
-                test_result = backtest(test_prices, test_signal, risk_on_weights, 
-                                     risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
-                
-                # Combined score with penalty for overfitting
-                train_sharpe = train_result["performance"]["Sharpe"]
-                test_sharpe = test_result["performance"]["Sharpe"]
-                
-                # Adjusted score: 30% train, 70% test (more weight to OOS)
-                adjusted_score = (0.3 * train_sharpe) + (0.7 * test_sharpe)
-                
-                # Penalty for poor OOS performance
-                if test_sharpe < 0:
-                    adjusted_score -= 0.5  # Penalty for negative OOS Sharpe
-                
-                if adjusted_score > best_score:
-                    best_score = adjusted_score
-                    best_params = (L, ma_type, tol)
-                    oos_perf = test_result["performance"]
-                    
-            except Exception as e:
-                continue
-        
-        if best_params is None:
-            # Fallback
-            best_params = (100, "sma", 0.02)
-        
-        # Final backtest with selected params on FULL dataset
-        L, ma_type, tol = best_params
-        ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
-        signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-        final_result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
-                              flip_cost, ma_flip_multiplier=4.0)
-        
-        return best_params, final_result, {
-            "method": "out_of_sample",
-            "train_test_split": f"{split_idx}/{total_days - split_idx} days",
-            "oos_performance": oos_perf if 'oos_perf' in locals() else None
-        }
 
 def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost):
     """
@@ -1516,10 +1312,11 @@ def main():
         st.header("🎯 Strategy Validation")
         
         # Create tabs for different validation tests
-        val_tab1, val_tab2, val_tab3 = st.tabs([
+        val_tab1, val_tab2, val_tab3, val_tab4 = st.tabs([
             "Statistical Significance", 
             "Out-of-Sample Performance",
-            "Parameter Sensitivity (SIG Engine)"
+            "Parameter Sensitivity (MA Strategy)",  # Changed from "SIG Engine"
+            "Strategy Consistency"
         ])
         
         with val_tab1:
@@ -1817,7 +1614,7 @@ def main():
                 st.info("Not enough data for walk-forward analysis (need at least 2 years)")
         
         with val_tab3:
-            st.subheader("Parameter Sensitivity Analysis (SIG Engine)")
+            st.subheader("Parameter Sensitivity Analysis (MA Strategy)")  # Changed
             
             sens_results = sig_based_sensitivity_analysis(
                 prices, best_cfg, risk_on_weights, risk_off_weights, FLIP_COST
