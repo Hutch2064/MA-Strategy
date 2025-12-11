@@ -62,8 +62,24 @@ def build_portfolio_index(prices, weights_dict):
     for a, w in weights_dict.items():
         if a in simple_rets.columns:
             idx_rets += simple_rets[a] * w
-
-    return (1 + idx_rets).cumprod()
+    
+    # Create cumulative product
+    cumprod = (1 + idx_rets).cumprod()
+    
+    # Find first valid (non-NaN, non-zero) index
+    valid_mask = cumprod.notna() & (cumprod > 0)
+    if not valid_mask.any():
+        # All values are NaN or zero - return a constant series
+        return pd.Series(1.0, index=cumprod.index)
+    
+    first_valid_idx = cumprod[valid_mask].index[0]
+    
+    # Forward fill from first valid value
+    cumprod_filled = cumprod.copy()
+    cumprod_filled.loc[:first_valid_idx] = 1.0  # Set early values to 1.0
+    cumprod_filled = cumprod_filled.ffill()
+    
+    return cumprod_filled
 
 
 # ============================================================
