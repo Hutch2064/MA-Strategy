@@ -360,7 +360,7 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
         
         # Ensure reasonable bounds
         min_len = max(20, int(0.1 * total_days))
-        max_len = min(500, int(0.5 * total_days))
+        max_len = min(400, int(0.5 * total_days))
         
         base_lengths = [l for l in base_lengths if min_len <= l <= max_len]
         
