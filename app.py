@@ -139,56 +139,53 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 
 def calculate_tax_liability_at_realization(returns, signal_changes, tax_rate=ANNUAL_TAX_RATE):
     """
-    Calculate taxes when gains are realized (FIXED VERSION)
-    Taxes applied immediately when:
-    1. MA signal flips from RISK-ON to RISK-OFF
-    2. Quarterly rebalancing triggers partial realization
+    Calculate taxes when gains are realized - FIXED VERSION
+    Taxes applied immediately when MA signal flips from RISK-ON to RISK-OFF
     """
     if len(returns) == 0:
         return pd.Series(0.0, index=returns.index)
     
-    # Convert to equity curve
-    equity_pre_tax = (1 + returns).cumprod()
+    # Start with initial investment
+    equity = 10000.0  # Start with $10,000
+    cost_basis = equity  # Initial cost basis
     tax_payments = pd.Series(0.0, index=returns.index)
+    equity_values = [equity]
     
-    # Track cost basis
-    cost_basis = equity_pre_tax.iloc[0] if len(equity_pre_tax) > 0 else 1.0
     in_position = True
-    last_entry_idx = 0
+    last_entry_value = equity
     
-    for i in range(1, len(returns)):
-        current_value = equity_pre_tax.iloc[i]
+    for i in range(len(returns)):
+        # Apply daily return
+        equity *= (1 + returns.iloc[i])
         
         # Check for RISK-ON → RISK-OFF transition (sell all risky)
         if signal_changes.iloc[i] == -1 and in_position:
-            # Calculate gain
-            gain = max(0, current_value - cost_basis)
+            # Calculate gain since last entry
+            gain = max(0, equity - last_entry_value)
             
             if gain > 0:
-                # Apply tax
+                # Apply tax immediately
                 tax_amount = gain * tax_rate
                 tax_payments.iloc[i] = -tax_amount
                 
-                # Reduce equity proportionally
-                reduction_factor = (current_value - tax_amount) / current_value
-                if current_value > 0:
-                    equity_pre_tax.iloc[i:] *= reduction_factor
+                # Reduce equity by tax amount
+                equity -= tax_amount
                 
-                # Update current_value after tax
-                current_value = equity_pre_tax.iloc[i]
+                # Update cost basis
+                cost_basis = equity
+                last_entry_value = equity
             
-            # Reset cost basis to post-tax value
-            cost_basis = current_value
             in_position = False
         
         # Check for RISK-OFF → RISK-ON transition (buy risky)
         elif signal_changes.iloc[i] == 1 and not in_position:
-            cost_basis = current_value
+            last_entry_value = equity
             in_position = True
         
-        # Update last_entry_idx if we're in a position
-        if in_position:
-            last_entry_idx = i
+        equity_values.append(equity)
+    
+    # Remove the first value (starting equity)
+    equity_curve = pd.Series(equity_values[1:], index=returns.index)
     
     return tax_payments
 
@@ -449,7 +446,7 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
 def backtest_with_taxes(prices, signal, risk_on_weights, risk_off_weights, 
                        flip_cost=FLIP_COST, tax_rate=ANNUAL_TAX_RATE):
     """
-    Backtest with proper tax treatment
+    Backtest with proper tax treatment - FIXED VERSION
     """
     simple = prices.pct_change().fillna(0)
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
@@ -462,7 +459,7 @@ def backtest_with_taxes(prices, signal, risk_on_weights, risk_off_weights,
     # 1. Apply slippage costs
     flip_costs = np.where(flip_mask, -flip_cost, 0.0)
     
-    # 2. Calculate taxes (realization-based) - USING FIXED VERSION
+    # 2. Calculate taxes (realization-based)
     tax_payments = calculate_tax_liability_at_realization(
         strategy_simple + flip_costs, 
         signal_changes,
@@ -472,19 +469,30 @@ def backtest_with_taxes(prices, signal, risk_on_weights, risk_off_weights,
     # 3. Combine all costs
     total_costs = flip_costs + tax_payments.values
     
-    # 4. Calculate returns and equity
-    strat_adj = strategy_simple + total_costs
-    eq = (1 + strat_adj).cumprod()
-
+    # 4. Calculate returns and equity - CORRECT WAY
+    # Start with $10,000 and apply returns and costs cumulatively
+    equity_curve = [10000.0]
+    for i in range(len(strategy_simple)):
+        # Apply daily return and costs
+        daily_return = strategy_simple.iloc[i] + total_costs[i]
+        new_equity = equity_curve[-1] * (1 + daily_return)
+        equity_curve.append(new_equity)
+    
+    # Remove initial value
+    equity_curve = pd.Series(equity_curve[1:], index=strategy_simple.index)
+    
+    # Calculate the actual returns from the equity curve
+    actual_returns = equity_curve.pct_change().fillna(0)
+    
     # Calculate turnover for analysis
     turnover = calculate_turnover(signal)
 
     return {
-        "returns": strat_adj,
-        "equity_curve": eq,
+        "returns": actual_returns,
+        "equity_curve": equity_curve,
         "signal": signal,
         "weights": weights,
-        "performance": compute_performance(strat_adj, eq),
+        "performance": compute_performance(actual_returns, equity_curve),
         "flip_mask": flip_mask,
         "flip_costs": pd.Series(flip_costs, index=strategy_simple.index),
         "tax_payments": tax_payments,
