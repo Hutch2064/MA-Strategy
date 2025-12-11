@@ -275,7 +275,7 @@ def robust_ma_validation(prices, risk_on_weights, risk_off_weights, flip_cost,
             
             # Training data: everything before test
             train_indices = list(range(test_start))
-            if len(train_indices) < 180:  # Need minimum training data
+            if len(train_indices) < 100:  # Need minimum training data
                 continue
             
             train_portfolio = portfolio_index.iloc[train_indices]
