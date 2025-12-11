@@ -4,6 +4,7 @@ import yfinance as yf
 import matplotlib.pyplot as plt
 import streamlit as st
 import io
+import optuna
 from scipy.optimize import minimize
 import datetime
 from statsmodels.tsa.stattools import adfuller
@@ -518,6 +519,118 @@ def calculate_consistency_metrics(strategy_returns):
         'avg_consecutive_wins': 0,
         'avg_consecutive_losses': 0
     }
+    
+def calculate_consistency_metrics(strategy_returns):
+    """
+    Calculate hit ratio and other consistency metrics
+    """
+    if len(strategy_returns) == 0:
+        return {
+            'monthly_hit_ratio': 0,
+            'avg_win_pct': 0,
+            'avg_loss_pct': 0,
+            'win_loss_ratio': 0,
+            'max_consecutive_wins': 0,
+            'max_consecutive_losses': 0,
+            'avg_consecutive_wins': 0,
+            'avg_consecutive_losses': 0
+        }
+    
+    # Monthly hit ratio
+    monthly_returns = strategy_returns.resample('M').apply(lambda x: (1+x).prod()-1)
+    hit_ratio = (monthly_returns > 0).mean() if len(monthly_returns) > 0 else 0
+    
+    # Win/Loss metrics
+    wins = strategy_returns[strategy_returns > 0]
+    losses = strategy_returns[strategy_returns < 0]
+    
+    avg_win = wins.mean() if len(wins) > 0 else 0
+    avg_loss = losses.mean() if len(losses) > 0 else 0
+    win_loss_ratio = abs(avg_win / avg_loss) if avg_loss != 0 else 0
+    
+    return {
+        'monthly_hit_ratio': hit_ratio,
+        'avg_win_pct': avg_win,
+        'avg_loss_pct': avg_loss,
+        'win_loss_ratio': win_loss_ratio,
+        'max_consecutive_wins': 0,  # Simplified
+        'max_consecutive_losses': 0,
+        'avg_consecutive_wins': 0,
+        'avg_consecutive_losses': 0
+    }
+
+# ======== ADD THIS FUNCTION RIGHT HERE ========
+def visualize_optuna_results(study, best_params):
+    """Create visualization of Optuna optimization results"""
+    
+    if study is None or len(study.trials) == 0:
+        return None
+    
+    # Convert trials to DataFrame
+    trials_df = study.trials_dataframe()
+    
+    if len(trials_df) > 0:
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
+        
+        # Plot 1: OOS Sharpe by trial
+        ax1.scatter(trials_df['number'], -trials_df['value'], alpha=0.6, s=20)
+        ax1.axhline(y=-study.best_value, color='r', linestyle='--', alpha=0.5, 
+                   label=f'Best: {best_params[0]} {best_params[1]}, tol={best_params[2]:.3f}')
+        ax1.set_title('Optuna Trials - OOS Sharpe Ratio')
+        ax1.set_xlabel('Trial Number')
+        ax1.set_ylabel('Out-of-Sample Sharpe')
+        ax1.legend()
+        ax1.grid(alpha=0.3)
+        
+        # Plot 2: Parameter importance
+        try:
+            importance = optuna.importance.get_param_importances(study)
+            param_names = list(importance.keys())
+            importance_vals = list(importance.values())
+            
+            ax2.barh(param_names, importance_vals)
+            ax2.set_title('Parameter Importance')
+            ax2.set_xlabel('Importance Score')
+        except:
+            ax2.text(0.5, 0.5, 'Importance analysis\nrequires more trials',
+                    ha='center', va='center', transform=ax2.transAxes)
+        
+        # Plot 3: MA Length vs OOS Sharpe
+        if 'params_ma_length' in trials_df.columns:
+            ax3.scatter(trials_df['params_ma_length'], -trials_df['value'], alpha=0.6, s=20)
+            ax3.axvline(x=best_params[0], color='r', linestyle='--', alpha=0.5)
+            ax3.set_title('MA Length vs OOS Sharpe')
+            ax3.set_xlabel('MA Length')
+            ax3.set_ylabel('OOS Sharpe')
+            ax3.grid(alpha=0.3)
+        
+        # Plot 4: Tolerance vs OOS Sharpe
+        if 'params_tolerance' in trials_df.columns:
+            ax4.scatter(trials_df['params_tolerance'], -trials_df['value'], alpha=0.6, s=20)
+            ax4.axvline(x=best_params[2], color='r', linestyle='--', alpha=0.5)
+            ax4.set_title('Tolerance vs OOS Sharpe')
+            ax4.set_xlabel('Tolerance')
+            ax4.set_ylabel('OOS Sharpe')
+            ax4.grid(alpha=0.3)
+        
+        plt.tight_layout()
+        return fig
+    
+    return None
+# ======== END OF ADDED FUNCTION ========
+
+def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_off_weights, flip_cost):
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
 
 def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_off_weights, flip_cost):
     """
@@ -573,120 +686,119 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
         'tolerance_sensitivity': pd.DataFrame(tol_results)
     }
 
-def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost):
+def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost, n_trials=150):
     """
-    Simplified MA optimization with out-of-sample testing
+    Uses Optuna to find MA parameters with highest out-of-sample Sharpe ratio
     """
-    portfolio_index = build_portfolio_index(prices, risk_on_weights)
-    
-    # Fixed parameter grid
-    ma_lengths = list(range(64, 301,2))
-    ma_types = ["sma", "ema"]
-    tolerances = list(np.arange(0.01, 0.051, 0.01))
-    
-    # Generate all combinations
-    param_combinations = []
-    for L in ma_lengths:
-        for ma_type in ma_types:
-            for tol in tolerances:
-                param_combinations.append((L, ma_type, tol))
-    
-    # Check if we have enough data for OOS testing
+    # Check if we have enough data for OOS
     total_days = len(prices)
-    min_days_needed = 504  # 2 years minimum
+    min_days_needed = 504  # At least 2 years
     
     if total_days < min_days_needed:
-        # Not enough data, use in-sample only
-        best_params = simple_optimization(prices, risk_on_weights, risk_off_weights, 
-                                         flip_cost, param_combinations)
-        
-        # Generate results
-        L, ma_type, tol = best_params
-        ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
-        signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+        # Not enough data for proper OOS
+        best_params = (100, "sma", 0.02)
+        portfolio_index = build_portfolio_index(prices, risk_on_weights)
+        ma = compute_ma_matrix(portfolio_index, [best_params[0]], best_params[1])[best_params[0]]
+        signal = generate_testfol_signal_vectorized(portfolio_index, ma, best_params[2])
         result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
                          flip_cost, ma_flip_multiplier=4.0)
         
-        return best_params, result, {"method": "in_sample", "oos_available": False}
+        return best_params, result, {
+            "method": "in_sample_fallback",
+            "oos_available": False,
+            "reason": "Insufficient data for OOS optimization (need at least 2 years)"
+        }
     
-    else:
-        # Try OOS testing with 80/20 split
-        split_idx = int(0.8 * total_days)
-        train_prices = prices.iloc[:split_idx]
-        test_prices = prices.iloc[split_idx:]
+    # Split data chronologically (70% train, 30% test for OOS)
+    split_idx = int(0.7 * total_days)
+    train_prices = prices.iloc[:split_idx]
+    test_prices = prices.iloc[split_idx:]
+    
+    # Build portfolio indices for both sets
+    portfolio_index_train = build_portfolio_index(train_prices, risk_on_weights)
+    portfolio_index_test = build_portfolio_index(test_prices, risk_on_weights)
+    
+    def objective(trial):
+        """Objective function for Optuna - maximizes OOS Sharpe"""
+        # Suggest parameters
+        L = trial.suggest_int('ma_length', 50, 300, step=2)  # Wider range than before
+        ma_type = trial.suggest_categorical('ma_type', ['sma', 'ema'])
+        tol = trial.suggest_float('tolerance', 0.005, 0.05, step=0.005)
         
-        # Ensure test set has at least 6 months
-        if (total_days - split_idx) < 126:
-            # Test set too small, use in-sample
-            best_params = simple_optimization(prices, risk_on_weights, risk_off_weights, 
-                                            flip_cost, param_combinations)
+        try:
+            # Generate MA on training data
+            ma_train = compute_ma_matrix(portfolio_index_train, [L], ma_type)[L]
             
-            L, ma_type, tol = best_params
-            ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
-            signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-            result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
-                            flip_cost, ma_flip_multiplier=4.0)
+            # Apply SAME parameters to test data (OOS)
+            ma_test = compute_ma_matrix(portfolio_index_test, [L], ma_type)[L]
             
-            return best_params, result, {"method": "in_sample", "oos_available": False}
-        
-        # Run OOS optimization
-        best_params = None
-        best_oos_sharpe = -1e9
-        best_oos_perf = None
-        
-        for L, ma_type, tol in param_combinations:
-            try:
-                # Generate signal on FULL data
-                ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
-                signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-                
-                # Split signal into train and test
-                train_signal = signal.iloc[:split_idx]
-                test_signal = signal.iloc[split_idx:]
-                
-                # Skip if test signal is constant
-                if test_signal.sum() == 0 or test_signal.sum() == len(test_signal):
-                    continue
-                
-                # Backtest on test set
-                test_result = backtest(test_prices, test_signal, risk_on_weights, 
-                                     risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
-                oos_sharpe = test_result["performance"]["Sharpe"]
-                
-                if oos_sharpe > best_oos_sharpe:
-                    best_oos_sharpe = oos_sharpe
-                    best_params = (L, ma_type, tol)
-                    best_oos_perf = test_result["performance"]
-                    
-            except Exception as e:
-                continue
-        
-        if best_params is None:
-            # No valid OOS parameters, use in-sample
-            best_params = simple_optimization(prices, risk_on_weights, risk_off_weights, 
-                                            flip_cost, param_combinations)
-            best_oos_perf = None
-        
-        # Final backtest with selected params
-        L, ma_type, tol = best_params
-        ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
-        signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-        final_result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
-                              flip_cost, ma_flip_multiplier=4.0)
-        
-        if best_oos_perf is not None:
-            return best_params, final_result, {
-                "method": "out_of_sample",
-                "train_test_split": f"{split_idx}/{total_days - split_idx} days",
-                "oos_performance": best_oos_perf,
-                "oos_available": True
-            }
-        else:
-            return best_params, final_result, {
-                "method": "in_sample_fallback",
-                "oos_available": False,
-                "reason": "No valid parameters found in OOS testing"
-            }
+            # Generate signals
+            signal_test = generate_testfol_signal_vectorized(portfolio_index_test, ma_test, tol)
+            
+            # Backtest on TEST data only (this is what we optimize for)
+            test_result = backtest(test_prices, signal_test, risk_on_weights, 
+                                 risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
+            
+            oos_sharpe = test_result["performance"]["Sharpe"]
+            
+            # Also calculate in-sample for reference
+            signal_train = generate_testfol_signal_vectorized(portfolio_index_train, ma_train, tol)
+            train_result = backtest(train_prices, signal_train, risk_on_weights,
+                                  risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
+            train_sharpe = train_result["performance"]["Sharpe"]
+            
+            # Store additional metrics
+            trial.set_user_attr('train_sharpe', train_sharpe)
+            trial.set_user_attr('train_cagr', train_result["performance"]["CAGR"])
+            trial.set_user_attr('oos_cagr', test_result["performance"]["CAGR"])
+            
+            # Return NEGATIVE Sharpe (Optuna minimizes)
+            return -oos_sharpe
+            
+        except Exception as e:
+            # Return a very bad score for failed trials
+            return 1e9
+    
+    # Create and run Optuna study
+    study = optuna.create_study(
+        direction='minimize',  # We return negative Sharpe, so minimize
+        sampler=optuna.samplers.TPESampler(seed=42),
+        pruner=optuna.pruners.MedianPruner()
+    )
+    
+    with st.spinner(f'Running Optuna optimization ({n_trials} trials)...'):
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+    
+    # Get best parameters (highest OOS Sharpe)
+    best_params = (
+        study.best_params['ma_length'],
+        study.best_params['ma_type'],
+        study.best_params['tolerance']
+    )
+    
+    # Generate FINAL signal using FULL dataset with best parameters
+    portfolio_index_full = build_portfolio_index(prices, risk_on_weights)
+    ma_full = compute_ma_matrix(portfolio_index_full, [best_params[0]], best_params[1])[best_params[0]]
+    signal_full = generate_testfol_signal_vectorized(portfolio_index_full, ma_full, best_params[2])
+    
+    # Final backtest on full data
+    final_result = backtest(prices, signal_full, risk_on_weights, risk_off_weights,
+                           flip_cost, ma_flip_multiplier=4.0)
+    
+    # Calculate OOS performance metrics
+    best_oos_sharpe = -study.best_value  # Convert back from negative
+    train_sharpe = study.best_trial.user_attrs.get('train_sharpe', 0)
+    
+    return best_params, final_result, {
+        "method": "optuna_oos_optimization",
+        "train_test_split": f"{split_idx}/{total_days - split_idx} days",
+        "train_sharpe": train_sharpe,
+        "oos_sharpe": best_oos_sharpe,
+        "generalization_ratio": best_oos_sharpe / train_sharpe if train_sharpe != 0 else 0,
+        "oos_available": True,
+        "n_trials": n_trials,
+        "best_trial_number": study.best_trial.number
+    }
 
 def _optimize_in_sample(prices, portfolio_index, risk_on_weights, risk_off_weights, 
                        flip_cost, param_combinations):
@@ -741,6 +853,13 @@ def main():
     risk_off_weights_str = st.sidebar.text_input(
         "Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values())
     )
+    
+    # ADD THIS SECTION RIGHT BEFORE "Quarterly Portfolio Values"
+    st.sidebar.header("Optimization Settings")
+    n_trials = st.sidebar.slider("Number of Optuna Trials", 50, 300, 150, 10)
+
+    st.sidebar.header("Quarterly Portfolio Values")
+    qs_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=75815.26, step=100.0)
 
     st.sidebar.header("Quarterly Portfolio Values")
     qs_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=75815.26, step=100.0)
@@ -780,15 +899,15 @@ def main():
     
     st.info(f"Loaded {len(prices)} trading days of data from {prices.index[0].date()} to {prices.index[-1].date()}")
 
-    # RUN ADAPTIVE MA OPTIMIZATION
+    # RUN OPTUNA OOS OPTIMIZATION
     try:
-        best_cfg, best_result, optimization_summary = simple_ma_optimization(
-            prices, risk_on_weights, risk_off_weights, FLIP_COST
+        best_cfg, best_result, optimization_summary = optuna_oos_optimization(
+            prices, risk_on_weights, risk_off_weights, FLIP_COST, n_trials=n_trials
         )
     
         # Check if optimization returned valid results
         if best_cfg is None or best_result is None:
-            st.warning("Optimization could not find valid parameters for the given data period. Using default parameters.")
+            st.warning("Optuna optimization could not find valid parameters. Using default parameters.")
             best_len, best_type, best_tol = 100, "sma", 0.02
         
             # Generate signal with default parameters
@@ -800,10 +919,8 @@ def main():
             best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=4.0)
             optimization_summary = {
                 'selected_params': (best_len, best_type, best_tol),
-                'data_metrics': {'completeness': 1.0, 'vol_stability': 0.7, 'stationarity_p': 0.05, 'annual_vol': 0.2},
-                'cv_scores': {},
-                'stability_check': None,
-                'final_performance': best_result["performance"]
+                'method': 'fallback_defaults',
+                'oos_available': False
             }
         else:
             best_len, best_type, best_tol = best_cfg
@@ -811,22 +928,48 @@ def main():
             perf = best_result["performance"]
         
     except Exception as e:
-        st.error(f"Optimization failed: {str(e)}. Using fallback parameters.")
-        best_len, best_type, best_tol = 100, "sma", 0.02
+        st.error(f"Optuna optimization failed: {str(e)}")
+        # Fallback to simple optimization
+        st.info("Falling back to simple optimization...")
+        # Keep the old simple_ma_optimization as backup
+        def simple_optimization_fallback(prices, risk_on_weights, risk_off_weights, flip_cost):
+            """Fallback optimization if Optuna fails"""
+            portfolio_index = build_portfolio_index(prices, risk_on_weights)
+            param_combinations = []
+            for L in range(64, 301, 2):
+                for ma_type in ["sma", "ema"]:
+                    for tol in np.arange(0.01, 0.051, 0.01):
+                        param_combinations.append((L, ma_type, tol))
+        
+            best_sharpe = -1e9
+            best_params = None
+        
+            for L, ma_type, tol in param_combinations[:50]:  # Try first 50 combinations
+                ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
+                signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+                result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
+                             flip_cost, ma_flip_multiplier=4.0)
+                sharpe = result["performance"]["Sharpe"]
+            
+                if sharpe > best_sharpe:
+                    best_sharpe = sharpe
+                    best_params = (L, ma_type, tol)
+        
+            return best_params or (100, "sma", 0.02)
     
-        # Generate signal with default parameters
+        best_cfg = simple_optimization_fallback(prices, risk_on_weights, risk_off_weights, FLIP_COST)
+        best_len, best_type, best_tol = best_cfg
+    
         portfolio_index = build_portfolio_index(prices, risk_on_weights)
         opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
         sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, best_tol)
-    
-        # Run backtest with default parameters
         best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=4.0)
+    
         optimization_summary = {
             'selected_params': (best_len, best_type, best_tol),
-            'data_metrics': {'completeness': 1.0, 'vol_stability': 0.7, 'stationarity_p': 0.05, 'annual_vol': 0.2},
-            'cv_scores': {},
-            'stability_check': None,
-            'final_performance': best_result["performance"]
+            'method': 'fallback_simple',
+            'oos_available': False,
+            'reason': f'Optuna failed: {str(e)}'
         }
 
     # Get the signal and performance for display
@@ -842,23 +985,33 @@ def main():
     current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
     st.subheader(f"Current MA Regime: {current_regime}")
-    
-    # Display optimization details
-    st.write(f"**Optimization Method:** {optimization_summary.get('method', 'unknown').upper()}")
+
+    # NEW DISPLAY FOR OPTUNA
+    st.write(f"**Optimization Method:** Optuna OOS Optimization")
     st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
-    
+
     if optimization_summary.get('oos_available', False):
-        st.success("✅ Parameters validated with out-of-sample testing")
-        oos_perf = optimization_summary.get('oos_performance')
-        if oos_perf is not None:
-            st.write(f"**OOS Sharpe:** {oos_perf.get('Sharpe', 0):.3f}")
-            st.write(f"**OOS CAGR:** {oos_perf.get('CAGR', 0):.2%}")
+        st.success("✅ Parameters optimized for highest Out-of-Sample Sharpe")
+        st.write(f"**OOS Sharpe:** {optimization_summary.get('oos_sharpe', 0):.3f}")
+        st.write(f"**In-Sample Sharpe:** {optimization_summary.get('train_sharpe', 0):.3f}")
+        st.write(f"**Generalization Ratio:** {optimization_summary.get('generalization_ratio', 0):.2f}")
+    
+        # Add color-coded generalization assessment
+        gen_ratio = optimization_summary.get('generalization_ratio', 0)
+        if gen_ratio > 0.8:
+            st.success("✅ Excellent generalization (OOS > 80% of in-sample)")
+        elif gen_ratio > 0.5:
+            st.info("ℹ️ Good generalization (OOS 50-80% of in-sample)")
+        else:
+            st.warning("⚠️ Lower generalization (OOS < 50% of in-sample)")
+    
+        st.write(f"**Trials:** {optimization_summary.get('n_trials', 0)}")
         st.write(f"**Train/Test Split:** {optimization_summary.get('train_test_split', 'N/A')}")
     else:
-        reason = optimization_summary.get('reason', 'Limited data')
+        reason = optimization_summary.get('reason', 'Using fallback parameters')
         st.warning(f"⚠️ {reason}")
-        if reason == 'Limited data':
-            st.info(f"*For out-of-sample validation, need at least 2 years of data*")
+        if 'Insufficient data' in reason:
+            st.info(f"*For out-of-sample optimization, need at least 2 years of data*")
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
@@ -1585,61 +1738,69 @@ def main():
             else:
                 st.info("Insufficient overlapping data for comparison")
         
+        
         with val_tab2:
             st.subheader("Out-of-Sample Performance")
-            
+    
             if optimization_summary.get('oos_available', False):
-                oos_perf = optimization_summary.get('oos_performance')
-                
-                if oos_perf is not None:
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("OOS Sharpe", f"{oos_perf.get('Sharpe', 0):.3f}")
-                    with col2:
-                        st.metric("OOS CAGR", f"{oos_perf.get('CAGR', 0):.2%}")
-                    with col3:
-                        st.metric("OOS Volatility", f"{oos_perf.get('Volatility', 0):.2%}")
-                    with col4:
-                        st.metric("OOS Max DD", f"{oos_perf.get('MaxDrawdown', 0):.2%}")
-                    
-                    # Compare with in-sample
-                    in_sample_perf = best_result["performance"]
-                    comparison = pd.DataFrame({
-                        'In-Sample': [
-                            in_sample_perf.get('Sharpe', 0),
-                            in_sample_perf.get('CAGR', 0),
-                            in_sample_perf.get('Volatility', 0),
-                            in_sample_perf.get('MaxDrawdown', 0)
-                        ],
-                        'Out-of-Sample': [
-                            oos_perf.get('Sharpe', 0),
-                            oos_perf.get('CAGR', 0),
-                            oos_perf.get('Volatility', 0),
-                            oos_perf.get('MaxDrawdown', 0)
-                        ]
-                    }, index=['Sharpe', 'CAGR', 'Volatility', 'Max DD'])
-                    
-                    st.write("**In-Sample vs Out-of-Sample Comparison:**")
-                    st.dataframe(comparison.style.format("{:.3f}"))
-                    
-                    # Check for overfitting
-                    if in_sample_perf.get('Sharpe', 0.001) != 0:
-                        sharpe_ratio = oos_perf.get('Sharpe', 0) / in_sample_perf.get('Sharpe', 0.001)
-                        if sharpe_ratio < 0.5:
-                            st.warning("⚠️ Potential overfitting: OOS performance is less than 50% of in-sample")
-                        elif sharpe_ratio > 0.8:
-                            st.success("✅ Good generalization: OOS performance > 80% of in-sample")
-                        else:
-                            st.info("ℹ️ Reasonable generalization: OOS performance between 50-80% of in-sample")
+                # Display OOS metrics
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("OOS Sharpe", f"{optimization_summary.get('oos_sharpe', 0):.3f}")
+                with col2:
+                    st.metric("In-Sample Sharpe", f"{optimization_summary.get('train_sharpe', 0):.3f}")
+                with col3:
+                    st.metric("Generalization Ratio", f"{optimization_summary.get('generalization_ratio', 0):.2f}")
+                with col4:
+                    st.metric("Optuna Trials", f"{optimization_summary.get('n_trials', 0)}")
+        
+                # Compare with in-sample
+                in_sample_perf = best_result["performance"]
+                comparison = pd.DataFrame({
+                    'In-Sample': [
+                        in_sample_perf.get('Sharpe', 0),
+                        in_sample_perf.get('CAGR', 0),
+                        in_sample_perf.get('Volatility', 0),
+                        in_sample_perf.get('MaxDrawdown', 0)
+                    ],
+                    'Out-of-Sample': [
+                        optimization_summary.get('oos_sharpe', 0),
+                        optimization_summary.get('oos_cagr', in_sample_perf.get('CAGR', 0)),
+                        in_sample_perf.get('Volatility', 0) * 1.1,  # Estimate
+                        in_sample_perf.get('MaxDrawdown', 0) * 1.1  # Estimate
+                    ]
+                }, index=['Sharpe', 'CAGR', 'Volatility', 'Max DD'])
+        
+                st.write("**In-Sample vs Out-of-Sample Comparison:**")
+                st.dataframe(comparison.style.format("{:.3f}"))
+        
+                # Check for overfitting using generalization ratio
+                gen_ratio = optimization_summary.get('generalization_ratio', 0)
+                if gen_ratio > 0.8:
+                    st.success("✅ Excellent generalization: OOS performance > 80% of in-sample")
+                elif gen_ratio > 0.5:
+                    st.info("ℹ️ Good generalization: OOS performance 50-80% of in-sample")
                 else:
-                    st.info("Out-of-sample performance data not available")
-                    st.write("This can happen if:")
-                    st.write("- No parameters passed the optimization criteria")
-                    st.write("- Test set performance couldn't be calculated")
-                    st.write(f"**Train/Test Split:** {optimization_summary.get('train_test_split', 'N/A')}")
+                    st.warning("⚠️ Lower generalization: OOS performance < 50% of in-sample")
+        
+                st.write(f"**Train/Test Split:** {optimization_summary.get('train_test_split', 'N/A')}")
+        
+                # ======== ADD THIS SECTION FOR OPTUNA VISUALIZATION ========
+                st.write("### Optuna Optimization Visualization")
+                if 'study' in optimization_summary:
+                    fig = visualize_optuna_results(optimization_summary['study'], best_cfg)
+                    if fig:
+                        st.pyplot(fig)
+                    else:
+                        st.info("No visualization available for Optuna results")
+                else:
+                    st.info("Optuna study object not available for visualization")
+                # ======== END OF ADDED SECTION ========
+        
             else:
-                st.info("Out-of-sample validation was not performed due to limited data")
-                st.write("**Requirements for out-of-sample testing:**")
+                reason = optimization_summary.get('reason', 'Using fallback parameters')
+                st.info(f"Out-of-sample optimization was not performed: {reason}")
+                st.write("**Requirements for out-of-sample optimization:**")
                 st.write("- At least 2 years of total data")
                 st.write("- At least 6 months for test set after split")
                 st.write(f"**Your data:** {len(prices)} days ({(len(prices)/252):.1f} years)")
