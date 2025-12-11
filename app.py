@@ -330,6 +330,33 @@ def robust_ma_validation(prices, risk_on_weights, risk_off_weights, flip_cost,
     
     return best_params, cv_scores
 
+    
+def simple_optimization(prices, risk_on_weights, risk_off_weights, flip_cost, candidate_params):
+    """Simple optimization without validation - for limited data"""
+    best_sharpe = -1e9
+    best_params = None
+    
+    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+    
+    for L, ma_type, tol in candidate_params:
+        ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
+        signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+        result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
+                         flip_cost, ma_flip_multiplier=4.0)
+        sharpe = result["performance"]["Sharpe"]
+        
+        if sharpe > best_sharpe:
+            best_sharpe = sharpe
+            best_params = (L, ma_type, tol)
+    
+    # Default fallback
+    if best_params is None:
+        total_days = len(prices)
+        min_len = max(20, int(0.1 * total_days))
+        max_len = min(300, int(0.5 * total_days))
+        best_params = (min(max(100, min_len), max_len), "sma", 0.02)
+    
+    return best_params
 
 def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost):
     """
