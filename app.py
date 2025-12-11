@@ -720,7 +720,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     # Get best parameters (highest OOS Sharpe)
     best_params = (
         study.best_params['ma_length'],
-        study.best_params['ma_type'],
+        'sma',  # hard-coded
         study.best_params['tolerance']
     )
     
