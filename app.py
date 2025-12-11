@@ -935,9 +935,59 @@ def main():
     st.info(f"Loaded {len(prices)} trading days of data from {prices.index[0].date()} to {prices.index[-1].date()}")
 
     # RUN ADAPTIVE MA OPTIMIZATION
-    best_cfg, best_result, optimization_summary = adaptive_ma_optimization(
-        prices, risk_on_weights, risk_off_weights, FLIP_COST
-    )
+    try:
+        best_cfg, best_result, optimization_summary = adaptive_ma_optimization(
+            prices, risk_on_weights, risk_off_weights, FLIP_COST
+        )
+    
+        # Check if optimization returned valid results
+        if best_cfg is None or best_result is None:
+            st.warning("Optimization could not find valid parameters for the given data period. Using default parameters.")
+            best_len, best_type, best_tol = 100, "sma", 0.02
+        
+            # Generate signal with default parameters
+            portfolio_index = build_portfolio_index(prices, risk_on_weights)
+            opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
+            sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, best_tol)
+        
+            # Run backtest with default parameters
+            best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=4.0)
+            optimization_summary = {
+                'selected_params': (best_len, best_type, best_tol),
+                'data_metrics': {'completeness': 1.0, 'vol_stability': 0.7, 'stationarity_p': 0.05, 'annual_vol': 0.2},
+                'cv_scores': {},
+                'stability_check': None,
+                'final_performance': best_result["performance"]
+            }
+        else:
+            best_len, best_type, best_tol = best_cfg
+            sig = best_result["signal"]
+            perf = best_result["performance"]
+        
+    except Exception as e:
+        st.error(f"Optimization failed: {str(e)}. Using fallback parameters.")
+        best_len, best_type, best_tol = 100, "sma", 0.02
+    
+        # Generate signal with default parameters
+        portfolio_index = build_portfolio_index(prices, risk_on_weights)
+        opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
+        sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, best_tol)
+    
+        # Run backtest with default parameters
+        best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=4.0)
+        optimization_summary = {
+            'selected_params': (best_len, best_type, best_tol),
+            'data_metrics': {'completeness': 1.0, 'vol_stability': 0.7, 'stationarity_p': 0.05, 'annual_vol': 0.2},
+            'cv_scores': {},
+            'stability_check': None,
+            'final_performance': best_result["performance"]
+        }
+
+    # Get the signal and performance for display
+    sig = best_result["signal"]
+    perf = best_result["performance"]
+    
+
     best_len, best_type, best_tol = best_cfg
     sig = best_result["signal"]
     perf = best_result["performance"]
