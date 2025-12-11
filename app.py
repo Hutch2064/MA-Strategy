@@ -224,7 +224,7 @@ def run_sig_engine(
                         rebalance_dates.append(date)
 
                     # Apply quarterly fee with multiplier (2x for Pure SIG, 2x for Hybrid SIG quarterly part)
-                    eq *= (1 - flip_cost * target_quarter * quarterly_multiplier)
+                    eq *= (1 - flip_cost * quarterly_multiplier)  # Remove target_quarter!
 
             # Update equity
             eq = risky_val + safe_val
