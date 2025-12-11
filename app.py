@@ -134,64 +134,53 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 
 
 # ============================================================
-# TAX CALCULATION FUNCTIONS (UPDATED WITH FIXES)
+# UNIFIED TAX CALCULATION FUNCTIONS (FIXED)
 # ============================================================
 
-def calculate_tax_liability_at_realization(returns, signal_changes, tax_rate=ANNUAL_TAX_RATE):
+def calculate_unified_tax_liability(returns, signal, tax_rate=ANNUAL_TAX_RATE):
     """
-    Calculate taxes when gains are realized - FIXED VERSION
-    Taxes applied immediately when MA signal flips from RISK-ON to RISK-OFF
+    Unified tax calculation for ALL strategies
+    Taxes are applied when switching from RISK-ON to RISK-OFF (selling risky assets)
     """
-    if len(returns) == 0:
+    if len(returns) == 0 or len(signal) == 0:
         return pd.Series(0.0, index=returns.index)
     
-    # Start with initial investment
-    equity = 10000.0  # Start with $10,000
-    cost_basis = equity  # Initial cost basis
+    # Initialize tracking
+    equity = 10000.0
+    cost_basis = 10000.0  # Track separately from equity
     tax_payments = pd.Series(0.0, index=returns.index)
-    equity_values = [equity]
     
-    in_position = True
-    last_entry_value = equity
+    # Convert signal to boolean
+    sig_bool = signal.astype(bool)
     
     for i in range(len(returns)):
         # Apply daily return
         equity *= (1 + returns.iloc[i])
         
-        # Check for RISK-ON → RISK-OFF transition (sell all risky)
-        if signal_changes.iloc[i] == -1 and in_position:
-            # Calculate gain since last entry
-            gain = max(0, equity - last_entry_value)
-            
-            if gain > 0:
-                # Apply tax immediately
-                tax_amount = gain * tax_rate
-                tax_payments.iloc[i] = -tax_amount
+        # Check if we just switched from RISK-ON to RISK-OFF
+        if i > 0 and sig_bool.iloc[i-1] and not sig_bool.iloc[i]:
+            # We just sold risky assets - realize gains
+            if equity > cost_basis:
+                realized_gain = equity - cost_basis
+                tax_amount = realized_gain * tax_rate
                 
-                # Reduce equity by tax amount
+                # Apply tax payment
+                tax_payments.iloc[i] = -tax_amount
                 equity -= tax_amount
                 
-                # Update cost basis
+                # Update cost basis (post-tax value)
                 cost_basis = equity
-                last_entry_value = equity
-            
-            in_position = False
         
-        # Check for RISK-OFF → RISK-ON transition (buy risky)
-        elif signal_changes.iloc[i] == 1 and not in_position:
-            last_entry_value = equity
-            in_position = True
-        
-        equity_values.append(equity)
-    
-    # Remove the first value (starting equity)
-    equity_curve = pd.Series(equity_values[1:], index=returns.index)
+        # Check if we just switched from RISK-OFF to RISK-ON
+        elif i > 0 and not sig_bool.iloc[i-1] and sig_bool.iloc[i]:
+            # We just bought risky assets - new cost basis
+            cost_basis = equity
     
     return tax_payments
 
 def calculate_continuous_tax_drag(returns, turnover_rate, tax_rate=ANNUAL_TAX_RATE):
     """
-    Alternative: Continuous tax drag (simpler academic approach)
+    Continuous tax drag (simpler academic approach)
     Daily tax drag = (annual turnover × tax rate) / 252
     """
     daily_tax_drag = (turnover_rate * tax_rate) / 252
@@ -211,193 +200,51 @@ def calculate_turnover(signal):
     
     return annual_turnover
 
-# ============================================================
-# SIG ENGINE — UPDATED WITH TAXES
-# ============================================================
-
-def run_sig_engine(
-    risk_on_returns,
-    risk_off_returns,
-    target_quarter,
-    ma_signal,
-    pure_sig_rw=None,
-    pure_sig_sw=None,
-    flip_cost=FLIP_COST,
-    tax_rate=ANNUAL_TAX_RATE,
-    quarter_end_dates=None
-):
-
-    dates = risk_on_returns.index
-    n = len(dates)
-
-    if quarter_end_dates is None:
-        raise ValueError("quarter_end_dates must be supplied")
-
-    # Fast lookup
-    quarter_end_set = set(quarter_end_dates)
-
-    # MA flip detection
-    sig_arr = ma_signal.astype(int)
-    flip_mask = sig_arr.diff().abs() == 1
-
-    # Init values
-    eq = 10000.0
-    risky_val = eq * START_RISKY
-    safe_val  = eq * START_SAFE
-
-    # Tax tracking
-    tax_basis = eq  # Initial cost basis
-    last_risky_enter_date = None
-    last_risky_enter_value = risky_val + safe_val
-    
-    frozen_risky = None
-    frozen_safe  = None
-
-    equity_curve = []
-    risky_w_series = []
-    safe_w_series = []
-    risky_val_series = []
-    safe_val_series = []
-    tax_payments_series = []
-    rebalance_events = 0
-    rebalance_dates = []
-
-    for i in range(n):
-        date = dates[i]
-        r_on = risk_on_returns.iloc[i]
-        r_off = risk_off_returns.iloc[i]
-        ma_on = bool(ma_signal.iloc[i])
-        
-        tax_paid_today = 0.0
-
-        if ma_on:
-            # Track when we enter RISK-ON
-            if last_risky_enter_date is None and i > 0:
-                last_risky_enter_date = date
-                last_risky_enter_value = risky_val + safe_val
-
-            # Restore pure-SIG weights after exiting RISK-OFF
-            if frozen_risky is not None:
-                w_r = pure_sig_rw.iloc[i]
-                w_s = pure_sig_sw.iloc[i]
-                risky_val = eq * w_r
-                safe_val  = eq * w_s
-                frozen_risky = None
-                frozen_safe  = None
-
-            # Apply daily returns
-            risky_val *= (1 + r_on)
-            safe_val  *= (1 + r_off)
-
-            # Rebalance ON quarter-end date
-            if date in quarter_end_set:
-                prev_qs = [qd for qd in quarter_end_dates if qd < date]
-
-                if prev_qs:
-                    prev_q = prev_qs[-1]
-                    idx_prev = dates.get_loc(prev_q)
-                    risky_at_qstart = risky_val_series[idx_prev]
-                    goal_risky = risky_at_qstart * (1 + target_quarter)
-
-                    if risky_val > goal_risky:
-                        excess = risky_val - goal_risky
-                        risky_val -= excess
-                        safe_val  += excess
-                        rebalance_dates.append(date)
-                        
-                        # Calculate tax on rebalanced amount (partial realization)
-                        current_total = risky_val + safe_val
-                        if current_total > tax_basis:
-                            gain_fraction = max(0, (current_total - tax_basis) / current_total)
-                            tax_on_rebalance = excess * gain_fraction * tax_rate
-                            eq -= tax_on_rebalance
-                            risky_val -= tax_on_rebalance * (risky_val / current_total)
-                            safe_val -= tax_on_rebalance * (safe_val / current_total)
-                            tax_paid_today += tax_on_rebalance
-
-                    elif risky_val < goal_risky:
-                        needed = goal_risky - risky_val
-                        move = min(needed, safe_val)
-                        safe_val -= move
-                        risky_val += move
-                        rebalance_dates.append(date)
-
-                    # Apply quarterly fee
-                    eq *= (1 - flip_cost * target_quarter)
-
-            # Update equity
-            eq = risky_val + safe_val
-            risky_w = risky_val / eq
-            safe_w  = safe_val  / eq
-
-            # Flip cost at MA transition
-            if flip_mask.iloc[i]:
-                eq *= (1 - flip_cost)
-
+def calculate_strategy_taxes(returns, signal, tax_rate=ANNUAL_TAX_RATE, method='auto'):
+    """
+    Unified tax calculation with automatic method selection
+    """
+    if method == 'auto':
+        # Auto-select based on turnover
+        turnover = calculate_turnover(signal)
+        if turnover > 3.0:  # >300% annual turnover
+            method = 'continuous'
         else:
-            # RISK-OFF: Selling risky assets → realize gains
-            if i > 0 and bool(ma_signal.iloc[i-1]) and not ma_on:
-                # Calculate gain since entering RISK-ON
-                current_value = risky_val + safe_val
-                if last_risky_enter_value is not None and current_value > last_risky_enter_value:
-                    gain = current_value - last_risky_enter_value
-                    tax_payment = gain * tax_rate
-                    
-                    # Apply tax
-                    eq -= tax_payment
-                    tax_paid_today += tax_payment
-                    
-                    # Reset cost basis
-                    tax_basis = eq
-                
-                last_risky_enter_date = None
-                last_risky_enter_value = None
-
-            # Freeze values on entering RISK-OFF
-            if frozen_risky is None:
-                frozen_risky = risky_val
-                frozen_safe  = safe_val
-
-            # Only safe sleeve earns returns
-            eq *= (1 + r_off)
-            risky_w = 0.0
-            safe_w  = 1.0
-
-        # Store values
-        equity_curve.append(eq)
-        risky_w_series.append(risky_w)
-        safe_w_series.append(safe_w)
-        risky_val_series.append(risky_val)
-        safe_val_series.append(safe_val)
-        tax_payments_series.append(tax_paid_today)
-
-    return (
-        pd.Series(equity_curve, index=dates),
-        pd.Series(risky_w_series, index=dates),
-        pd.Series(safe_w_series, index=dates),
-        pd.Series(tax_payments_series, index=dates),
-        rebalance_dates
-    )
+            method = 'realization'
+    
+    if method == 'continuous':
+        turnover = calculate_turnover(signal)
+        return calculate_continuous_tax_drag(returns, turnover, tax_rate)
+    else:
+        return calculate_unified_tax_liability(returns, signal, tax_rate)
 
 
 # ============================================================
-# BACKTEST ENGINE - UPDATED WITH TAXES
+# UNIFIED BACKTEST ENGINE (FOR ALL STRATEGIES)
 # ============================================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
+    """
+    Build daily weight matrix based on signal
+    """
     weights = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
-
-    for a, w in risk_on_weights.items():
-        if a in prices.columns:
-            weights.loc[signal, a] = w
-
-    for a, w in risk_off_weights.items():
-        if a in prices.columns:
-            weights.loc[~signal, a] = w
-
+    
+    # When signal is True (RISK-ON), use risk_on_weights
+    for asset, weight in risk_on_weights.items():
+        if asset in prices.columns:
+            weights.loc[signal, asset] = weight
+    
+    # When signal is False (RISK-OFF), use risk_off_weights
+    for asset, weight in risk_off_weights.items():
+        if asset in prices.columns:
+            weights.loc[~signal, asset] = weight
+    
     return weights
 
 def compute_performance(simple_returns, eq_curve, rf=0.0):
+    """
+    Compute performance metrics safely
+    """
     if len(eq_curve) == 0 or eq_curve.iloc[0] == 0:
         return {
             "CAGR": 0,
@@ -408,24 +255,42 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
             "DD_Series": pd.Series([], dtype=float)
         }
     
-    # Ensure equity curve doesn't go negative
-    eq_curve = eq_curve.clip(lower=0.01)  # Prevent divide by zero
+    # Ensure valid data
+    eq_curve = eq_curve.replace([np.inf, -np.inf], np.nan).dropna()
     
-    if eq_curve.iloc[-1] <= 0:
+    if len(eq_curve) < 2:
         return {
-            "CAGR": -1.0,  # -100% CAGR for total loss
-            "Volatility": simple_returns.std() * np.sqrt(252) if len(simple_returns) > 0 else 0,
+            "CAGR": 0,
+            "Volatility": 0,
             "Sharpe": 0,
-            "MaxDrawdown": -1.0,
-            "TotalReturn": -1.0,
-            "DD_Series": pd.Series([-1.0], index=eq_curve.index)
+            "MaxDrawdown": 0,
+            "TotalReturn": 0,
+            "DD_Series": pd.Series([], dtype=float)
         }
     
-    cagr = (eq_curve.iloc[-1] / eq_curve.iloc[0]) ** (252 / len(eq_curve)) - 1
-    vol = simple_returns.std() * np.sqrt(252) if len(simple_returns) > 0 else 0
-    sharpe = (simple_returns.mean() * 252 - rf) / vol if vol > 0 else 0
+    # Calculate years
+    years = len(eq_curve) / 252
     
-    # Calculate drawdown safely
+    # Calculate CAGR
+    if eq_curve.iloc[0] > 0 and eq_curve.iloc[-1] > 0:
+        cagr = (eq_curve.iloc[-1] / eq_curve.iloc[0]) ** (1 / years) - 1
+    else:
+        cagr = -1.0
+    
+    # Calculate volatility
+    if len(simple_returns) > 1:
+        vol = simple_returns.std() * np.sqrt(252)
+    else:
+        vol = 0
+    
+    # Calculate Sharpe ratio
+    if vol > 0 and len(simple_returns) > 0:
+        annual_return = simple_returns.mean() * 252
+        sharpe = (annual_return - rf) / vol
+    else:
+        sharpe = 0
+    
+    # Calculate max drawdown
     if eq_curve.iloc[0] > 0:
         cumulative = eq_curve / eq_curve.iloc[0]
         running_max = cumulative.cummax()
@@ -434,167 +299,232 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
     else:
         max_dd = -1.0
     
+    # Calculate total return
+    if eq_curve.iloc[0] > 0:
+        total_return = eq_curve.iloc[-1] / eq_curve.iloc[0] - 1
+    else:
+        total_return = -1.0
+    
     return {
         "CAGR": cagr,
         "Volatility": vol,
         "Sharpe": sharpe,
         "MaxDrawdown": max_dd,
-        "TotalReturn": eq_curve.iloc[-1] / eq_curve.iloc[0] - 1 if eq_curve.iloc[0] != 0 else 0,
+        "TotalReturn": total_return,
         "DD_Series": drawdown if 'drawdown' in locals() else pd.Series([], dtype=float)
     }
 
-def backtest_with_taxes(prices, signal, risk_on_weights, risk_off_weights, 
-                       flip_cost=FLIP_COST, tax_rate=ANNUAL_TAX_RATE):
+def backtest_unified(prices, signal, risk_on_weights, risk_off_weights,
+                    flip_cost=FLIP_COST, tax_rate=ANNUAL_TAX_RATE, tax_method='auto'):
     """
-    Backtest with proper tax treatment - FIXED VERSION
+    Unified backtest function for ALL strategies (MA, Hybrid SIG, Pure SIG, etc.)
     """
-    simple = prices.pct_change().fillna(0)
+    # Calculate daily returns
+    simple_rets = prices.pct_change().fillna(0)
+    
+    # Build weight matrix
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
-
-    strategy_simple = (weights.shift(1).fillna(0) * simple).sum(axis=1)
+    
+    # Calculate strategy returns BEFORE costs
+    strategy_returns = (weights.shift(1).fillna(0) * simple_rets).sum(axis=1)
+    
+    # Apply flip costs
     sig_arr = signal.astype(int)
     flip_mask = sig_arr.diff().abs() == 1
-    signal_changes = sig_arr.diff().fillna(0)
-
-    # 1. Apply slippage costs
-    flip_costs = np.where(flip_mask, -flip_cost, 0.0)
+    returns_after_flip = strategy_returns.copy()
+    returns_after_flip[flip_mask] -= flip_cost
     
-    # 2. Calculate taxes (realization-based)
-    tax_payments = calculate_tax_liability_at_realization(
-        strategy_simple + flip_costs, 
-        signal_changes,
-        tax_rate
-    )
+    # Calculate taxes using unified function
+    tax_payments = calculate_strategy_taxes(returns_after_flip, signal, tax_rate, tax_method)
     
-    # 3. Combine all costs
-    total_costs = flip_costs + tax_payments.values
+    # Net returns after all costs
+    net_returns = returns_after_flip + tax_payments.values
     
-    # 4. Calculate returns and equity - CORRECT WAY
-    # Start with $10,000 and apply returns and costs cumulatively
-    equity_curve = [10000.0]
-    for i in range(len(strategy_simple)):
-        # Apply daily return and costs
-        daily_return = strategy_simple.iloc[i] + total_costs[i]
-        new_equity = equity_curve[-1] * (1 + daily_return)
-        equity_curve.append(new_equity)
+    # Calculate equity curve
+    equity_curve = (1 + net_returns).cumprod() * 10000
     
-    # Remove initial value
-    equity_curve = pd.Series(equity_curve[1:], index=strategy_simple.index)
-    
-    # Calculate the actual returns from the equity curve
-    actual_returns = equity_curve.pct_change().fillna(0)
-    
-    # Calculate turnover for analysis
+    # Calculate turnover
     turnover = calculate_turnover(signal)
-
+    
     return {
-        "returns": actual_returns,
+        "returns": net_returns,
         "equity_curve": equity_curve,
         "signal": signal,
         "weights": weights,
-        "performance": compute_performance(actual_returns, equity_curve),
-        "flip_mask": flip_mask,
-        "flip_costs": pd.Series(flip_costs, index=strategy_simple.index),
+        "performance": compute_performance(net_returns, equity_curve),
+        "flip_costs": pd.Series(np.where(flip_mask, -flip_cost, 0.0), index=strategy_returns.index),
         "tax_payments": tax_payments,
-        "total_costs": pd.Series(total_costs, index=strategy_simple.index),
         "annual_turnover": turnover,
-        "tax_rate": tax_rate
-    }
-
-def backtest_simple(prices, signal, risk_on_weights, risk_off_weights, flip_cost=FLIP_COST):
-    """
-    Simple backtest without taxes (for comparison)
-    """
-    simple = prices.pct_change().fillna(0)
-    weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
-
-    strategy_simple = (weights.shift(1).fillna(0) * simple).sum(axis=1)
-    sig_arr = signal.astype(int)
-    flip_mask = sig_arr.diff().abs() == 1
-
-    flip_costs = np.where(flip_mask, -flip_cost, 0.0)
-    strat_adj = strategy_simple + flip_costs
-
-    eq = (1 + strat_adj).cumprod()
-
-    return {
-        "returns": strat_adj,
-        "equity_curve": eq,
-        "signal": signal,
-        "weights": weights,
-        "performance": compute_performance(strat_adj, eq),
-        "flip_mask": flip_mask,
+        "tax_rate": tax_rate,
+        "tax_method": tax_method
     }
 
 
 # ============================================================
-# ROBUST MA OPTIMIZATION (UPDATED)
+# SIG ENGINE - UPDATED WITHOUT EMBEDDED TAX LOGIC
 # ============================================================
 
-def evaluate_ma_configuration(returns, signal, flip_cost=FLIP_COST, tax_rate=ANNUAL_TAX_RATE):
+def run_sig_engine_no_tax(risk_on_returns, risk_off_returns, target_quarter,
+                         ma_signal, pure_sig_rw=None, pure_sig_sw=None,
+                         flip_cost=FLIP_COST, quarter_end_dates=None):
     """
-    Evaluate MA configuration using multiple criteria
-    Returns a composite score and metrics
+    SIG Engine without embedded tax logic - only handles rebalancing
+    Returns daily returns that can be fed into unified backtest
     """
-    if len(returns) == 0 or signal.sum() == 0:
+    dates = risk_on_returns.index
+    n = len(dates)
+    
+    if quarter_end_dates is None:
+        raise ValueError("quarter_end_dates must be supplied")
+    
+    quarter_end_set = set(quarter_end_dates)
+    
+    # MA flip detection
+    sig_arr = ma_signal.astype(int)
+    
+    # Initialize values
+    eq = 10000.0
+    risky_val = eq * START_RISKY
+    safe_val = eq * START_SAFE
+    
+    frozen_risky = None
+    frozen_safe = None
+    
+    # Track daily returns
+    daily_returns = pd.Series(0.0, index=dates)
+    rebalance_dates = []
+    
+    for i in range(n):
+        date = dates[i]
+        r_on = risk_on_returns.iloc[i]
+        r_off = risk_off_returns.iloc[i]
+        ma_on = bool(ma_signal.iloc[i])
+        
+        if ma_on:
+            # Restore pure-SIG weights after exiting RISK-OFF
+            if frozen_risky is not None:
+                w_r = pure_sig_rw.iloc[i]
+                w_s = pure_sig_sw.iloc[i]
+                risky_val = eq * w_r
+                safe_val = eq * w_s
+                frozen_risky = None
+                frozen_safe = None
+            
+            # Apply daily returns
+            risky_val *= (1 + r_on)
+            safe_val *= (1 + r_off)
+            
+            # Rebalance on quarter-end date
+            if date in quarter_end_set:
+                prev_qs = [qd for qd in quarter_end_dates if qd < date]
+                
+                if prev_qs:
+                    prev_q = prev_qs[-1]
+                    idx_prev = dates.get_loc(prev_q)
+                    risky_at_qstart = risky_val
+                    goal_risky = risky_at_qstart * (1 + target_quarter)
+                    
+                    if risky_val > goal_risky:
+                        excess = risky_val - goal_risky
+                        risky_val -= excess
+                        safe_val += excess
+                        rebalance_dates.append(date)
+                        
+                        # Apply quarterly fee
+                        eq *= (1 - flip_cost * target_quarter)
+                    
+                    elif risky_val < goal_risky:
+                        needed = goal_risky - risky_val
+                        move = min(needed, safe_val)
+                        safe_val -= move
+                        risky_val += move
+                        rebalance_dates.append(date)
+            
+            # Update equity and calculate return
+            new_eq = risky_val + safe_val
+            daily_return = (new_eq / eq) - 1
+            eq = new_eq
+        
+        else:
+            # RISK-OFF regime
+            # Freeze values on entering RISK-OFF
+            if frozen_risky is None:
+                frozen_risky = risky_val
+                frozen_safe = safe_val
+            
+            # Only safe sleeve earns returns
+            eq *= (1 + r_off)
+            daily_return = r_off
+            
+            # Update values for consistency
+            risky_val = 0.0
+            safe_val = eq
+        
+        # Store daily return
+        daily_returns.iloc[i] = daily_return
+    
+    return daily_returns, rebalance_dates
+
+
+# ============================================================
+# ROBUST MA OPTIMIZATION (UPDATED WITH UNIFIED BACKTEST)
+# ============================================================
+
+def evaluate_ma_configuration_unified(prices, signal, risk_on_weights, risk_off_weights,
+                                    flip_cost=FLIP_COST, tax_rate=ANNUAL_TAX_RATE):
+    """
+    Evaluate MA configuration using unified backtest
+    """
+    if len(signal) == 0 or signal.sum() == 0:
         return 0, {"sharpe": 0, "trades_per_year": 0, "hit_ratio": 0}
     
-    # Apply costs to calculate realistic returns
-    sig_arr = signal.astype(int)
-    flip_mask = sig_arr.diff().abs() == 1
-    flip_costs = np.where(flip_mask, -flip_cost, 0.0)
+    # Run unified backtest
+    result = backtest_unified(prices, signal, risk_on_weights, risk_off_weights,
+                             flip_cost, tax_rate, tax_method='auto')
     
-    # Calculate tax drag based on turnover
-    turnover = calculate_turnover(signal)
-    tax_drag = calculate_continuous_tax_drag(returns, turnover, tax_rate)
-    
-    # Net returns after costs
-    net_returns = returns + flip_costs + tax_drag.values
-    
-    # Calculate metrics
-    if net_returns.std() > 0:
-        sharpe = net_returns.mean() / net_returns.std() * np.sqrt(252)
-    else:
-        sharpe = 0
-    
-    trades_per_year = flip_mask.sum() / (len(signal) / 252)
+    # Calculate additional metrics
+    perf = result["performance"]
+    turnover = result["annual_turnover"]
     
     # Monthly hit ratio
-    monthly_returns = net_returns.resample('M').apply(lambda x: (1+x).prod()-1)
+    monthly_returns = result["returns"].resample('M').apply(lambda x: (1+x).prod()-1)
     hit_ratio = (monthly_returns > 0).mean() if len(monthly_returns) > 0 else 0
     
     # Penalize excessive trading
-    trade_penalty = max(0, (trades_per_year - 12) * 0.02)  # Penalize >12 trades/year
+    trades_per_year = turnover
+    trade_penalty = max(0, (trades_per_year - 12) * 0.02)
     
-    # Penalize extreme regimes (always ON or always OFF)
+    # Penalize extreme regimes
     regime_balance = min(signal.mean(), 1 - signal.mean())
-    regime_penalty = max(0, 0.1 - regime_balance) * 10  # Penalize if <10% in either regime
+    regime_penalty = max(0, 0.1 - regime_balance) * 10
     
-    # Composite score (academic approach)
-    score = sharpe - trade_penalty - regime_penalty + (hit_ratio * 0.5)
+    # Composite score
+    score = perf["Sharpe"] - trade_penalty - regime_penalty + (hit_ratio * 0.5)
     
     metrics = {
-        "sharpe": sharpe,
+        "sharpe": perf["Sharpe"],
         "trades_per_year": trades_per_year,
         "hit_ratio": hit_ratio,
         "regime_balance": regime_balance,
         "trade_penalty": trade_penalty,
         "regime_penalty": regime_penalty,
-        "raw_score": score
+        "raw_score": score,
+        "cagr": perf["CAGR"],
+        "max_dd": perf["MaxDrawdown"]
     }
     
-    return score, metrics
+    return score, metrics, result
 
-def run_robust_ma_optimization(prices, risk_on_weights, risk_off_weights, 
-                              flip_cost=FLIP_COST, tax_rate=ANNUAL_TAX_RATE):
+def run_robust_ma_optimization_unified(prices, risk_on_weights, risk_off_weights,
+                                     flip_cost=FLIP_COST, tax_rate=ANNUAL_TAX_RATE):
     """
-    Robust MA optimization using walk-forward validation
+    Robust MA optimization using unified backtest
     """
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     returns = portfolio_index.pct_change().fillna(0)
     
-    # Use global parameters directly
-    candidate_lengths = list(range(MA_MIN_DAYS, MA_MAX_DAYS + 1, 
+    # Generate candidate parameters
+    candidate_lengths = list(range(MA_MIN_DAYS, MA_MAX_DAYS + 1,
                                  max(1, (MA_MAX_DAYS - MA_MIN_DAYS) // MA_STEP_FACTOR)))
     candidate_types = ["sma", "ema"]
     min_tol, max_tol, step_tol = MA_TOL_RANGE
@@ -603,6 +533,7 @@ def run_robust_ma_optimization(prices, risk_on_weights, risk_off_weights,
     best_score = -np.inf
     best_config = None
     best_metrics = None
+    best_result = None
     
     # Cache MAs for efficiency
     ma_cache = {}
@@ -627,8 +558,11 @@ def run_robust_ma_optimization(prices, risk_on_weights, risk_off_weights,
                 if signal.sum() == 0 or signal.sum() == len(signal):
                     continue
                 
-                # Evaluate configuration
-                score, metrics = evaluate_ma_configuration(returns, signal, flip_cost, tax_rate)
+                # Evaluate configuration using unified backtest
+                score, metrics, result = evaluate_ma_configuration_unified(
+                    prices, signal, risk_on_weights, risk_off_weights,
+                    flip_cost, tax_rate
+                )
                 
                 # Minimum requirements
                 if metrics["sharpe"] < 0.3:  # Minimum Sharpe
@@ -642,117 +576,67 @@ def run_robust_ma_optimization(prices, risk_on_weights, risk_off_weights,
                     best_score = score
                     best_config = (length, ma_type, tol)
                     best_metrics = metrics
+                    best_result = result
     
     # If no valid config found, use reasonable defaults
     if best_config is None:
         best_config = (100, "sma", 0.02)
         ma = compute_ma_matrix(portfolio_index, [100], "sma")[100]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, 0.02)
+        _, _, best_result = evaluate_ma_configuration_unified(
+            prices, signal, risk_on_weights, risk_off_weights,
+            flip_cost, tax_rate
+        )
     
-    # Run final backtest with taxes
-    ma = compute_ma_matrix(portfolio_index, [best_config[0]], best_config[1])[best_config[0]]
-    signal = generate_testfol_signal_vectorized(portfolio_index, ma, best_config[2])
-    result = backtest_with_taxes(prices, signal, risk_on_weights, risk_off_weights, 
-                                flip_cost, tax_rate)
-    
-    return best_config, result, best_metrics
+    return best_config, best_result, best_metrics
 
 
 # ============================================================
-# BENCHMARK CREATION FUNCTIONS (NEW)
+# BENCHMARK CREATION FUNCTIONS (UPDATED)
 # ============================================================
 
-def create_benchmarks(prices, risk_on_weights, risk_off_weights, 
-                     rebalance_dates, flip_cost=FLIP_COST, tax_rate=ANNUAL_TAX_RATE):
+def create_benchmarks_unified(prices, risk_on_weights, risk_off_weights,
+                             rebalance_dates, flip_cost=FLIP_COST, tax_rate=ANNUAL_TAX_RATE):
     """
-    Create multiple academically valid benchmarks
+    Create benchmarks using unified backtest framework
     """
-    simple_rets = prices.pct_change().fillna(0)
+    # 1. Static Buy & Hold (no rebalancing)
+    bh_static_signal = pd.Series(True, index=prices.index)
+    bh_static = backtest_unified(prices, bh_static_signal, risk_on_weights, {},
+                                flip_cost=0.0, tax_rate=tax_rate, tax_method='continuous')
     
-    # 1. Static Buy & Hold (no rebalancing, lets weights drift)
-    bh_static_returns = pd.Series(0.0, index=simple_rets.index)
-    for a, w in risk_on_weights.items():
-        if a in simple_rets.columns:
-            bh_static_returns += simple_rets[a] * w
-    bh_static_eq = (1 + bh_static_returns).cumprod()
+    # 2. Rebalanced Buy & Hold (quarterly)
+    bh_rebal_signal = pd.Series(True, index=prices.index)
+    bh_rebal = backtest_unified(prices, bh_rebal_signal, risk_on_weights, {},
+                               flip_cost=flip_cost, tax_rate=tax_rate, tax_method='continuous')
     
-    # 2. Rebalanced Buy & Hold (quarterly, with trading costs)
-    bh_rebal_eq = pd.Series(10000.0, index=simple_rets.index)
-    current_weights = risk_on_weights.copy()
-    
-    for i, date in enumerate(simple_rets.index):
-        # Apply returns with current weights
-        daily_ret = 0
-        for asset, weight in current_weights.items():
-            if asset in simple_rets.columns:
-                daily_ret += simple_rets[asset].iloc[i] * weight
-        
-        if i > 0:
-            bh_rebal_eq.iloc[i] = bh_rebal_eq.iloc[i-1] * (1 + daily_ret)
-        
-        # Quarterly rebalancing with costs
-        if date in rebalance_dates:
-            # Calculate turnover
-            turnover = 0
-            for asset in risk_on_weights:
-                if asset in current_weights:
-                    turnover += abs(current_weights.get(asset, 0) - risk_on_weights.get(asset, 0))
-            
-            # Apply trading costs
-            trading_cost = turnover * flip_cost
-            bh_rebal_eq.iloc[i] *= (1 - trading_cost)
-            
-            # Reset to target weights
-            current_weights = risk_on_weights.copy()
-    
-    bh_rebal_returns = bh_rebal_eq.pct_change().fillna(0)
-    
-    # 3. 60/40 Portfolio (common institutional benchmark)
-    # Try to find SPY and AGG, or use first two assets
+    # 3. 60/40 Portfolio
+    # Create synthetic 60/40 weights
     assets = list(prices.columns)
     if len(assets) >= 2:
-        spy_col = next((a for a in assets if 'SPY' in a or 'IVV' in a), assets[0])
-        agg_col = next((a for a in assets if 'AGG' in a or 'BND' in a), assets[1])
+        # Try to find SPY and AGG equivalents
+        spy_col = next((a for a in assets if 'SPY' in a or 'IVV' in a or 'VOO' in a), assets[0])
+        agg_col = next((a for a in assets if 'AGG' in a or 'BND' in a or 'IEF' in a), assets[1])
         
-        spy_ret = simple_rets[spy_col] if spy_col in simple_rets.columns else simple_rets.iloc[:, 0]
-        agg_ret = simple_rets[agg_col] if agg_col in simple_rets.columns else simple_rets.iloc[:, 1]
-        
-        sixty_forty_returns = 0.6 * spy_ret + 0.4 * agg_ret
+        sixty_forty_weights = {spy_col: 0.6, agg_col: 0.4}
+        sixty_forty_signal = pd.Series(True, index=prices.index)
+        sixty_forty = backtest_unified(prices, sixty_forty_signal, sixty_forty_weights, {},
+                                      flip_cost=flip_cost, tax_rate=tax_rate, tax_method='continuous')
     else:
-        sixty_forty_returns = bh_static_returns  # Fallback
-    
-    sixty_forty_eq = (1 + sixty_forty_returns).cumprod()
-    
-    # Apply tax drag to benchmarks (continuous approximation)
-    bh_static_turnover = 0.0  # No trading
-    bh_rebal_turnover = 1.0   # 100% annual turnover (quarterly rebalancing)
-    
-    bh_static_tax_drag = calculate_continuous_tax_drag(bh_static_returns, bh_static_turnover, tax_rate)
-    bh_rebal_tax_drag = calculate_continuous_tax_drag(bh_rebal_returns, bh_rebal_turnover, tax_rate)
-    
-    bh_static_after_tax = bh_static_returns + bh_static_tax_drag.values
-    bh_rebal_after_tax = bh_rebal_returns + bh_rebal_tax_drag.values
+        # Fallback to buy & hold
+        sixty_forty = bh_static
     
     return {
         'bh_static': {
-            'eq_pre_tax': (1 + bh_static_returns).cumprod(),
-            'eq_after_tax': (1 + bh_static_after_tax).cumprod(),
-            'returns_pre_tax': bh_static_returns,
-            'returns_after_tax': bh_static_after_tax,
+            'result': bh_static,
             'description': 'Static Buy & Hold (weights drift)'
         },
         'bh_rebalanced': {
-            'eq_pre_tax': bh_rebal_eq,
-            'eq_after_tax': (1 + bh_rebal_after_tax).cumprod(),
-            'returns_pre_tax': bh_rebal_returns,
-            'returns_after_tax': bh_rebal_after_tax,
+            'result': bh_rebal,
             'description': 'Quarterly Rebalanced Buy & Hold'
         },
         'sixty_forty': {
-            'eq_pre_tax': sixty_forty_eq,
-            'eq_after_tax': sixty_forty_eq,  # Same for simplicity
-            'returns_pre_tax': sixty_forty_returns,
-            'returns_after_tax': sixty_forty_returns,
+            'result': sixty_forty,
             'description': '60/40 Stock/Bond Portfolio'
         }
     }
@@ -782,21 +666,12 @@ def normalize(eq):
 
 
 # ============================================================
-# VALIDATION FUNCTIONS (UPDATED WITH TAX AWARENESS)
+# VALIDATION FUNCTIONS (UPDATED WITH UNIFIED BACKTEST)
 # ============================================================
 
-def calculate_max_dd(prices_series):
-    """Calculate maximum drawdown for a price series"""
-    if len(prices_series) == 0:
-        return 0
-    cumulative = (1 + prices_series.pct_change().fillna(0)).cumprod()
-    running_max = cumulative.cummax()
-    drawdown = (cumulative - running_max) / running_max
-    return drawdown.min() if len(drawdown) > 0 else 0
-
-def walk_forward_validation_with_taxes(prices, strategy_result, window_years=3):
+def walk_forward_validation_unified(prices, strategy_result, window_years=3):
     """
-    Walk-forward validation that includes tax effects
+    Walk-forward validation using unified backtest
     """
     returns = strategy_result["returns"]
     signal = strategy_result["signal"]
@@ -804,7 +679,7 @@ def walk_forward_validation_with_taxes(prices, strategy_result, window_years=3):
     results = []
     total_days = len(prices)
     
-    min_days_needed = 252 * 2  # At least 2 years
+    min_days_needed = 252 * 2
     if total_days < min_days_needed:
         return pd.DataFrame()
     
@@ -816,65 +691,56 @@ def walk_forward_validation_with_taxes(prices, strategy_result, window_years=3):
         
         if test_end - train_end < 63:
             continue
-            
-        # Test period returns
-        test_returns = returns.iloc[train_end:test_end]
         
-        if len(test_returns) > 0 and test_returns.std() > 0:
-            # Calculate after-tax Sharpe
-            test_signal = signal.iloc[train_end:test_end]
-            test_turnover = calculate_turnover(test_signal)
-            test_tax_drag = calculate_continuous_tax_drag(test_returns, test_turnover)
-            test_after_tax = test_returns + test_tax_drag.values
+        # Extract test period data
+        test_prices = prices.iloc[train_end:test_end]
+        test_signal = signal.iloc[train_end:test_end]
+        
+        if len(test_prices) > 0 and len(test_signal) > 0:
+            # Run backtest on test period
+            test_result = backtest_unified(test_prices, test_signal,
+                                          strategy_result["weights"].columns.tolist(),
+                                          {}, flip_cost=0.001, tax_rate=0.20)
             
-            test_sharpe_pre_tax = test_returns.mean() / test_returns.std() * np.sqrt(252)
-            test_sharpe_after_tax = test_after_tax.mean() / test_after_tax.std() * np.sqrt(252)
+            test_perf = test_result["performance"]
             
             results.append({
                 'train_period': f"{prices.index[start].date()} to {prices.index[train_end-1].date()}",
                 'test_period': f"{prices.index[train_end].date()} to {prices.index[test_end-1].date()}",
-                'test_sharpe_pre_tax': test_sharpe_pre_tax,
-                'test_sharpe_after_tax': test_sharpe_after_tax,
-                'test_turnover': test_turnover,
-                'test_length_days': len(test_returns)
+                'test_sharpe': test_perf["Sharpe"],
+                'test_cagr': test_perf["CAGR"],
+                'test_max_dd': test_perf["MaxDrawdown"],
+                'test_length_days': len(test_prices)
             })
     
     return pd.DataFrame(results)
 
-def monte_carlo_significance_with_costs(strategy_returns, signal, flip_cost=FLIP_COST, n_simulations=500):
+def monte_carlo_significance_unified(strategy_result, n_simulations=500):
     """
-    Monte Carlo test that includes trading costs
+    Monte Carlo test using unified framework
     """
-    if len(strategy_returns) == 0 or strategy_returns.std() == 0:
+    returns = strategy_result["returns"]
+    signal = strategy_result["signal"]
+    
+    if len(returns) == 0 or returns.std() == 0:
         return {
             'actual_sharpe': 0,
             'p_value': 1.0,
             'significance_95': False
         }
     
-    # Calculate actual strategy metrics with costs
-    sig_arr = signal.astype(int)
-    flip_mask = sig_arr.diff().abs() == 1
-    flip_costs = np.where(flip_mask, -flip_cost, 0.0)
-    net_returns = strategy_returns + flip_costs
-    
-    if net_returns.std() > 0:
-        actual_sharpe = net_returns.mean() / net_returns.std() * np.sqrt(252)
-    else:
-        actual_sharpe = 0
+    actual_sharpe = strategy_result["performance"]["Sharpe"]
     
     # Generate null distribution by shuffling returns
     null_sharpes = []
-    for _ in range(min(n_simulations, len(strategy_returns) // 2)):
+    for _ in range(min(n_simulations, len(returns) // 2)):
         # Shuffle returns but keep signal structure
-        shuffled_returns = np.random.permutation(strategy_returns.values)
+        shuffled_returns = np.random.permutation(returns.values)
+        shuffled_series = pd.Series(shuffled_returns, index=returns.index)
         
-        # Apply same trading costs based on original signal
-        # (conservative: random strategy pays same costs)
-        shuffled_with_costs = shuffled_returns + flip_costs
-        
-        if np.std(shuffled_with_costs) > 0:
-            null_sharpe = np.mean(shuffled_with_costs) / np.std(shuffled_with_costs) * np.sqrt(252)
+        # Calculate Sharpe on shuffled returns with same signal
+        if shuffled_series.std() > 0:
+            null_sharpe = shuffled_series.mean() / shuffled_series.std() * np.sqrt(252)
             null_sharpes.append(null_sharpe)
     
     # Calculate p-value
@@ -891,21 +757,24 @@ def monte_carlo_significance_with_costs(strategy_returns, signal, flip_cost=FLIP
         'null_std': np.std(null_sharpes) if null_sharpes else 0
     }
 
-def calculate_cost_breakdown(strategy_result):
+def calculate_cost_breakdown_unified(strategy_result):
     """
-    Calculate and display cost breakdown
+    Calculate cost breakdown using unified structure
     """
     returns = strategy_result["returns"]
     flip_costs = strategy_result.get("flip_costs", pd.Series(0.0, index=returns.index))
     tax_payments = strategy_result.get("tax_payments", pd.Series(0.0, index=returns.index))
     
-    total_flip_costs = flip_costs.sum()
-    total_taxes = tax_payments.sum()
+    total_flip_costs = flip_costs.sum() * 10000  # Scale to $10,000 investment
+    total_taxes = tax_payments.sum() * 10000
     total_costs = total_flip_costs + total_taxes
     
-    total_return = strategy_result["equity_curve"].iloc[-1] / strategy_result["equity_curve"].iloc[0] - 1
+    total_return = strategy_result["equity_curve"].iloc[-1] - 10000
     
-    cost_percentage = abs(total_costs) / total_return if total_return != 0 else 0
+    if total_return != 0:
+        cost_percentage = abs(total_costs) / abs(total_return)
+    else:
+        cost_percentage = 0
     
     return {
         'total_flip_costs': total_flip_costs,
@@ -913,17 +782,18 @@ def calculate_cost_breakdown(strategy_result):
         'total_costs': total_costs,
         'cost_as_percent_of_return': cost_percentage,
         'annual_turnover': strategy_result.get('annual_turnover', 0),
-        'tax_rate': strategy_result.get('tax_rate', ANNUAL_TAX_RATE)
+        'tax_rate': strategy_result.get('tax_rate', ANNUAL_TAX_RATE),
+        'tax_method': strategy_result.get('tax_method', 'auto')
     }
 
 
 # ============================================================
-# STREAMLIT APP - UPDATED
+# STREAMLIT APP - UPDATED WITH UNIFIED LOGIC
 # ============================================================
 
 def main():
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
-    st.title("Portfolio Strategy with Tax-Aware Optimization")
+    st.title("Portfolio Strategy with Unified Tax-Aware Optimization")
 
     # Sidebar configuration
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
@@ -980,6 +850,7 @@ def main():
     st.sidebar.header("Validation Settings")
     run_validation = st.sidebar.checkbox("Run Validation Suite", value=True)
     show_cost_breakdown = st.sidebar.checkbox("Show Cost Breakdown", value=True)
+    show_tax_method = st.sidebar.checkbox("Show Tax Method Details", value=True)
 
     run_clicked = st.sidebar.button("Run Backtest & Optimize")
     if not run_clicked:
@@ -1006,24 +877,22 @@ def main():
     
     st.info(f"Loaded {len(prices)} trading days of data from {prices.index[0].date()} to {prices.index[-1].date()}")
 
-    # Use local variables instead of modifying globals
-    current_ma_min_days = ma_min_days
-    current_ma_max_days = ma_max_days
+    # Use local parameters
     current_flip_cost = flip_cost_input
     current_tax_rate = tax_rate_input
 
-    # RUN ROBUST MA OPTIMIZATION WITH TAXES
-    st.subheader("🔍 MA Optimization (Tax-Aware)")
-    with st.spinner("Optimizing MA parameters with tax-aware evaluation..."):
-        best_cfg, best_result, best_metrics = run_robust_ma_optimization(
+    # RUN ROBUST MA OPTIMIZATION WITH UNIFIED BACKTEST
+    st.subheader("🔍 MA Optimization (Unified Tax-Aware)")
+    with st.spinner("Optimizing MA parameters with unified tax-aware evaluation..."):
+        best_cfg, ma_result, best_metrics = run_robust_ma_optimization_unified(
             prices, risk_on_weights, risk_off_weights, current_flip_cost, current_tax_rate
         )
     
     best_len, best_type, best_tol = best_cfg
-    sig = best_result["signal"]
-    perf = best_result["performance"]
+    ma_signal = ma_result["signal"]
+    ma_perf = ma_result["performance"]
 
-    latest_signal = sig.iloc[-1] if len(sig) > 0 else False
+    latest_signal = ma_signal.iloc[-1] if len(ma_signal) > 0 else False
     current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
     st.subheader(f"📈 Current MA Regime: {current_regime}")
@@ -1038,10 +907,7 @@ def main():
         with col3:
             st.metric("Trades/Year", f"{best_metrics['trades_per_year']:.1f}")
         with col4:
-            st.metric("Regime Balance", f"{best_metrics['regime_balance']:.1%}")
-
-    portfolio_index = build_portfolio_index(prices, risk_on_weights)
-    opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
+            st.metric("Tax Method", ma_result.get('tax_method', 'auto').title())
 
     # Calculate calendar quarter dates
     dates = prices.index
@@ -1053,22 +919,20 @@ def main():
             mapped_q_ends.append(valid_dates.max())
     mapped_q_ends = pd.to_datetime(mapped_q_ends)
 
-    # Today's date for rebalancing
-    today_date = pd.Timestamp.today().normalize()
-    true_next_q = pd.date_range(start=today_date, periods=2, freq="Q")[0]
-    next_q_end = true_next_q
-    true_prev_q = pd.date_range(end=today_date, periods=2, freq="Q")[0]
-    past_q_end = true_prev_q
-    days_to_next_q = (next_q_end - today_date).days
-
     # Calculate quarterly target
     simple_rets = prices.pct_change().fillna(0)
     risk_on_simple = pd.Series(0.0, index=simple_rets.index)
     for a, w in risk_on_weights.items():
         if a in simple_rets.columns:
             risk_on_simple += simple_rets[a] * w
-    risk_on_eq = (1 + risk_on_simple).cumprod()
     
+    risk_off_daily = pd.Series(0.0, index=simple_rets.index)
+    for a, w in risk_off_weights.items():
+        if a in simple_rets.columns:
+            risk_off_daily += simple_rets[a] * w
+    
+    # Calculate quarterly target
+    risk_on_eq = (1 + risk_on_simple).cumprod()
     if len(risk_on_eq) > 0 and risk_on_eq.iloc[0] != 0:
         bh_cagr = (risk_on_eq.iloc[-1] / risk_on_eq.iloc[0]) ** (252 / len(risk_on_eq)) - 1
         quarterly_target = (1 + bh_cagr) ** (1/4) - 1
@@ -1076,40 +940,28 @@ def main():
         bh_cagr = 0
         quarterly_target = 0
 
-    # Risk-off returns
-    risk_off_daily = pd.Series(0.0, index=simple_rets.index)
-    for a, w in risk_off_weights.items():
-        if a in simple_rets.columns:
-            risk_off_daily += simple_rets[a] * w
-
-    # Run SIG engines with taxes
+    # Get pure SIG weights (no MA signal)
     pure_sig_signal = pd.Series(True, index=risk_on_simple.index)
-    pure_sig_eq, pure_sig_rw, pure_sig_sw, pure_sig_taxes, pure_sig_rebals = run_sig_engine(
-        risk_on_simple,
-        risk_off_daily,
-        quarterly_target,
-        pure_sig_signal,
-        flip_cost=current_flip_cost,
-        tax_rate=current_tax_rate,
-        quarter_end_dates=mapped_q_ends
-    )
+    pure_sig_result = backtest_unified(prices, pure_sig_signal, risk_on_weights, risk_off_weights,
+                                      current_flip_cost, current_tax_rate, tax_method='continuous')
 
-    hybrid_eq, hybrid_rw, hybrid_sw, hybrid_taxes, hybrid_rebals = run_sig_engine(
-        risk_on_simple,
-        risk_off_daily,
-        quarterly_target,
-        sig,
-        pure_sig_rw=pure_sig_rw,
-        pure_sig_sw=pure_sig_sw,
-        flip_cost=current_flip_cost,
-        tax_rate=current_tax_rate,
-        quarter_end_dates=mapped_q_ends
+    # Get Hybrid SIG returns from SIG engine (without tax logic)
+    hybrid_returns, hybrid_rebals = run_sig_engine_no_tax(
+        risk_on_simple, risk_off_daily, quarterly_target, ma_signal,
+        flip_cost=current_flip_cost, quarter_end_dates=mapped_q_ends
     )
+    
+    # Create Hybrid SIG signal (same as MA signal for tax purposes)
+    hybrid_signal = ma_signal.copy()
+    
+    # Run unified backtest for Hybrid SIG
+    hybrid_result = backtest_unified(prices, hybrid_signal, risk_on_weights, risk_off_weights,
+                                    current_flip_cost, current_tax_rate, tax_method='auto')
 
     # Create benchmarks
     st.subheader("📊 Benchmark Creation")
-    benchmarks = create_benchmarks(prices, risk_on_weights, risk_off_weights, 
-                                  mapped_q_ends, current_flip_cost, current_tax_rate)
+    benchmarks = create_benchmarks_unified(prices, risk_on_weights, risk_off_weights,
+                                          mapped_q_ends, current_flip_cost, current_tax_rate)
 
     # Display rebalance dates
     if len(hybrid_rebals) > 0:
@@ -1127,13 +979,25 @@ def main():
     if len(hybrid_rebals) > 0:
         last_reb = hybrid_rebals[-1]
         st.write(f"**Last Rebalance:** {last_reb.strftime('%Y-%m-%d')}")
+    
+    # Calculate next quarter date
+    today_date = pd.Timestamp.today().normalize()
+    next_q_end = pd.date_range(start=today_date, periods=2, freq="Q")[0]
+    days_to_next_q = (next_q_end - today_date).days
+    
     st.write(f"**Next Rebalance:** {next_q_end.date()} ({days_to_next_q} days)")
     st.write(f"**Quarterly Target Growth Rate:** {quarterly_target:.2%}")
 
     def get_sig_progress(qs_cap, today_cap):
-        if quarter_start_date is not None and len(hybrid_rw) > 0:
-            risky_start = qs_cap * float(hybrid_rw.loc[quarter_start_date])
-            risky_today = today_cap * float(hybrid_rw.iloc[-1])
+        if quarter_start_date is not None and len(hybrid_result["weights"]) > 0:
+            # Extract risky weight from hybrid result
+            risky_weight = 0.0
+            for asset, weight in risk_on_weights.items():
+                if asset in hybrid_result["weights"].columns:
+                    risky_weight += hybrid_result["weights"].loc[quarter_start_date, asset] if quarter_start_date in hybrid_result["weights"].index else 0
+            
+            risky_start = qs_cap * risky_weight
+            risky_today = today_cap * risky_weight  # Using same weight for simplicity
             return compute_quarter_progress(risky_start, risky_today, quarterly_target)
         else:
             return compute_quarter_progress(0, 0, 0)
@@ -1171,83 +1035,99 @@ def main():
     if show_cost_breakdown:
         st.subheader("💰 Cost Breakdown Analysis")
         
-        cost_data = calculate_cost_breakdown(best_result)
+        ma_cost_data = calculate_cost_breakdown_unified(ma_result)
+        hybrid_cost_data = calculate_cost_breakdown_unified(hybrid_result)
+        pure_sig_cost_data = calculate_cost_breakdown_unified(pure_sig_result)
         
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Slippage Costs", f"${cost_data['total_flip_costs']*10000:,.2f}",
-                     delta=f"{cost_data['total_flip_costs']/best_result['performance']['TotalReturn']:.1%} of returns" 
-                     if best_result['performance']['TotalReturn'] != 0 else "N/A")
-        with col2:
-            st.metric("Total Tax Costs", f"${cost_data['total_taxes']*10000:,.2f}",
-                     delta=f"{cost_data['total_taxes']/best_result['performance']['TotalReturn']:.1%} of returns"
-                     if best_result['performance']['TotalReturn'] != 0 else "N/A")
-        with col3:
-            st.metric("Total Costs", f"${cost_data['total_costs']*10000:,.2f}",
-                     delta=f"{cost_data['cost_as_percent_of_return']:.1%} of returns")
-        with col4:
-            st.metric("Annual Turnover", f"{cost_data['annual_turnover']:.1%}",
-                     help="Percentage of portfolio traded annually")
+        # Compare costs
+        cost_comparison = pd.DataFrame({
+            "MA Strategy": [
+                f"${ma_cost_data['total_costs']:,.2f}",
+                f"{ma_cost_data['cost_as_percent_of_return']:.1%}",
+                f"{ma_cost_data['annual_turnover']:.1%}",
+                ma_cost_data['tax_method']
+            ],
+            "Hybrid SIG": [
+                f"${hybrid_cost_data['total_costs']:,.2f}",
+                f"{hybrid_cost_data['cost_as_percent_of_return']:.1%}",
+                f"{hybrid_cost_data['annual_turnover']:.1%}",
+                hybrid_cost_data['tax_method']
+            ],
+            "Pure SIG": [
+                f"${pure_sig_cost_data['total_costs']:,.2f}",
+                f"{pure_sig_cost_data['cost_as_percent_of_return']:.1%}",
+                f"{pure_sig_cost_data['annual_turnover']:.1%}",
+                pure_sig_cost_data['tax_method']
+            ]
+        }, index=["Total Costs", "Costs/Return", "Annual Turnover", "Tax Method"])
+        
+        st.dataframe(cost_comparison)
         
         # Plot cost accumulation
         fig, ax = plt.subplots(figsize=(10, 4))
-        ax.plot(best_result.get("flip_costs", pd.Series(0.0, index=prices.index)).cumsum() * 10000, 
-                label="Cumulative Slippage Costs", linewidth=2)
-        ax.plot(best_result.get("tax_payments", pd.Series(0.0, index=prices.index)).cumsum() * 10000, 
-                label="Cumulative Tax Payments", linewidth=2)
-        ax.set_title("Cost Accumulation Over Time ($ per $10,000 invested)")
+        ax.plot(ma_result["flip_costs"].cumsum() * 10000, 
+                label="MA Slippage Costs", linewidth=2)
+        ax.plot(ma_result["tax_payments"].cumsum() * 10000, 
+                label="MA Tax Payments", linewidth=2)
+        ax.set_title("Cost Accumulation for MA Strategy ($ per $10,000 invested)")
         ax.set_xlabel("Date")
         ax.set_ylabel("Cumulative Costs ($)")
         ax.legend()
         ax.grid(alpha=0.3)
         st.pyplot(fig)
 
-    # PERFORMANCE COMPARISON TABLE (Updated with benchmarks) - FIXED VERSION
+    # PERFORMANCE COMPARISON TABLE
     st.subheader("📈 Performance Comparison (After-Tax)")
     
-    # Calculate performance for all strategies
-    def calculate_strategy_perf(name, returns, eq_curve):
-        perf = compute_performance(returns, eq_curve)
-        return {
-            "Strategy": name,
-            "CAGR": perf["CAGR"],
-            "Volatility": perf["Volatility"],
-            "Sharpe": perf["Sharpe"],
-            "MaxDD": perf["MaxDrawdown"],
-            "Total Return": perf["TotalReturn"]
-        }
+    # Collect all performance data
+    all_perf = []
     
     # MA Strategy
-    ma_perf = calculate_strategy_perf("MA Strategy", 
-                                     best_result["returns"], 
-                                     best_result["equity_curve"])
+    all_perf.append({
+        "Strategy": "MA Strategy",
+        "CAGR": ma_perf["CAGR"],
+        "Volatility": ma_perf["Volatility"],
+        "Sharpe": ma_perf["Sharpe"],
+        "MaxDD": ma_perf["MaxDrawdown"],
+        "Total Return": ma_perf["TotalReturn"]
+    })
     
     # Hybrid SIG
-    hybrid_simple = hybrid_eq.pct_change().fillna(0)
-    hybrid_perf = calculate_strategy_perf("Hybrid SIG", 
-                                         hybrid_simple, 
-                                         hybrid_eq)
+    hybrid_perf = hybrid_result["performance"]
+    all_perf.append({
+        "Strategy": "Hybrid SIG",
+        "CAGR": hybrid_perf["CAGR"],
+        "Volatility": hybrid_perf["Volatility"],
+        "Sharpe": hybrid_perf["Sharpe"],
+        "MaxDD": hybrid_perf["MaxDrawdown"],
+        "Total Return": hybrid_perf["TotalReturn"]
+    })
     
     # Pure SIG
-    pure_sig_simple = pure_sig_eq.pct_change().fillna(0)
-    pure_sig_perf = calculate_strategy_perf("Pure SIG", 
-                                           pure_sig_simple, 
-                                           pure_sig_eq)
+    pure_sig_perf = pure_sig_result["performance"]
+    all_perf.append({
+        "Strategy": "Pure SIG",
+        "CAGR": pure_sig_perf["CAGR"],
+        "Volatility": pure_sig_perf["Volatility"],
+        "Sharpe": pure_sig_perf["Sharpe"],
+        "MaxDD": pure_sig_perf["MaxDrawdown"],
+        "Total Return": pure_sig_perf["TotalReturn"]
+    })
     
-    # Benchmarks (after-tax)
-    benchmarks_data = []
+    # Benchmarks
     for key, bench in benchmarks.items():
-        bench_perf = calculate_strategy_perf(bench['description'], 
-                                            bench['returns_after_tax'], 
-                                            bench['eq_after_tax'])
-        benchmarks_data.append(bench_perf)
+        bench_perf = bench["result"]["performance"]
+        all_perf.append({
+            "Strategy": bench["description"],
+            "CAGR": bench_perf["CAGR"],
+            "Volatility": bench_perf["Volatility"],
+            "Sharpe": bench_perf["Sharpe"],
+            "MaxDD": bench_perf["MaxDrawdown"],
+            "Total Return": bench_perf["TotalReturn"]
+        })
     
-    # Combine all performance data
-    all_perf = [ma_perf, hybrid_perf, pure_sig_perf] + benchmarks_data
+    # Create DataFrame
     perf_df = pd.DataFrame(all_perf)
-    
-    # Store raw values before formatting
-    perf_df_raw = perf_df.copy()
     
     # Format for display
     def format_perf_df(df):
@@ -1262,33 +1142,25 @@ def main():
     perf_df_formatted = format_perf_df(perf_df)
     st.dataframe(perf_df_formatted, use_container_width=True)
     
-    # Highlight best performer in each category - FIXED VERSION
+    # Highlight best performers
     st.write("**Best Performers:**")
-    for metric in ["Sharpe", "CAGR", "MaxDD"]:
-        if metric in perf_df.columns:
-            # Use raw values for comparison
-            if metric == "MaxDD":
-                best_idx = perf_df[metric].idxmax()  # Higher (less negative) is better for MaxDD
-            else:
-                best_idx = perf_df[metric].idxmax()
+    perf_df_raw = perf_df.copy()
+    
+    for metric in ["Sharpe", "CAGR"]:
+        if metric in perf_df_raw.columns:
+            best_idx = perf_df_raw[metric].idxmax()
+            best_value = perf_df_raw.loc[best_idx, metric]
+            best_name = perf_df_raw.loc[best_idx, "Strategy"]
             
-            best_raw_value = perf_df.loc[best_idx, metric]
-            best_name = perf_df.loc[best_idx, "Strategy"]
-            
-            # Format based on metric type
             if metric == "Sharpe":
-                formatted_value = f"{best_raw_value:.3f}"
+                formatted_value = f"{best_value:.3f}"
             else:
-                formatted_value = f"{best_raw_value:.2%}"
+                formatted_value = f"{best_value:.2%}"
             
             st.write(f"- **{metric}:** {best_name} ({formatted_value})")
 
-    # FINAL PERFORMANCE PLOT
+    # PERFORMANCE PLOT
     st.subheader("📊 Performance Comparison Chart")
-    
-    # Normalize all equity curves
-    plot_index = build_portfolio_index(prices, risk_on_weights)
-    plot_ma = compute_ma_matrix(plot_index, [best_len], best_type)[best_len]
     
     # Normalize to $10,000 starting value
     def normalize_to_10k(eq):
@@ -1299,36 +1171,71 @@ def main():
     fig, ax = plt.subplots(figsize=(12, 6))
     
     # Plot strategies
-    ax.plot(normalize_to_10k(best_result["equity_curve"]), 
+    ax.plot(normalize_to_10k(ma_result["equity_curve"]), 
             label=f"MA Strategy ({best_len}-day {best_type.upper()})", 
             linewidth=2, color='green')
-    ax.plot(normalize_to_10k(hybrid_eq), 
+    ax.plot(normalize_to_10k(hybrid_result["equity_curve"]), 
             label="Hybrid SIG", 
             linewidth=2, color='blue', alpha=0.8)
-    ax.plot(normalize_to_10k(pure_sig_eq), 
+    ax.plot(normalize_to_10k(pure_sig_result["equity_curve"]), 
             label="Pure SIG", 
             linewidth=2, color='orange', alpha=0.8)
     
     # Plot benchmarks
     colors = ['red', 'purple', 'brown']
     for (key, bench), color in zip(benchmarks.items(), colors):
-        ax.plot(normalize_to_10k(bench['eq_after_tax']), 
+        ax.plot(normalize_to_10k(bench["result"]["equity_curve"]), 
                 label=bench['description'], 
                 linewidth=1.5, color=color, alpha=0.6, linestyle='--')
     
-    # Plot MA line
-    if len(plot_ma.dropna()) > 0:
-        ma_norm = normalize_to_10k(plot_ma.dropna())
-        ax.plot(ma_norm, label=f"MA({best_len}) Line", 
-                linestyle=':', color='black', alpha=0.5, linewidth=1)
-    
-    ax.set_title("Growth of $10,000 Investment (After-Tax)")
+    ax.set_title("Growth of $10,000 Investment (After-Tax, Unified Logic)")
     ax.set_xlabel("Date")
     ax.set_ylabel("Portfolio Value ($)")
     ax.legend(loc='upper left')
     ax.grid(alpha=0.3)
     
     st.pyplot(fig)
+
+    # TAX METHOD DETAILS
+    if show_tax_method:
+        st.subheader("🧾 Tax Method Details")
+        
+        st.write("""
+        **Unified Tax Logic Applied:**
+        
+        1. **All strategies** use the same tax calculation logic
+        2. **Tax Method Selection:**
+           - **Auto:** Chooses method based on annual turnover
+           - **Realization:** Taxes paid when switching from RISK-ON to RISK-OFF
+           - **Continuous:** Daily tax drag based on turnover rate
+        
+        3. **Rules:**
+           - Turnover < 300% → Realization method
+           - Turnover ≥ 300% → Continuous method
+           - Benchmarks use continuous method (academic standard)
+        """)
+        
+        # Show tax method details
+        tax_methods = pd.DataFrame({
+            "Strategy": ["MA Strategy", "Hybrid SIG", "Pure SIG"],
+            "Annual Turnover": [
+                f"{ma_result.get('annual_turnover', 0):.1%}",
+                f"{hybrid_result.get('annual_turnover', 0):.1%}",
+                f"{pure_sig_result.get('annual_turnover', 0):.1%}"
+            ],
+            "Tax Method": [
+                ma_result.get('tax_method', 'auto'),
+                hybrid_result.get('tax_method', 'auto'),
+                pure_sig_result.get('tax_method', 'auto')
+            ],
+            "Total Taxes Paid": [
+                f"${ma_result.get('tax_payments', pd.Series([0])).sum() * 10000:,.2f}",
+                f"${hybrid_result.get('tax_payments', pd.Series([0])).sum() * 10000:,.2f}",
+                f"${pure_sig_result.get('tax_payments', pd.Series([0])).sum() * 10000:,.2f}"
+            ]
+        })
+        
+        st.dataframe(tax_methods)
 
     # VALIDATION SECTION
     if run_validation:
@@ -1341,17 +1248,13 @@ def main():
         ])
         
         with val_tab1:
-            st.subheader("Monte Carlo Significance Test (with Costs)")
+            st.subheader("Monte Carlo Significance Test")
             
-            mc_results = monte_carlo_significance_with_costs(
-                best_result["returns"], 
-                best_result["signal"],
-                current_flip_cost
-            )
+            mc_results = monte_carlo_significance_unified(ma_result)
             
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Actual Sharpe (with costs)", f"{mc_results['actual_sharpe']:.3f}")
+                st.metric("Actual Sharpe", f"{mc_results['actual_sharpe']:.3f}")
             with col2:
                 st.metric("p-value", f"{mc_results['p_value']:.3f}")
             with col3:
@@ -1363,31 +1266,29 @@ def main():
         with val_tab2:
             st.subheader("Walk-Forward Validation")
             
-            wfa_results = walk_forward_validation_with_taxes(prices, best_result)
+            wfa_results = walk_forward_validation_unified(prices, ma_result)
             
             if not wfa_results.empty:
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("Avg Test Sharpe (Pre-tax)", 
-                             f"{wfa_results['test_sharpe_pre_tax'].mean():.3f}")
+                    st.metric("Avg Test Sharpe", 
+                             f"{wfa_results['test_sharpe'].mean():.3f}")
                 with col2:
-                    st.metric("Avg Test Sharpe (After-tax)", 
-                             f"{wfa_results['test_sharpe_after_tax'].mean():.3f}")
+                    st.metric("Avg Test CAGR", 
+                             f"{wfa_results['test_cagr'].mean():.2%}")
                 with col3:
-                    success_rate = (wfa_results['test_sharpe_after_tax'] > 0.5).mean()
+                    success_rate = (wfa_results['test_sharpe'] > 0.5).mean()
                     st.metric("Success Rate (Sharpe > 0.5)", f"{success_rate:.1%}")
                 with col4:
-                    avg_turnover = wfa_results['test_turnover'].mean()
-                    st.metric("Avg Test Turnover", f"{avg_turnover:.1%}")
+                    avg_max_dd = wfa_results['test_max_dd'].mean()
+                    st.metric("Avg Max Drawdown", f"{avg_max_dd:.1%}")
                 
                 # Plot results
                 fig, ax = plt.subplots(figsize=(10, 4))
-                ax.plot(wfa_results.index, wfa_results['test_sharpe_after_tax'], 
-                       marker='o', linewidth=2, label='After-tax Sharpe')
-                ax.plot(wfa_results.index, wfa_results['test_sharpe_pre_tax'], 
-                       marker='s', linewidth=1, alpha=0.5, label='Pre-tax Sharpe')
+                ax.plot(range(len(wfa_results)), wfa_results['test_sharpe'], 
+                       marker='o', linewidth=2, label='Test Sharpe')
                 ax.axhline(y=0, color='r', linestyle='--', alpha=0.5)
-                ax.axhline(y=wfa_results['test_sharpe_after_tax'].mean(), 
+                ax.axhline(y=wfa_results['test_sharpe'].mean(), 
                           color='g', linestyle='--', alpha=0.5, label='Average')
                 ax.set_title('Walk-Forward Test Sharpe Ratios')
                 ax.set_xlabel('Test Period')
@@ -1402,39 +1303,43 @@ def main():
             st.subheader("Strategy Health Metrics")
             
             # Calculate various metrics
-            metrics = {
-                "Monthly Hit Ratio": (best_result["returns"].resample('M')
-                                     .apply(lambda x: (1+x).prod()-1 > 0).mean()),
-                "Win/Loss Ratio": (abs(best_result["returns"][best_result["returns"] > 0].mean() / 
-                                     best_result["returns"][best_result["returns"] < 0].mean()) 
-                                 if len(best_result["returns"][best_result["returns"] < 0]) > 0 else 0),
-                "Profit Factor": (best_result["returns"][best_result["returns"] > 0].sum() / 
-                                abs(best_result["returns"][best_result["returns"] < 0].sum()) 
-                                if best_result["returns"][best_result["returns"] < 0].sum() != 0 else 0),
-                "Calmar Ratio": (best_result["performance"]["CAGR"] / 
-                               abs(best_result["performance"]["MaxDrawdown"]) 
-                               if best_result["performance"]["MaxDrawdown"] != 0 else 0),
-                "Omega Ratio": (best_result["returns"][best_result["returns"] > 0].sum() / 
-                              abs(best_result["returns"][best_result["returns"] < 0].sum()) 
-                              if best_result["returns"][best_result["returns"] < 0].sum() != 0 else 0)
-            }
+            metrics_data = {}
             
-            # Display metrics
-            cols = st.columns(5)
-            for (metric, value), col in zip(metrics.items(), cols):
-                with col:
-                    if metric in ["Monthly Hit Ratio"]:
-                        st.metric(metric, f"{value:.1%}")
-                    elif metric in ["Win/Loss Ratio", "Profit Factor", "Calmar Ratio", "Omega Ratio"]:
-                        st.metric(metric, f"{value:.2f}")
+            for strategy_name, result in [("MA Strategy", ma_result), 
+                                         ("Hybrid SIG", hybrid_result),
+                                         ("Pure SIG", pure_sig_result)]:
+                
+                returns = result["returns"]
+                
+                metrics = {
+                    "Monthly Hit Ratio": (returns.resample('M')
+                                         .apply(lambda x: (1+x).prod()-1 > 0).mean()),
+                    "Win/Loss Ratio": (abs(returns[returns > 0].mean() / 
+                                         returns[returns < 0].mean()) 
+                                     if len(returns[returns < 0]) > 0 else 0),
+                    "Profit Factor": (returns[returns > 0].sum() / 
+                                    abs(returns[returns < 0].sum()) 
+                                    if returns[returns < 0].sum() != 0 else 0),
+                    "Calmar Ratio": (result["performance"]["CAGR"] / 
+                                   abs(result["performance"]["MaxDrawdown"]) 
+                                   if result["performance"]["MaxDrawdown"] != 0 else 0)
+                }
+                
+                metrics_data[strategy_name] = metrics
             
-            # Interpretation guide
-            st.write("### 📊 Interpretation Guide")
-            st.write("- **Monthly Hit Ratio > 55%**: Good consistency")
-            st.write("- **Win/Loss Ratio > 1.5**: Favorable risk/reward")
-            st.write("- **Profit Factor > 1.5**: Profitable strategy")
-            st.write("- **Calmar Ratio > 1.0**: Good risk-adjusted returns")
-            st.write("- **Omega Ratio > 1.5**: Favorable return distribution")
+            # Display metrics in columns
+            st.write("#### Key Metrics Comparison")
+            metric_names = ["Monthly Hit Ratio", "Win/Loss Ratio", "Profit Factor", "Calmar Ratio"]
+            
+            for metric in metric_names:
+                cols = st.columns(3)
+                for idx, (strategy_name, metrics) in enumerate(metrics_data.items()):
+                    with cols[idx]:
+                        value = metrics.get(metric, 0)
+                        if metric == "Monthly Hit Ratio":
+                            st.metric(f"{strategy_name} - {metric}", f"{value:.1%}")
+                        else:
+                            st.metric(f"{strategy_name} - {metric}", f"{value:.2f}")
 
     # IMPLEMENTATION CHECKLIST
     st.markdown("""
@@ -1442,8 +1347,9 @@ def main():
 
 ## **Implementation Checklist**
 
-1. **Tax Considerations:**
-   - Taxes are paid when gains are realized (MA flips to RISK-OFF or quarterly rebalancing)
+1. **Unified Tax Logic Applied:**
+   - All strategies use same tax calculation
+   - Tax method auto-selected based on turnover
    - Effective tax rate: {:.1%}
    - Slippage cost per trade: {:.1%}
 
@@ -1455,20 +1361,19 @@ def main():
 
 3. **Current Configuration:**
    - MA: {}-day {} with {:.1%} tolerance
+   - Tax Method: {}
    - Expected annual turnover: {:.1%}
-   - Expected trades/year: {:.1f}
 
 4. **Academic Notes:**
    - All returns shown are AFTER estimated taxes and trading costs
+   - Unified tax logic ensures consistent comparison
    - Benchmarks include rebalancing costs and tax drag
-   - MA optimization penalizes excessive trading
 
 Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=9TIGHucZuaJ
 
 ---
     """.format(current_tax_rate, current_flip_cost, best_len, best_type.upper(), best_tol,
-              best_result.get('annual_turnover', 0), 
-              best_metrics['trades_per_year'] if best_metrics else 0))
+              ma_result.get('tax_method', 'auto'), ma_result.get('annual_turnover', 0)))
 
 
 # ============================================================
