@@ -331,20 +331,126 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
     """
     Main adaptive MA optimization that handles limited data
     """
-    portfolio_index = build_portfolio_index(prices, risk_on_weights)
-    total_days = len(prices)
-    total_years = total_days / 252
-    
-    # STAGE 1: Generate candidate parameters based on data characteristics
-    regime_history = None  # Could load from your CSV file here
-    
-    # Get adaptive bounds and initial guess
-    adaptive_ma, ma_type, tolerance, metrics = regime_adaptive_ma_selection(
-        prices, risk_on_weights, flip_cost, regime_history
-    )
-    
-    # Create candidate parameter space
-    candidate_params = []
+    try:
+        portfolio_index = build_portfolio_index(prices, risk_on_weights)
+        total_days = len(prices)
+        
+        if total_days < 100:  # Minimum data requirement
+            return None, None, None
+            
+        total_years = total_days / 252
+        
+        # STAGE 1: Generate candidate parameters based on data characteristics
+        regime_history = None  # Could load from your CSV file here
+        
+        # Get adaptive bounds and initial guess
+        adaptive_ma, ma_type, tolerance, metrics = regime_adaptive_ma_selection(
+            prices, risk_on_weights, flip_cost, regime_history
+        )
+        
+        # Create candidate parameter space
+        candidate_params = []
+        
+        # Center around adaptive MA
+        base_lengths = [adaptive_ma]
+        if adaptive_ma > 50:
+            base_lengths.extend([adaptive_ma - 25, adaptive_ma + 25])
+        if adaptive_ma > 100:
+            base_lengths.extend([adaptive_ma - 50, adaptive_ma + 50])
+        
+        # Ensure reasonable bounds
+        min_len = max(20, int(0.1 * total_days))
+        max_len = min(300, int(0.5 * total_days))
+        
+        base_lengths = [l for l in base_lengths if min_len <= l <= max_len]
+        
+        # Add both MA types
+        for L in base_lengths:
+            candidate_params.append((L, "sma", tolerance))
+            candidate_params.append((L, "ema", tolerance))
+        
+        # Add tolerance variations
+        tolerance_variants = []
+        for L, ma_type, _ in candidate_params[:10]:  # Limit to first 10 to keep manageable
+            for tol in [0.01, 0.02, 0.03, 0.04]:
+                tolerance_variants.append((L, ma_type, tol))
+        
+        candidate_params.extend(tolerance_variants[:min(10, len(tolerance_variants))])
+        
+        # STAGE 2: Robust validation
+        if total_years >= 2:  # Need at least 2 years for meaningful CV
+            best_params, cv_scores = robust_ma_validation(
+                prices, risk_on_weights, risk_off_weights, flip_cost, 
+                candidate_params, n_folds=min(5, int(total_years))
+            )
+        else:
+            # Very limited data: use simplest reasonable parameters
+            best_params = (adaptive_ma, ma_type, tolerance)
+            cv_scores = {}
+        
+        # If best_params is None, use defaults
+        if best_params is None:
+            best_params = (min(max(100, min_len), max_len), "sma", 0.02)
+            cv_scores = {}
+        
+        # STAGE 3: Out-of-sample stability check (if enough data)
+        stability_check = {}
+        if total_years >= 4:
+            # Reserve last year for out-of-sample test
+            split_idx = int(0.75 * total_days)
+            train_prices = prices.iloc[:split_idx]
+            test_prices = prices.iloc[split_idx:]
+            
+            # Train on first 75%
+            train_portfolio = build_portfolio_index(train_prices, risk_on_weights)
+            L, ma_type, tol = best_params
+            
+            train_ma = compute_ma_matrix(train_portfolio, [L], ma_type)[L]
+            train_signal = generate_testfol_signal_vectorized(train_portfolio, train_ma, tol)
+            
+            # Test on last 25%
+            test_portfolio = build_portfolio_index(test_prices, risk_on_weights)
+            full_portfolio = build_portfolio_index(prices, risk_on_weights)
+            
+            full_ma = compute_ma_matrix(full_portfolio, [L], ma_type)[L]
+            full_signal = generate_testfol_signal_vectorized(full_portfolio, full_ma, tol)
+            
+            test_signal = full_signal.iloc[split_idx:]
+            
+            train_result = backtest(train_prices, train_signal, risk_on_weights, 
+                                  risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
+            test_result = backtest(test_prices, test_signal, risk_on_weights, 
+                                 risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
+            
+            stability_check = {
+                'train_sharpe': train_result["performance"]["Sharpe"],
+                'test_sharpe': test_result["performance"]["Sharpe"],
+                'oos_ratio': test_result["performance"]["Sharpe"] / max(0.001, train_result["performance"]["Sharpe"]),
+                'train_days': len(train_prices),
+                'test_days': len(test_prices)
+            }
+        
+        # STAGE 4: Final backtest with selected parameters
+        L, ma_type, tol = best_params
+        full_ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
+        full_signal = generate_testfol_signal_vectorized(portfolio_index, full_ma, tol)
+        final_result = backtest(prices, full_signal, risk_on_weights, risk_off_weights,
+                              flip_cost, ma_flip_multiplier=4.0)
+        
+        # Create results summary
+        results_summary = {
+            'selected_params': best_params,
+            'data_metrics': metrics,
+            'cv_scores': cv_scores,
+            'stability_check': stability_check,
+            'final_performance': final_result["performance"]
+        }
+        
+        return best_params, final_result, results_summary
+        
+    except Exception as e:
+        print(f"Optimization error: {e}")
+        return None, None, None
     
     # Center around adaptive MA
     base_lengths = [adaptive_ma]
