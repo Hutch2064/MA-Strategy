@@ -137,7 +137,9 @@ def run_sig_engine(
     pure_sig_rw=None,
     pure_sig_sw=None,
     flip_cost=FLIP_COST,
-    quarter_end_dates=None   # <-- must be mapped_q_ends
+    quarter_end_dates=None,   # <-- must be mapped_q_ends
+    quarterly_multiplier=2.0,  # NEW: 2x for Pure SIG, 2x for Hybrid SIG (quarterly part)
+    ma_flip_multiplier=4.0     # NEW: 4x for Hybrid SIG when MA flips
 ):
 
     dates = risk_on_returns.index
@@ -221,17 +223,17 @@ def run_sig_engine(
                         risky_val += move
                         rebalance_dates.append(date)
 
-                    # Apply quarterly fee once
-                    eq *= (1 - flip_cost * target_quarter)
+                    # Apply quarterly fee with multiplier (2x for Pure SIG, 2x for Hybrid SIG quarterly part)
+                    eq *= (1 - flip_cost * target_quarter * quarterly_multiplier)
 
             # Update equity
             eq = risky_val + safe_val
             risky_w = risky_val / eq
             safe_w  = safe_val  / eq
 
-            # Flip cost at MA transition
+            # Flip cost at MA transition with multiplier (4x for Hybrid SIG when MA flips)
             if flip_mask.iloc[i]:
-                eq *= (1 - flip_cost)
+                eq *= (1 - flip_cost * ma_flip_multiplier)
 
         else:
             # Freeze values on entering RISK-OFF
@@ -257,6 +259,8 @@ def run_sig_engine(
         pd.Series(safe_w_series, index=dates),
         rebalance_dates
     )
+
+
 # ============================================================
 # BACKTEST ENGINE
 # ============================================================
@@ -301,7 +305,7 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
     }
 
 
-def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
+def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=4.0):
     simple = prices.pct_change().fillna(0)
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
@@ -309,7 +313,8 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
     sig_arr = signal.astype(int)
     flip_mask = sig_arr.diff().abs() == 1
 
-    flip_costs = np.where(flip_mask, -flip_cost, 0.0)
+    # MA flip costs with 4x multiplier for MA Strategy
+    flip_costs = np.where(flip_mask, -flip_cost * ma_flip_multiplier, 0.0)
     strat_adj = strategy_simple + flip_costs
 
     eq = (1 + strat_adj).cumprod()
@@ -321,6 +326,49 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
         "weights": weights,
         "performance": compute_performance(strat_adj, eq),
         "flip_mask": flip_mask,
+    }
+
+
+# ============================================================
+# BUY & HOLD ENGINE WITH QUARTERLY REBALANCE
+# ============================================================
+
+def buy_and_hold_with_rebalance(prices, weights_dict, flip_cost, quarter_end_dates):
+    """Buy & Hold with quarterly rebalancing to target weights (1x flip cost)"""
+    simple = prices.pct_change().fillna(0)
+    
+    # Initial investment
+    eq = 10000.0
+    equity_curve = [eq]
+    
+    # Fast lookup for quarter ends
+    quarter_end_set = set(quarter_end_dates)
+    
+    for i in range(1, len(prices)):
+        date = prices.index[i]
+        
+        # Calculate portfolio return for the day
+        daily_return = 0.0
+        for asset, weight in weights_dict.items():
+            if asset in simple.columns:
+                daily_return += simple.iloc[i][asset] * weight
+        
+        # Apply daily return
+        eq *= (1 + daily_return)
+        
+        # Apply quarterly rebalancing cost (1x flip cost)
+        if date in quarter_end_set:
+            eq *= (1 - flip_cost)
+        
+        equity_curve.append(eq)
+    
+    eq_series = pd.Series(equity_curve, index=prices.index)
+    returns = eq_series.pct_change().fillna(0)
+    
+    return {
+        "returns": returns,
+        "equity_curve": eq_series,
+        "performance": compute_performance(returns, eq_series)
     }
 
 
@@ -344,7 +392,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
         default_cfg = (20, "sma", 0.02)
         ma = compute_ma_matrix(portfolio_index, [20], "sma")[20]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, 0.02)
-        default_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+        default_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
         return default_cfg, default_result
     
     # Use reasonable MA lengths based on available data
@@ -372,7 +420,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
                     idx += 1
                     continue
                     
-                result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+                result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
 
                 sig_arr = signal.astype(int)
                 switches = sig_arr.diff().abs().sum()
@@ -399,7 +447,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
         default_cfg = (default_length, "sma", 0.02)
         ma = compute_ma_matrix(portfolio_index, [default_length], "sma")[default_length]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, 0.02)
-        best_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+        best_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
         return default_cfg, best_result
 
     return best_cfg, best_result
@@ -584,7 +632,7 @@ def parameter_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
     for length in test_lengths:
         ma = compute_ma_matrix(portfolio_index, [length], base_type)[length]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, base_tol)
-        result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+        result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
         perf = result["performance"]
         length_results.append({
             'length': length,
@@ -598,7 +646,7 @@ def parameter_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
     ma = compute_ma_matrix(portfolio_index, [min(base_len, max_possible)], base_type)[min(base_len, max_possible)]
     for tol in [0.00, 0.01, 0.02, 0.03, 0.04, 0.05]:
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-        result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+        result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
         perf = result["performance"]
         tol_results.append({
             'tolerance': tol,
@@ -680,7 +728,7 @@ def main():
     
     st.info(f"Loaded {len(prices)} trading days of data from {prices.index[0].date()} to {prices.index[-1].date()}")
 
-    # RUN MA GRID SEARCH (unchanged)
+    # RUN MA GRID SEARCH (4x flip costs for MA Strategy)
     best_cfg, best_result = run_grid_search(
         prices, risk_on_weights, risk_off_weights, FLIP_COST
     )
@@ -693,6 +741,13 @@ def main():
 
     st.subheader(f"Current MA Regime: {current_regime}")
     st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
+    
+    # Display flip cost information
+    st.write(f"**Flip Cost Multipliers Applied:**")
+    st.write(f"- Buy & Hold: 1x (quarterly rebalance to target weights)")
+    st.write(f"- Pure SIG: 2x (quarterly rebalance)")
+    st.write(f"- MA Strategy: 4x (when MA flips)")
+    st.write(f"- Hybrid SIG: 6x total (2x quarterly + 4x MA flips)")
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
@@ -798,7 +853,7 @@ def main():
         if a in simple_rets.columns:
             risk_off_daily += simple_rets[a] * w
 
-    # PURE SIG (always RISK-ON)
+    # PURE SIG (always RISK-ON) - 2x flip costs quarterly
     pure_sig_signal = pd.Series(True, index=risk_on_simple.index)
 
     pure_sig_eq, pure_sig_rw, pure_sig_sw, pure_sig_rebals = run_sig_engine(
@@ -806,10 +861,12 @@ def main():
         risk_off_daily,
         quarterly_target,
         pure_sig_signal,
-        quarter_end_dates=mapped_q_ends
+        quarter_end_dates=mapped_q_ends,
+        quarterly_multiplier=2.0,  # 2x for Pure SIG
+        ma_flip_multiplier=0.0     # No MA flips for Pure SIG
     )
 
-    # HYBRID SIG (MA Filter)
+    # HYBRID SIG (MA Filter) - 2x quarterly + 4x MA flips = 6x total
     hybrid_eq, hybrid_rw, hybrid_sw, hybrid_rebals = run_sig_engine(
         risk_on_simple,
         risk_off_daily,
@@ -817,7 +874,25 @@ def main():
         sig,
         pure_sig_rw=pure_sig_rw,
         pure_sig_sw=pure_sig_sw,
-        quarter_end_dates=mapped_q_ends
+        quarter_end_dates=mapped_q_ends,
+        quarterly_multiplier=2.0,  # 2x quarterly part
+        ma_flip_multiplier=4.0     # 4x when MA flips
+    )
+    
+    # ============================================================
+    # BUY & HOLD WITH QUARTERLY REBALANCE (1x flip costs)
+    # ============================================================
+    
+    # Combine risk_on and risk_off weights for Buy & Hold
+    bh_weights = risk_on_weights.copy()
+    bh_weights.update(risk_off_weights)
+    
+    # Run Buy & Hold with quarterly rebalance (1x flip costs)
+    bh_rebalance_result = buy_and_hold_with_rebalance(
+        prices, 
+        bh_weights, 
+        FLIP_COST, 
+        mapped_q_ends
     )
     
     # ============================================================
@@ -943,9 +1018,18 @@ def main():
         np.zeros(len(pure_sig_simple), dtype=bool) if len(pure_sig_simple) > 0 else np.array([], dtype=bool),
         0,
     )
+    
+    # Buy & Hold stats (with quarterly rebalance)
+    bh_stats = compute_stats(
+        bh_rebalance_result["performance"],
+        bh_rebalance_result["returns"],
+        bh_rebalance_result["performance"]["DD_Series"],
+        np.zeros(len(bh_rebalance_result["returns"]), dtype=bool) if len(bh_rebalance_result["returns"]) > 0 else np.array([], dtype=bool),
+        0,
+    )
 
-    # STAT TABLE (unchanged)
-    st.subheader("MA vs Sharpe-Optimal vs Buy & Hold vs Hybrid SIG/MA vs Pure SIG")
+    # STAT TABLE (updated with Buy & Hold with rebalance)
+    st.subheader("MA vs Sharpe-Optimal vs Buy & Hold (with rebalance) vs Hybrid SIG/MA vs Pure SIG")
     rows = [
         ("CAGR", "CAGR"),
         ("Volatility", "Volatility"),
@@ -968,16 +1052,17 @@ def main():
     for label, key in rows:
         sv = strat_stats.get(key, np.nan)
         sh = sharp_perf.get(key, np.nan)
+        bh = bh_stats.get(key, np.nan)
         rv = risk_stats.get(key, np.nan)
         hv = hybrid_stats.get(key, np.nan)
         ps = pure_sig_stats.get(key, np.nan)
 
         if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
-            row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(rv), fmt_pct(hv), fmt_pct(ps)]
+            row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(bh), fmt_pct(rv), fmt_pct(hv), fmt_pct(ps)]
         elif key in ["Sharpe", "MAR", "PainGain", "Skew", "Kurtosis"]:
-            row = [label, fmt_dec(sv), fmt_dec(sh), fmt_dec(rv), fmt_dec(hv), fmt_dec(ps)]
+            row = [label, fmt_dec(sv), fmt_dec(sh), fmt_dec(bh), fmt_dec(rv), fmt_dec(hv), fmt_dec(ps)]
         else:
-            row = [label, fmt_num(sv), fmt_num(sh), fmt_num(rv), fmt_num(hv), fmt_num(ps)]
+            row = [label, fmt_num(sv), fmt_num(sh), fmt_num(bh), fmt_num(rv), fmt_num(hv), fmt_num(ps)]
 
         table_data.append(row)
 
@@ -987,7 +1072,8 @@ def main():
             "Metric",
             "MA Strategy",
             "Sharpe-Optimal",
-            "Buy & Hold",
+            "Buy & Hold (Rebalanced)",
+            "Buy & Hold (No Rebalance)",
             "Hybrid SIG",
             "Pure SIG",
         ],
@@ -1520,7 +1606,7 @@ def main():
     
     st.markdown("---")  # Separator before final plot
 
-    # Final Performance Plot (unchanged)
+    # Final Performance Plot (updated with Buy & Hold with rebalance)
     st.subheader("Portfolio Strategy Performance Comparison")
 
     plot_index = build_portfolio_index(prices, risk_on_weights)
@@ -1534,13 +1620,16 @@ def main():
     hybrid_eq_norm = normalize(hybrid_eq) if len(hybrid_eq) > 0 else pd.Series([], dtype=float)
     pure_sig_norm  = normalize(pure_sig_eq) if len(pure_sig_eq) > 0 else pd.Series([], dtype=float)
     risk_on_norm   = normalize(risk_on_eq) if len(risk_on_eq) > 0 else pd.Series([], dtype=float)
+    bh_rebalance_norm = normalize(bh_rebalance_result["equity_curve"]) if len(bh_rebalance_result["equity_curve"]) > 0 else pd.Series([], dtype=float)
 
     if len(strat_eq_norm) > 0:
         fig, ax = plt.subplots(figsize=(12, 6))
         ax.plot(strat_eq_norm, label="MA Strategy", linewidth=2)
         if len(sharp_eq_norm) > 0:
             ax.plot(sharp_eq_norm, label="Sharpe-Optimal", linewidth=2, color="magenta")
-        ax.plot(risk_on_norm, label="100% Risk-On", alpha=0.65)
+        if len(bh_rebalance_norm) > 0:
+            ax.plot(bh_rebalance_norm, label="Buy & Hold (Rebalanced)", linewidth=2, color="purple", linestyle=":")
+        ax.plot(risk_on_norm, label="Buy & Hold (No Rebalance)", alpha=0.65)
         if len(hybrid_eq_norm) > 0:
             ax.plot(hybrid_eq_norm, label="Hybrid SIG", linewidth=2, color="blue")
         if len(pure_sig_norm) > 0:
