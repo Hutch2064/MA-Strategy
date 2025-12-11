@@ -25,7 +25,7 @@ RISK_OFF_WEIGHTS = {
     "SHY": 1.0,
 }
 
-FLIP_COST = 0.00375
+FLIP_COST = 0.00
 
 # Starting weights inside the SIG engine (unchanged)
 START_RISKY = 0.70
@@ -552,7 +552,7 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
     tol_results = []
     ma = compute_ma_matrix(portfolio_index, [base_len], base_type)[base_len]
     
-    for tol in [0.01, 0.02, 0.03, 0.04, 0.05]:
+    for tol in [0.00, 0.01, 0.02, 0.03, 0.04, 0.05]:
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
         
         # Use MA Strategy backtest (NOT Hybrid SIG!)
@@ -582,7 +582,7 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
     # Fixed parameter grid
     ma_lengths = [50, 100, 150, 200, 250, 300]
     ma_types = ["sma", "ema"]
-    tolerances = [0.01, 0.02, 0.03, 0.04, 0.05]
+    tolerances = [0.01, 0.02, 0.03, 0.04]
     
     # Generate all combinations
     param_combinations = []
