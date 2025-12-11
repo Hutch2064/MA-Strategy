@@ -134,58 +134,57 @@ def generate_testfol_signal_vectorized(price, ma, tol):
 
 
 # ============================================================
-# TAX CALCULATION FUNCTIONS (UPDATED WITH FIXES)
+# TAX CALCULATION FUNCTIONS (NEW)
 # ============================================================
 
 def calculate_tax_liability_at_realization(returns, signal_changes, tax_rate=ANNUAL_TAX_RATE):
     """
-    Calculate taxes when gains are realized - FIXED VERSION
-    Taxes applied immediately when MA signal flips from RISK-ON to RISK-OFF
+    Calculate taxes when gains are realized (academically correct)
+    Taxes applied immediately when:
+    1. MA signal flips from RISK-ON to RISK-OFF
+    2. Quarterly rebalancing triggers partial realization
     """
     if len(returns) == 0:
         return pd.Series(0.0, index=returns.index)
     
-    # Start with initial investment
-    equity = 10000.0  # Start with $10,000
-    cost_basis = equity  # Initial cost basis
+    # Convert to equity curve to track cost basis
+    equity_pre_tax = (1 + returns).cumprod()
     tax_payments = pd.Series(0.0, index=returns.index)
-    equity_values = [equity]
     
+    # Track cost basis and entry prices
+    cost_basis = equity_pre_tax.iloc[0]  # Initial investment
+    last_entry_idx = 0
     in_position = True
-    last_entry_value = equity
     
-    for i in range(len(returns)):
-        # Apply daily return
-        equity *= (1 + returns.iloc[i])
-        
-        # Check for RISK-ON → RISK-OFF transition (sell all risky)
-        if signal_changes.iloc[i] == -1 and in_position:
-            # Calculate gain since last entry
-            gain = max(0, equity - last_entry_value)
-            
-            if gain > 0:
-                # Apply tax immediately
-                tax_amount = gain * tax_rate
-                tax_payments.iloc[i] = -tax_amount
+    for i in range(1, len(returns)):
+        # Check for signal change from RISK-ON to RISK-OFF
+        if i > 0 and signal_changes.iloc[i] == -1:  # RISK-ON → RISK-OFF
+            if in_position:
+                # Calculate gain since last entry
+                current_value = equity_pre_tax.iloc[i]
+                gain = max(0, current_value - cost_basis)
                 
-                # Reduce equity by tax amount
-                equity -= tax_amount
+                if gain > 0:
+                    # Apply tax immediately
+                    tax_amount = gain * tax_rate
+                    tax_payments.iloc[i] = -tax_amount
+                    
+                    # Reduce equity by tax amount
+                    equity_pre_tax.iloc[i:] *= (1 - tax_amount / current_value)
+                    
+                    # Reset cost basis
+                    cost_basis = equity_pre_tax.iloc[i]
                 
-                # Update cost basis
-                cost_basis = equity
-                last_entry_value = equity
-            
-            in_position = False
+                in_position = False
+                last_entry_idx = i
         
-        # Check for RISK-OFF → RISK-ON transition (buy risky)
-        elif signal_changes.iloc[i] == 1 and not in_position:
-            last_entry_value = equity
-            in_position = True
-        
-        equity_values.append(equity)
-    
-    # Remove the first value (starting equity)
-    equity_curve = pd.Series(equity_values[1:], index=returns.index)
+        # Check for signal change from RISK-OFF to RISK-ON
+        elif i > 0 and signal_changes.iloc[i] == 1:  # RISK-OFF → RISK-ON
+            if not in_position:
+                # New position - set new cost basis
+                cost_basis = equity_pre_tax.iloc[i]
+                last_entry_idx = i
+                in_position = True
     
     return tax_payments
 
@@ -408,45 +407,24 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
             "DD_Series": pd.Series([], dtype=float)
         }
     
-    # Ensure equity curve doesn't go negative
-    eq_curve = eq_curve.clip(lower=0.01)  # Prevent divide by zero
-    
-    if eq_curve.iloc[-1] <= 0:
-        return {
-            "CAGR": -1.0,  # -100% CAGR for total loss
-            "Volatility": simple_returns.std() * np.sqrt(252) if len(simple_returns) > 0 else 0,
-            "Sharpe": 0,
-            "MaxDrawdown": -1.0,
-            "TotalReturn": -1.0,
-            "DD_Series": pd.Series([-1.0], index=eq_curve.index)
-        }
-    
     cagr = (eq_curve.iloc[-1] / eq_curve.iloc[0]) ** (252 / len(eq_curve)) - 1
     vol = simple_returns.std() * np.sqrt(252) if len(simple_returns) > 0 else 0
     sharpe = (simple_returns.mean() * 252 - rf) / vol if vol > 0 else 0
-    
-    # Calculate drawdown safely
-    if eq_curve.iloc[0] > 0:
-        cumulative = eq_curve / eq_curve.iloc[0]
-        running_max = cumulative.cummax()
-        drawdown = (cumulative - running_max) / running_max
-        max_dd = drawdown.min() if len(drawdown) > 0 else 0
-    else:
-        max_dd = -1.0
-    
+    dd = eq_curve / eq_curve.cummax() - 1
+
     return {
         "CAGR": cagr,
         "Volatility": vol,
         "Sharpe": sharpe,
-        "MaxDrawdown": max_dd,
+        "MaxDrawdown": dd.min() if len(dd) > 0 else 0,
         "TotalReturn": eq_curve.iloc[-1] / eq_curve.iloc[0] - 1 if eq_curve.iloc[0] != 0 else 0,
-        "DD_Series": drawdown if 'drawdown' in locals() else pd.Series([], dtype=float)
+        "DD_Series": dd
     }
 
 def backtest_with_taxes(prices, signal, risk_on_weights, risk_off_weights, 
                        flip_cost=FLIP_COST, tax_rate=ANNUAL_TAX_RATE):
     """
-    Backtest with proper tax treatment - FIXED VERSION
+    Backtest with proper tax treatment
     """
     simple = prices.pct_change().fillna(0)
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
@@ -469,30 +447,19 @@ def backtest_with_taxes(prices, signal, risk_on_weights, risk_off_weights,
     # 3. Combine all costs
     total_costs = flip_costs + tax_payments.values
     
-    # 4. Calculate returns and equity - CORRECT WAY
-    # Start with $10,000 and apply returns and costs cumulatively
-    equity_curve = [10000.0]
-    for i in range(len(strategy_simple)):
-        # Apply daily return and costs
-        daily_return = strategy_simple.iloc[i] + total_costs[i]
-        new_equity = equity_curve[-1] * (1 + daily_return)
-        equity_curve.append(new_equity)
-    
-    # Remove initial value
-    equity_curve = pd.Series(equity_curve[1:], index=strategy_simple.index)
-    
-    # Calculate the actual returns from the equity curve
-    actual_returns = equity_curve.pct_change().fillna(0)
-    
+    # 4. Calculate returns and equity
+    strat_adj = strategy_simple + total_costs
+    eq = (1 + strat_adj).cumprod()
+
     # Calculate turnover for analysis
     turnover = calculate_turnover(signal)
 
     return {
-        "returns": actual_returns,
-        "equity_curve": equity_curve,
+        "returns": strat_adj,
+        "equity_curve": eq,
         "signal": signal,
         "weights": weights,
-        "performance": compute_performance(actual_returns, equity_curve),
+        "performance": compute_performance(strat_adj, eq),
         "flip_mask": flip_mask,
         "flip_costs": pd.Series(flip_costs, index=strategy_simple.index),
         "tax_payments": tax_payments,
@@ -593,7 +560,7 @@ def run_robust_ma_optimization(prices, risk_on_weights, risk_off_weights,
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     returns = portfolio_index.pct_change().fillna(0)
     
-    # Use global parameters directly
+    # Use global parameters directly (no global declaration needed here)
     candidate_lengths = list(range(MA_MIN_DAYS, MA_MAX_DAYS + 1, 
                                  max(1, (MA_MAX_DAYS - MA_MIN_DAYS) // MA_STEP_FACTOR)))
     candidate_types = ["sma", "ema"]
@@ -1202,7 +1169,7 @@ def main():
         ax.grid(alpha=0.3)
         st.pyplot(fig)
 
-    # PERFORMANCE COMPARISON TABLE (Updated with benchmarks) - FIXED VERSION
+    # PERFORMANCE COMPARISON TABLE (Updated with benchmarks)
     st.subheader("📈 Performance Comparison (After-Tax)")
     
     # Calculate performance for all strategies
@@ -1246,9 +1213,6 @@ def main():
     all_perf = [ma_perf, hybrid_perf, pure_sig_perf] + benchmarks_data
     perf_df = pd.DataFrame(all_perf)
     
-    # Store raw values before formatting
-    perf_df_raw = perf_df.copy()
-    
     # Format for display
     def format_perf_df(df):
         formatted = df.copy()
@@ -1259,29 +1223,19 @@ def main():
             formatted["Sharpe"] = formatted["Sharpe"].apply(lambda x: f"{x:.3f}")
         return formatted
     
-    perf_df_formatted = format_perf_df(perf_df)
-    st.dataframe(perf_df_formatted, use_container_width=True)
+    st.dataframe(format_perf_df(perf_df), use_container_width=True)
     
-    # Highlight best performer in each category - FIXED VERSION
+    # Highlight best performer in each category
     st.write("**Best Performers:**")
     for metric in ["Sharpe", "CAGR", "MaxDD"]:
         if metric in perf_df.columns:
-            # Use raw values for comparison
             if metric == "MaxDD":
                 best_idx = perf_df[metric].idxmax()  # Higher (less negative) is better for MaxDD
             else:
                 best_idx = perf_df[metric].idxmax()
-            
-            best_raw_value = perf_df.loc[best_idx, metric]
+            best_value = perf_df.loc[best_idx, metric]
             best_name = perf_df.loc[best_idx, "Strategy"]
-            
-            # Format based on metric type
-            if metric == "Sharpe":
-                formatted_value = f"{best_raw_value:.3f}"
-            else:
-                formatted_value = f"{best_raw_value:.2%}"
-            
-            st.write(f"- **{metric}:** {best_name} ({formatted_value})")
+            st.write(f"- **{metric}:** {best_name} ({best_value:.2% if metric != 'Sharpe' else best_value:.3f})")
 
     # FINAL PERFORMANCE PLOT
     st.subheader("📊 Performance Comparison Chart")
