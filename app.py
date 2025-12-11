@@ -374,7 +374,7 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
             for tol in [0.01, 0.02, 0.03, 0.04, 0.05]:
                 tolerance_variants.append((L, ma_type, tol))
         
-        candidate_params.extend(tolerance_variants[:min(10, len(tolerance_variants))])
+            candidate_params.extend(tolerance_variants[:min(10, len(tolerance_variants))])
         
         # STAGE 2: Robust validation
         if total_years >= 2:  # Need at least 2 years for meaningful CV
