@@ -25,7 +25,6 @@ RISK_OFF_WEIGHTS = {
 }
 
 FLIP_COST = 0.005
-TURNOVER_COST = 0.001  # 0.1% per unit of turnover (academic standard)
 
 # Starting weights inside the SIG engine (unchanged)
 START_RISKY = 0.70
@@ -258,10 +257,8 @@ def run_sig_engine(
         pd.Series(safe_w_series, index=dates),
         rebalance_dates
     )
-
-
 # ============================================================
-# BACKTEST ENGINE WITH TURNOVER COSTS
+# BACKTEST ENGINE
 # ============================================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
@@ -278,7 +275,7 @@ def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
     return weights
 
 
-def compute_performance(simple_returns, eq_curve, turnover_series=None, rf=0.0):
+def compute_performance(simple_returns, eq_curve, rf=0.0):
     if len(eq_curve) == 0 or eq_curve.iloc[0] == 0:
         return {
             "CAGR": 0,
@@ -293,8 +290,8 @@ def compute_performance(simple_returns, eq_curve, turnover_series=None, rf=0.0):
     vol = simple_returns.std() * np.sqrt(252) if len(simple_returns) > 0 else 0
     sharpe = (simple_returns.mean() * 252 - rf) / vol if vol > 0 else 0
     dd = eq_curve / eq_curve.cummax() - 1
-    
-    result = {
+
+    return {
         "CAGR": cagr,
         "Volatility": vol,
         "Sharpe": sharpe,
@@ -302,16 +299,9 @@ def compute_performance(simple_returns, eq_curve, turnover_series=None, rf=0.0):
         "TotalReturn": eq_curve.iloc[-1] / eq_curve.iloc[0] - 1 if eq_curve.iloc[0] != 0 else 0,
         "DD_Series": dd
     }
-    
-    # Add turnover metrics if provided
-    if turnover_series is not None and len(turnover_series) > 0:
-        result["AnnualTurnover"] = turnover_series.mean() * 252
-        result["TotalTurnover"] = turnover_series.sum()
-    
-    return result
 
 
-def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, turnover_cost=TURNOVER_COST):
+def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
     simple = prices.pct_change().fillna(0)
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
@@ -319,19 +309,8 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, turno
     sig_arr = signal.astype(int)
     flip_mask = sig_arr.diff().abs() == 1
 
-    # MA flip costs
     flip_costs = np.where(flip_mask, -flip_cost, 0.0)
-    
-    # TURNOVER COSTS: proportional to portfolio weight changes
-    # Calculate turnover (sum of absolute changes divided by 2)
-    weight_diffs = weights.diff().abs().sum(axis=1).fillna(0)
-    turnover = weight_diffs / 2  # Divide by 2 for round-trip trading
-    
-    # Apply proportional cost
-    turnover_costs = -turnover * turnover_cost
-    
-    # Combine all costs
-    strat_adj = strategy_simple + flip_costs + turnover_costs
+    strat_adj = strategy_simple + flip_costs
 
     eq = (1 + strat_adj).cumprod()
 
@@ -340,18 +319,16 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, turno
         "equity_curve": eq,
         "signal": signal,
         "weights": weights,
-        "turnover": turnover,
-        "performance": compute_performance(strat_adj, eq, turnover),
+        "performance": compute_performance(strat_adj, eq),
         "flip_mask": flip_mask,
-        "turnover_costs": turnover_costs,
     }
 
 
 # ============================================================
-# GRID SEARCH — ADAPTIVE VERSION WITH TURNOVER COSTS
+# GRID SEARCH — ADAPTIVE VERSION (works with any data length)
 # ============================================================
 
-def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost=FLIP_COST, turnover_cost=TURNOVER_COST):
+def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
     best_sharpe = -1e9
     best_cfg = None
     best_result = None
@@ -367,7 +344,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost=FLIP_CO
         default_cfg = (20, "sma", 0.02)
         ma = compute_ma_matrix(portfolio_index, [20], "sma")[20]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, 0.02)
-        default_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, turnover_cost)
+        default_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
         return default_cfg, default_result
     
     # Use reasonable MA lengths based on available data
@@ -395,13 +372,12 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost=FLIP_CO
                     idx += 1
                     continue
                     
-                result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, turnover_cost)
+                result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
 
                 sig_arr = signal.astype(int)
                 switches = sig_arr.diff().abs().sum()
                 trades_per_year = switches / (len(sig_arr) / 252) if len(sig_arr) > 0 else 0
                 sharpe = result["performance"]["Sharpe"]
-                annual_turnover = result["performance"].get("AnnualTurnover", 0)
 
                 idx += 1
                 if idx % 200 == 0 and total > 0:
@@ -423,7 +399,7 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost=FLIP_CO
         default_cfg = (default_length, "sma", 0.02)
         ma = compute_ma_matrix(portfolio_index, [default_length], "sma")[default_length]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, 0.02)
-        best_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, turnover_cost)
+        best_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
         return default_cfg, best_result
 
     return best_cfg, best_result
@@ -454,7 +430,7 @@ def normalize(eq):
 
 
 # ============================================================
-# VALIDATION FUNCTIONS
+# VALIDATION FUNCTIONS (NEW SECTION)
 # ============================================================
 
 def calculate_max_dd(prices_series):
@@ -587,7 +563,7 @@ def calculate_consistency_metrics(strategy_returns):
         'avg_consecutive_losses': 0
     }
 
-def parameter_sensitivity_analysis(prices, base_params, risk_on_weights, risk_off_weights, flip_cost, turnover_cost=TURNOVER_COST):
+def parameter_sensitivity_analysis(prices, base_params, risk_on_weights, risk_off_weights, flip_cost):
     """
     Test how sensitive results are to parameter changes
     """
@@ -608,14 +584,13 @@ def parameter_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
     for length in test_lengths:
         ma = compute_ma_matrix(portfolio_index, [length], base_type)[length]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, base_tol)
-        result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, turnover_cost)
+        result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
         perf = result["performance"]
         length_results.append({
             'length': length,
             'sharpe': perf['Sharpe'],
             'cagr': perf['CAGR'],
-            'max_dd': perf['MaxDrawdown'],
-            'annual_turnover': perf.get('AnnualTurnover', 0)
+            'max_dd': perf['MaxDrawdown']
         })
     
     # Test different tolerances
@@ -623,14 +598,13 @@ def parameter_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
     ma = compute_ma_matrix(portfolio_index, [min(base_len, max_possible)], base_type)[min(base_len, max_possible)]
     for tol in [0.00, 0.01, 0.02, 0.03, 0.04, 0.05]:
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-        result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, turnover_cost)
+        result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
         perf = result["performance"]
         tol_results.append({
             'tolerance': tol,
             'sharpe': perf['Sharpe'],
             'cagr': perf['CAGR'],
-            'max_dd': perf['MaxDrawdown'],
-            'annual_turnover': perf.get('AnnualTurnover', 0)
+            'max_dd': perf['MaxDrawdown']
         })
     
     return {
@@ -667,10 +641,6 @@ def main():
     risk_off_weights_str = st.sidebar.text_input(
         "Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values())
     )
-
-    st.sidebar.header("Cost Parameters")
-    flip_cost_input = st.sidebar.number_input("Flip Cost (%)", min_value=0.0, max_value=5.0, value=FLIP_COST*100, step=0.1) / 100
-    turnover_cost_input = st.sidebar.number_input("Turnover Cost (%) per unit", min_value=0.0, max_value=1.0, value=TURNOVER_COST*100, step=0.01) / 100
 
     st.sidebar.header("Quarterly Portfolio Values")
     qs_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=75815.26, step=100.0)
@@ -710,9 +680,9 @@ def main():
     
     st.info(f"Loaded {len(prices)} trading days of data from {prices.index[0].date()} to {prices.index[-1].date()}")
 
-    # RUN MA GRID SEARCH WITH TURNOVER COSTS
+    # RUN MA GRID SEARCH (unchanged)
     best_cfg, best_result = run_grid_search(
-        prices, risk_on_weights, risk_off_weights, flip_cost_input, turnover_cost_input
+        prices, risk_on_weights, risk_off_weights, FLIP_COST
     )
     best_len, best_type, best_tol = best_cfg
     sig = best_result["signal"]
@@ -723,10 +693,6 @@ def main():
 
     st.subheader(f"Current MA Regime: {current_regime}")
     st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
-    
-    # Display cost-adjusted metrics
-    st.write(f"**Flip Cost:** {flip_cost_input:.2%}  —  **Turnover Cost:** {turnover_cost_input:.2%} per unit")
-    st.write(f"**Annual Turnover:** {perf.get('AnnualTurnover', 0):.1%}  —  **Total Turnover:** {perf.get('TotalTurnover', 0):.1%}")
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
@@ -919,14 +885,14 @@ def main():
     st.write("**Tax-Sheltered:** " + rebalance_text(prog_2["Gap ($)"], next_q_end, days_to_next_q))
     st.write("**Joint:** " + rebalance_text(prog_3["Gap ($)"], next_q_end, days_to_next_q))
 
-    # ADVANCED METRICS (with turnover)
+    # ADVANCED METRICS (unchanged)
     def time_in_drawdown(dd): return (dd < 0).mean() if len(dd) > 0 else 0
     def mar(c, dd): return c / abs(dd) if dd != 0 else 0
     def ulcer(dd): return np.sqrt((dd**2).mean()) if len(dd) > 0 and (dd**2).mean() != 0 else 0
     def pain_gain(c, dd): return c / ulcer(dd) if ulcer(dd) != 0 else 0
 
-    def compute_stats(perf, returns, dd, flips, tpy, turnover=None):
-        stats = {
+    def compute_stats(perf, returns, dd, flips, tpy):
+        return {
             "CAGR": perf["CAGR"],
             "Volatility": perf["Volatility"],
             "Sharpe": perf["Sharpe"],
@@ -939,11 +905,6 @@ def main():
             "Kurtosis": returns.kurt() if len(returns) > 0 else 0,
             "Trades/year": tpy,
         }
-        
-        if turnover is not None:
-            stats["AnnualTurnover"] = turnover.mean() * 252 if len(turnover) > 0 else 0
-            
-        return stats
 
     hybrid_simple = hybrid_eq.pct_change().fillna(0) if len(hybrid_eq) > 0 else pd.Series([], dtype=float)
     hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
@@ -957,7 +918,6 @@ def main():
         perf["DD_Series"],
         best_result["flip_mask"],
         trades_per_year,
-        best_result.get("turnover")
     )
 
     risk_stats = compute_stats(
@@ -966,7 +926,6 @@ def main():
         risk_on_perf["DD_Series"],
         np.zeros(len(risk_on_simple), dtype=bool) if len(risk_on_simple) > 0 else np.array([], dtype=bool),
         0,
-        pd.Series([0], index=risk_on_simple.index) if len(risk_on_simple) > 0 else None
     )
 
     hybrid_stats = compute_stats(
@@ -975,7 +934,6 @@ def main():
         hybrid_perf["DD_Series"],
         np.zeros(len(hybrid_simple), dtype=bool) if len(hybrid_simple) > 0 else np.array([], dtype=bool),
         0,
-        pd.Series([0], index=hybrid_simple.index) if len(hybrid_simple) > 0 else None
     )
 
     pure_sig_stats = compute_stats(
@@ -984,10 +942,9 @@ def main():
         pure_sig_perf["DD_Series"],
         np.zeros(len(pure_sig_simple), dtype=bool) if len(pure_sig_simple) > 0 else np.array([], dtype=bool),
         0,
-        pd.Series([0], index=pure_sig_simple.index) if len(pure_sig_simple) > 0 else None
     )
 
-    # STAT TABLE (updated with turnover)
+    # STAT TABLE (unchanged)
     st.subheader("MA vs Sharpe-Optimal vs Buy & Hold vs Hybrid SIG/MA vs Pure SIG")
     rows = [
         ("CAGR", "CAGR"),
@@ -998,7 +955,8 @@ def main():
         ("MAR Ratio", "MAR"),
         ("Time in Drawdown (%)", "TID"),
         ("Pain-to-Gain", "PainGain"),
-        ("Annual Turnover", "AnnualTurnover"),
+        ("Skew", "Skew"),
+        ("Kurtosis", "Kurtosis"),
         ("Trades per year", "Trades/year"),
     ]
 
@@ -1014,9 +972,9 @@ def main():
         hv = hybrid_stats.get(key, np.nan)
         ps = pure_sig_stats.get(key, np.nan)
 
-        if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID", "AnnualTurnover"]:
+        if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
             row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(rv), fmt_pct(hv), fmt_pct(ps)]
-        elif key in ["Sharpe", "MAR", "PainGain"]:
+        elif key in ["Sharpe", "MAR", "PainGain", "Skew", "Kurtosis"]:
             row = [label, fmt_dec(sv), fmt_dec(sh), fmt_dec(rv), fmt_dec(hv), fmt_dec(ps)]
         else:
             row = [label, fmt_num(sv), fmt_num(sh), fmt_num(rv), fmt_num(hv), fmt_num(ps)]
@@ -1158,7 +1116,7 @@ def main():
         st.write("No regime data available")
 
     # ============================================================
-    # STRATEGY VALIDATION DASHBOARD
+    # STRATEGY VALIDATION DASHBOARD (NEW SECTION)
     # ============================================================
     
     if run_validation:
@@ -1470,7 +1428,7 @@ def main():
             st.subheader("Parameter Sensitivity Analysis")
             
             sens_results = parameter_sensitivity_analysis(
-                prices, best_cfg, risk_on_weights, risk_off_weights, flip_cost_input, turnover_cost_input
+                prices, best_cfg, risk_on_weights, risk_off_weights, FLIP_COST
             )
             
             if not sens_results['length_sensitivity'].empty and not sens_results['tolerance_sensitivity'].empty:
@@ -1562,7 +1520,7 @@ def main():
     
     st.markdown("---")  # Separator before final plot
 
-    # Final Performance Plot
+    # Final Performance Plot (unchanged)
     st.subheader("Portfolio Strategy Performance Comparison")
 
     plot_index = build_portfolio_index(prices, risk_on_weights)
