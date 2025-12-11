@@ -210,8 +210,8 @@ def regime_adaptive_ma_selection(prices, risk_on_weights, flip_cost, regime_hist
     
     # Determine adaptive MA length bounds
     total_days = len(portfolio_index)
-    min_ma_days = 20
-    max_ma_days = min(300, int(0.25 * total_days))  # At most 50% of data
+    min_ma_days = 100
+    max_ma_days = 500
     
     # Adjust based on data quality
     if metrics['completeness'] < 0.8:
