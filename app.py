@@ -582,7 +582,7 @@ def simple_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cost)
     # Fixed parameter grid
     ma_lengths = list(range(64, 301,2))
     ma_types = ["sma", "ema"]
-    tolerances = range(.01,.05,.01):
+    tolerances = range(.01,.05,.01)
     
     # Generate all combinations
     param_combinations = []
