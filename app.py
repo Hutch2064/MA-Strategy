@@ -882,36 +882,6 @@ def main():
         ma_flip_multiplier=4.0     # 4x when MA flips
     )
     
-    # DEBUG: Verify flip costs are working
-    st.subheader("✅ FLIP COST VERIFICATION")
-
-    # Check that ALL flips get costs
-    sig_arr = sig.astype(int)
-    total_flips = sig_arr.diff().abs().sum()
-    on_to_off = (sig_arr.diff() == -1).sum()
-    off_to_on = (sig_arr.diff() == 1).sum()
-
-    st.write(f"**Total MA signal flips:** {total_flips}")
-    st.write(f"**ON→OFF flips:** {on_to_off}")
-    st.write(f"**OFF→ON flips:** {off_to_on}")
-
-    # Show cost calculations
-    st.write(f"**FLIP_COST:** {FLIP_COST:.1%}")
-    st.write(f"**MA Strategy (4x per flip):** {FLIP_COST * 4:.1%} per flip")
-    st.write(f"**Hybrid SIG MA flips (4x):** {FLIP_COST * 4:.1%} per flip")  
-    st.write(f"**Hybrid SIG quarterly (2x):** {FLIP_COST * 2:.1%} per quarter")
-
-    # Calculate expected impact
-    expected_ma_cost_per_flip = FLIP_COST * 4  # 12% with 3% base
-    expected_hybrid_ma_cost = total_flips * expected_ma_cost_per_flip
-    expected_hybrid_q_cost = len(mapped_q_ends) * FLIP_COST * 2
-    expected_total_hybrid_cost = expected_hybrid_ma_cost + expected_hybrid_q_cost
-
-    st.write(f"**Expected Hybrid SIG total costs:** {expected_total_hybrid_cost:.1%}")
-    st.write(f"**  - From MA flips:** {expected_hybrid_ma_cost:.1%}")
-    st.write(f"**  - From quarterly:** {expected_hybrid_q_cost:.1%}")
-
-    st.success("✅ Fix applied: Hybrid SIG now pays 4x costs on ALL MA flips (ON→OFF AND OFF→ON)")
     
     # ============================================================
     # BUY & HOLD WITH QUARTERLY REBALANCE (1x flip costs)
