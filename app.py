@@ -276,7 +276,7 @@ def robust_ma_validation(prices, risk_on_weights, risk_off_weights, flip_cost,
             
             # Training data: everything before test
             train_indices = list(range(test_start))
-            if len(train_indices) < 63:
+            if len(train_indices) < 21:
                 continue
             
             train_portfolio = portfolio_index.iloc[train_indices]
