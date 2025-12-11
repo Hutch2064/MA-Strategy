@@ -315,15 +315,14 @@ def robust_ma_validation(prices, risk_on_weights, risk_off_weights, flip_cost,
     # Select best with robustness penalty
     best_score = -1e9
     best_params = None
-    
-    for params, scores in cv_scores.items():
 
-        # To:
-        # Academic penalty: balance performance and stability
-        robustness_penalty = 1.0 / (1.0 + scores['std_sharpe'])
-        length_penalty = 1.0 - (L / 500)  # Penalize very long MAs (>250 days)
-        adjusted_score = scores['mean_sharpe'] 
-        
+    for params, scores in cv_scores.items():
+        # params is (L, ma_type, tol)
+        L, ma_type, tol = params
+    
+        # Purely Sharpe-driven selection
+        adjusted_score = scores['mean_sharpe']
+
         if adjusted_score > best_score:
             best_score = adjusted_score
             best_params = params
