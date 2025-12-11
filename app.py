@@ -87,7 +87,7 @@ def compute_ma_matrix(price_series, lengths, ma_type):
 # ============================================================
 
 def generate_testfol_signal_vectorized(price, ma, tol):
-    px = price.values
+    px = price.shift(1).values
     ma_vals = ma.values
     n = len(px)
     
