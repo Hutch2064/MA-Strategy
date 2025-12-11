@@ -669,9 +669,9 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     def objective(trial):
         """Objective function for Optuna - maximizes OOS Sharpe"""
         # Suggest parameters
-        L = trial.suggest_int('ma_length', 50, 300, step=2)  # Wider range than before
+        L = trial.suggest_int('ma_length', 63, 300, step=2)  # Wider range than before
         ma_type = trial.suggest_categorical('ma_type', ['sma', 'ema'])
-        tol = trial.suggest_float('tolerance', 0.005, 0.05, step=0.005)
+        tol = trial.suggest_float('tolerance', 0.01, 0.05, step=0.0025)
         
         try:
             # Generate MA on training data
