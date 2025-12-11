@@ -472,10 +472,7 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
         candidate_params.append((L, "ema", tolerance))
     
     # Add tolerance variations
-    tolerance_variants = []
-    for L, ma_type, _ in candidate_params[:12]:  # Limit to first 10 to keep manageable
-        for tol in [0.01, 0.02, 0.03, 0.04, 0.05]:
-            tolerance_variants.append((L, ma_type, tol))
+    for L, ma_type, _ in candidate_params:  # Test ALL candidates, not just first 10
     
     candidate_params.extend(tolerance_variants[:min(10, len(tolerance_variants))])
     
