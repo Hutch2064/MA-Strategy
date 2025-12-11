@@ -376,21 +376,53 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
 
         candidate_params.extend(tolerance_variants[:min(10, len(tolerance_variants))])
 
-        # STAGE 2: Robust validation
-        if total_years >= 2:  # Need at least 2 years for meaningful CV
-            best_params, cv_scores = robust_ma_validation(
-                prices, risk_on_weights, risk_off_weights, flip_cost, 
-                candidate_params, n_folds=min(5, int(total_years))
-            )
+        # STAGE 2: 80/20 Validation (academically valid for regime strategies)
+        cv_scores = {}
+        if total_days >= 504:  # Need at least 2 years total (1.6 train + 0.4 test)
+            split_idx = int(0.8 * total_days)  # 80% train, 20% test
+            
+            # Ensure test set has at least 1 year
+            if (total_days - split_idx) >= 252:
+                train_prices = prices.iloc[:split_idx]
+                test_prices = prices.iloc[split_idx:]
+                
+                best_sharpe = -1e9
+                best_params = None
+                
+                for L, ma_type, tol in candidate_params:
+                    # Generate signal on FULL dataset (to avoid lookahead bias)
+                    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+                    ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
+                    signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+                    
+                    # Use only the TEST portion (last 20%)
+                    test_signal = signal.iloc[split_idx:]
+                    
+                    # Backtest on test set only
+                    result = backtest(test_prices, test_signal, risk_on_weights, risk_off_weights, 
+                                    flip_cost, ma_flip_multiplier=4.0)
+                    sharpe = result["performance"]["Sharpe"]
+                    
+                    # Debug: uncomment to see what's being tested
+                    # print(f"MA {L}, {ma_type}, tol {tol:.3f}: Sharpe = {sharpe:.3f}")
+                    
+                    if sharpe > best_sharpe:
+                        best_sharpe = sharpe
+                        best_params = (L, ma_type, tol)
+                
+                # If no valid test results, use training optimization
+                if best_params is None:
+                    # Fallback: optimize on training set
+                    best_params = simple_optimization(train_prices, risk_on_weights, risk_off_weights, 
+                                                    flip_cost, candidate_params)
+            else:
+                # Test set too short, optimize on full dataset
+                best_params = simple_optimization(prices, risk_on_weights, risk_off_weights, 
+                                                flip_cost, candidate_params)
         else:
-            # Very limited data: use simplest reasonable parameters
-            best_params = (adaptive_ma, ma_type, tolerance)
-            cv_scores = {}
-        
-        # If best_params is None, use defaults
-        if best_params is None:
-            best_params = (min(max(100, min_len), max_len), "sma", 0.02)
-            cv_scores = {}
+            # Not enough data for 80/20, use simple optimization
+            best_params = simple_optimization(prices, risk_on_weights, risk_off_weights, 
+                                            flip_cost, candidate_params)
         
         # STAGE 3: Out-of-sample stability check (if enough data)
         stability_check = {}
