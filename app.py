@@ -288,7 +288,7 @@ def robust_ma_validation(prices, risk_on_weights, risk_off_weights, flip_cost,
             test_prices = prices.iloc[test_indices]
             
             # Generate signal on full sequence up to test end
-            full_ma = compute_ma_matrix(portfolio_index.iloc[:test_end], [L], ma_type)[L]
+            full_ma = compute_ma_matrix(portfolio_index.iloc[:test_end], [L], ma_type)[L].shift(1)
             full_signal = generate_testfol_signal_vectorized(
                 portfolio_index.iloc[:test_end], full_ma, tol
             )
@@ -339,7 +339,7 @@ def simple_optimization(prices, risk_on_weights, risk_off_weights, flip_cost, ca
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     
     for L, ma_type, tol in candidate_params:
-        ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
+        ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L].shift(1)
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
         result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
                          flip_cost, ma_flip_multiplier=4.0)
@@ -419,7 +419,7 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
                 for L, ma_type, tol in candidate_params:
                     # Generate signal on FULL dataset (to avoid lookahead bias)
                     portfolio_index = build_portfolio_index(prices, risk_on_weights)
-                    ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
+                    ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L].shift(1)
                     signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
                     
                     # Use only the TEST portion (last 20%)
@@ -463,14 +463,14 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
             train_portfolio = build_portfolio_index(train_prices, risk_on_weights)
             L, ma_type, tol = best_params
             
-            train_ma = compute_ma_matrix(train_portfolio, [L], ma_type)[L]
+            train_ma = compute_ma_matrix(train_portfolio, [L], ma_type)[L].shift(1)
             train_signal = generate_testfol_signal_vectorized(train_portfolio, train_ma, tol)
             
             # Test on last 25%
             test_portfolio = build_portfolio_index(test_prices, risk_on_weights)
             full_portfolio = build_portfolio_index(prices, risk_on_weights)
             
-            full_ma = compute_ma_matrix(full_portfolio, [L], ma_type)[L]
+            full_ma = compute_ma_matrix(full_portfolio, [L], ma_type)[L].shift(1)
             full_signal = generate_testfol_signal_vectorized(full_portfolio, full_ma, tol)
             
             test_signal = full_signal.iloc[split_idx:]
@@ -490,7 +490,7 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
         
         # STAGE 4: Final backtest with selected parameters
         L, ma_type, tol = best_params
-        full_ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
+        full_ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L].shift(1)
         full_signal = generate_testfol_signal_vectorized(portfolio_index, full_ma, tol)
         final_result = backtest(prices, full_signal, risk_on_weights, risk_off_weights,
                               flip_cost, ma_flip_multiplier=4.0)
