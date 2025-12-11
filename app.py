@@ -220,7 +220,8 @@ def regime_adaptive_ma_selection(prices, risk_on_weights, flip_cost, regime_hist
     
     if metrics['stationarity_p'] < 0.05:
         # Stationary returns: longer MA for smoother signals
-        target_ma = min(100, max(50, min_ma_days + max_ma_days) // 2))
+        target_ma = min(100, max(50, 
+        (min_ma_days + max_ma_days) // 2))
     
     # If we have regime history, use it to inform selection
     if regime_history is not None and len(regime_history) > 0:
