@@ -257,8 +257,87 @@ def run_sig_engine(
         pd.Series(safe_w_series, index=dates),
         rebalance_dates
     )
+
+
 # ============================================================
-# BACKTEST ENGINE
+# TAX CALCULATION FUNCTIONS
+# ============================================================
+
+def calculate_tax_impact(returns_series, weights_df, tax_rate=0.15, 
+                         apply_daily=False, apply_annual=True):
+    """
+    Calculate tax impact on returns
+    Returns: tax-adjusted returns series
+    """
+    if len(returns_series) == 0:
+        return returns_series
+    
+    # Simple daily tax impact (for short-term trading)
+    if apply_daily:
+        tax_adj_returns = returns_series * (1 - tax_rate)
+        return tax_adj_returns
+    
+    # Annual tax impact (more realistic for long-term)
+    if apply_annual:
+        # Resample to annual, calculate tax, then distribute back
+        annual_returns = returns_series.resample('Y').apply(lambda x: (1+x).prod()-1)
+        annual_tax = annual_returns * tax_rate
+        # Distribute tax evenly across days
+        daily_tax_factor = (1 - annual_tax) ** (1/252)  # Approximate daily adjustment
+        tax_adj_returns = returns_series * daily_tax_factor
+        
+        return tax_adj_returns
+    
+    return returns_series
+
+def calculate_turnover_tax(returns_series, weights_df, tax_rate=0.15):
+    """
+    Calculate tax impact from portfolio turnover
+    """
+    if len(returns_series) == 0 or len(weights_df) == 0:
+        return returns_series
+    
+    # Calculate daily turnover
+    daily_turnover = weights_df.diff().abs().sum(axis=1).fillna(0)
+    
+    # Assume half of turnover is taxed (simplified)
+    taxable_turnover = daily_turnover * 0.5
+    
+    # Tax impact
+    tax_impact = taxable_turnover * tax_rate / 252  # Daily tax impact
+    
+    # Adjust returns
+    tax_adj_returns = returns_series - tax_impact
+    
+    return tax_adj_returns
+
+def calculate_strategy_taxes(strategy_returns, weights_df, signal=None, 
+                            flip_mask=None, tax_rate=0.15,
+                            tax_on_flips=True, tax_on_rebalances=True):
+    """
+    Calculate comprehensive tax impact for a strategy
+    """
+    tax_adj_returns = strategy_returns.copy()
+    
+    # 1. Tax on MA regime flips (full capital gains realization)
+    if tax_on_flips and flip_mask is not None:
+        # Estimate that 50% of portfolio value has gains when flipping
+        flip_tax = flip_mask.astype(float) * tax_rate * 0.5  
+        tax_adj_returns = tax_adj_returns - flip_tax / 252  # Spread over year
+    
+    # 2. Tax on daily turnover (for active strategies)
+    if len(weights_df) > 0:
+        tax_adj_returns = calculate_turnover_tax(tax_adj_returns, weights_df, tax_rate)
+    
+    # 3. Annual tax on total returns
+    tax_adj_returns = calculate_tax_impact(tax_adj_returns, weights_df, 
+                                         tax_rate, apply_annual=True)
+    
+    return tax_adj_returns
+
+
+# ============================================================
+# BACKTEST ENGINE WITH TAX SUPPORT
 # ============================================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
@@ -301,7 +380,8 @@ def compute_performance(simple_returns, eq_curve, rf=0.0):
     }
 
 
-def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
+def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost,
+             tax_rate=0.0, include_taxes=False):
     simple = prices.pct_change().fillna(0)
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
@@ -309,8 +389,17 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
     sig_arr = signal.astype(int)
     flip_mask = sig_arr.diff().abs() == 1
 
+    # Apply flip costs
     flip_costs = np.where(flip_mask, -flip_cost, 0.0)
     strat_adj = strategy_simple + flip_costs
+    
+    # Store pre-tax returns
+    pre_tax_returns = strat_adj.copy()
+    
+    # Apply taxes if enabled
+    if include_taxes and tax_rate > 0:
+        strat_adj = calculate_strategy_taxes(strat_adj, weights, signal, 
+                                           flip_mask, tax_rate)
 
     eq = (1 + strat_adj).cumprod()
 
@@ -321,14 +410,16 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost):
         "weights": weights,
         "performance": compute_performance(strat_adj, eq),
         "flip_mask": flip_mask,
+        "pre_tax_returns": pre_tax_returns,
     }
 
 
 # ============================================================
-# GRID SEARCH — ADAPTIVE VERSION (works with any data length)
+# GRID SEARCH — ADAPTIVE VERSION WITH TAX SUPPORT
 # ============================================================
 
-def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
+def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost,
+                    tax_rate=0.0, include_taxes=False):
     best_sharpe = -1e9
     best_cfg = None
     best_result = None
@@ -344,7 +435,8 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
         default_cfg = (20, "sma", 0.02)
         ma = compute_ma_matrix(portfolio_index, [20], "sma")[20]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, 0.02)
-        default_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+        default_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost,
+                                 tax_rate, include_taxes)
         return default_cfg, default_result
     
     # Use reasonable MA lengths based on available data
@@ -372,7 +464,8 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
                     idx += 1
                     continue
                     
-                result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+                result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost,
+                                 tax_rate, include_taxes)
 
                 sig_arr = signal.astype(int)
                 switches = sig_arr.diff().abs().sum()
@@ -399,14 +492,15 @@ def run_grid_search(prices, risk_on_weights, risk_off_weights, flip_cost):
         default_cfg = (default_length, "sma", 0.02)
         ma = compute_ma_matrix(portfolio_index, [default_length], "sma")[default_length]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, 0.02)
-        best_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost)
+        best_result = backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost,
+                              tax_rate, include_taxes)
         return default_cfg, best_result
 
     return best_cfg, best_result
 
 
 # ============================================================
-# QUARTERLY PROGRESS HELPER (unchanged)
+# QUARTERLY PROGRESS HELPER
 # ============================================================
 
 def compute_quarter_progress(risky_start, risky_today, quarterly_target):
@@ -430,7 +524,183 @@ def normalize(eq):
 
 
 # ============================================================
-# VALIDATION FUNCTIONS (NEW SECTION)
+# TAX ANALYSIS DISPLAY FUNCTIONS
+# ============================================================
+
+def display_tax_analysis(ma_result, bh_returns, hybrid_returns, 
+                        prices, risk_on_weights, risk_off_weights,
+                        tax_rate, tax_on_flips, tax_on_rebalances):
+    """
+    Display comprehensive tax analysis
+    """
+    st.header("💸 Tax Impact Analysis")
+    
+    # Calculate strategies with different tax treatments
+    tax_scenarios = [
+        ("No Taxes", 0.0, False, False),
+        ("15% LTCG", 0.15, tax_on_flips, tax_on_rebalances),
+        ("23.8% High Income", 0.238, tax_on_flips, tax_on_rebalances),
+        ("40% Short-term", 0.40, True, True)  # Short-term always applies
+    ]
+    
+    results_by_tax = {}
+    
+    # Create Buy & Hold weights (always 100% risk-on)
+    bh_weights = build_weight_df(prices, pd.Series(True, index=prices.index), 
+                                risk_on_weights, {})
+    
+    for scenario_name, rate, apply_flip_tax, apply_rebalance_tax in tax_scenarios:
+        scenario_results = {}
+        
+        # MA Strategy with this tax rate
+        ma_tax_adj = calculate_strategy_taxes(
+            ma_result["pre_tax_returns"],
+            ma_result["weights"],
+            ma_result["signal"],
+            ma_result["flip_mask"],
+            rate,
+            apply_flip_tax,
+            apply_rebalance_tax
+        )
+        ma_eq_tax = (1 + ma_tax_adj).cumprod()
+        scenario_results["MA"] = compute_performance(ma_tax_adj, ma_eq_tax)
+        
+        # Buy & Hold with this tax rate
+        bh_tax_adj = calculate_strategy_taxes(
+            bh_returns,
+            bh_weights,
+            None,
+            None,
+            rate,
+            False,  # No flips for BH
+            False   # No rebalances for BH
+        )
+        bh_eq_tax = (1 + bh_tax_adj).cumprod()
+        scenario_results["BH"] = compute_performance(bh_tax_adj, bh_eq_tax)
+        
+        results_by_tax[scenario_name] = scenario_results
+    
+    # Display comparison table
+    tax_comparison = []
+    for scenario, results in results_by_tax.items():
+        # Calculate pre-tax performance for comparison
+        ma_pre_tax = compute_performance(ma_result["pre_tax_returns"], 
+                                        (1 + ma_result["pre_tax_returns"]).cumprod())
+        bh_pre_tax = compute_performance(bh_returns, (1 + bh_returns).cumprod())
+        
+        tax_comparison.append({
+            "Tax Scenario": scenario,
+            "MA After-tax CAGR": f"{results['MA']['CAGR']:.2%}",
+            "BH After-tax CAGR": f"{results['BH']['CAGR']:.2%}",
+            "MA After-tax Sharpe": f"{results['MA']['Sharpe']:.3f}",
+            "BH After-tax Sharpe": f"{results['BH']['Sharpe']:.3f}",
+            "MA Tax Drag": f"{(ma_pre_tax['CAGR'] - results['MA']['CAGR']):.2%}",
+            "BH Tax Drag": f"{(bh_pre_tax['CAGR'] - results['BH']['CAGR']):.2%}",
+            "Tax Efficiency (MA/BH)": f"{(results['MA']['CAGR'] / results['BH']['CAGR'] if results['BH']['CAGR'] != 0 else 0):.2f}"
+        })
+    
+    tax_df = pd.DataFrame(tax_comparison)
+    st.dataframe(tax_df, use_container_width=True)
+    
+    # Tax efficiency visualization
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    
+    # Plot 1: Tax drag comparison
+    scenarios = list(results_by_tax.keys())
+    ma_tax_drags = [compute_performance(ma_result["pre_tax_returns"], 
+                                       (1 + ma_result["pre_tax_returns"]).cumprod())['CAGR'] - 
+                    results_by_tax[s]['MA']['CAGR'] for s in scenarios]
+    bh_tax_drags = [compute_performance(bh_returns, (1 + bh_returns).cumprod())['CAGR'] - 
+                    results_by_tax[s]['BH']['CAGR'] for s in scenarios]
+    
+    x = np.arange(len(scenarios))
+    width = 0.35
+    ax1.bar(x - width/2, ma_tax_drags, width, label='MA Strategy', color='blue', alpha=0.7)
+    ax1.bar(x + width/2, bh_tax_drags, width, label='Buy & Hold', color='green', alpha=0.7)
+    ax1.set_xlabel('Tax Scenario')
+    ax1.set_ylabel('Tax Drag (CAGR reduction)')
+    ax1.set_title('Tax Drag by Strategy')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(scenarios, rotation=45)
+    ax1.legend()
+    ax1.grid(alpha=0.3)
+    
+    # Plot 2: After-tax returns comparison
+    ma_after_tax = [results_by_tax[s]['MA']['CAGR'] for s in scenarios]
+    bh_after_tax = [results_by_tax[s]['BH']['CAGR'] for s in scenarios]
+    
+    ax2.plot(scenarios, ma_after_tax, marker='o', label='MA Strategy', linewidth=2)
+    ax2.plot(scenarios, bh_after_tax, marker='s', label='Buy & Hold', linewidth=2)
+    ax2.set_xlabel('Tax Scenario')
+    ax2.set_ylabel('After-tax CAGR')
+    ax2.set_title('After-tax Returns Comparison')
+    ax2.legend()
+    ax2.grid(alpha=0.3)
+    ax2.tick_params(axis='x', rotation=45)
+    
+    plt.tight_layout()
+    st.pyplot(fig)
+    
+    # Account-specific tax analysis
+    st.subheader("📋 Account-Specific Tax Analysis")
+    
+    accounts = [
+        ("Taxable Brokerage", tax_rate, tax_on_flips, tax_on_rebalances),
+        ("Traditional IRA", 0.0, False, False),
+        ("Roth IRA", 0.0, False, False),
+        ("401(k)", 0.0, False, False)
+    ]
+    
+    account_results = []
+    for account_name, rate, apply_flip_tax, apply_rebalance_tax in accounts:
+        # Calculate MA strategy for this account
+        ma_account_returns = calculate_strategy_taxes(
+            ma_result["pre_tax_returns"],
+            ma_result["weights"],
+            ma_result["signal"],
+            ma_result["flip_mask"],
+            rate,
+            apply_flip_tax,
+            apply_rebalance_tax
+        )
+        
+        account_eq = (1 + ma_account_returns).cumprod()
+        account_perf = compute_performance(ma_account_returns, account_eq)
+        
+        account_results.append({
+            "Account Type": account_name,
+            "Tax Rate": f"{rate*100:.1f}%",
+            "Final Value ($10k)": f"${account_eq.iloc[-1] if len(account_eq) > 0 else 0:,.0f}",
+            "After-tax CAGR": f"{account_perf['CAGR']:.2%}",
+            "Tax Efficiency": "Optimal" if rate == 0 else "Moderate" if rate <= 0.15 else "Low"
+        })
+    
+    st.dataframe(pd.DataFrame(account_results))
+    
+    # Tax optimization recommendations
+    st.subheader("💡 Tax Optimization Recommendations")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("**For MA Strategy:**")
+        st.write("1. Place in tax-advantaged accounts (IRA/401k)")
+        st.write("2. Consider tax-loss harvesting during flips")
+        st.write("3. Use specific identification for tax lots")
+        st.write("4. Hold >1 year for long-term rates")
+    
+    with col2:
+        st.write("**For Hybrid SIG:**")
+        st.write("1. Quarterly rebalances create tax events")
+        st.write("2. Consider tax-deferred accounts")
+        st.write("3. Monitor turnover for tax efficiency")
+        st.write("4. Balance between performance & tax drag")
+    
+    return results_by_tax
+
+
+# ============================================================
+# VALIDATION FUNCTIONS
 # ============================================================
 
 def calculate_max_dd(prices_series):
@@ -619,10 +889,10 @@ def parameter_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
 
 def main():
 
-    st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
-    st.title("Portfolio Strategy")
+    st.set_page_config(page_title="Portfolio MA Regime Strategy with Tax Analysis", layout="wide")
+    st.title("Portfolio Strategy with Tax Analysis")
 
-    # Backtest inputs unchanged...
+    # Backtest inputs
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
     end = st.sidebar.text_input("End Date (optional)", "")
 
@@ -642,6 +912,13 @@ def main():
         "Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values())
     )
 
+    st.sidebar.header("Tax Settings")
+    tax_rate = st.sidebar.slider("Long-term Capital Gains Tax Rate (%)", 
+                                 0.0, 50.0, 15.0, 0.1) / 100
+    include_tax_analysis = st.sidebar.checkbox("Include Tax Analysis", value=True)
+    tax_on_flips = st.sidebar.checkbox("Tax on MA Regime Flips", value=True)
+    tax_on_rebalances = st.sidebar.checkbox("Tax on SIG Rebalances", value=True)
+
     st.sidebar.header("Quarterly Portfolio Values")
     qs_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=75815.26, step=100.0)
     qs_cap_2 = st.sidebar.number_input("Tax-Sheltered – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=10074.83, step=100.0)
@@ -654,7 +931,7 @@ def main():
 
     # Add validation toggle to sidebar
     st.sidebar.header("Validation Settings")
-    run_validation = st.sidebar.checkbox("Run Validation Suite", value=True)
+    run_validation = st.sidebar.checkbox("Run Validation Suite", value=False)
 
     run_clicked = st.sidebar.button("Run Backtest & Optimize")
     if not run_clicked:
@@ -680,9 +957,11 @@ def main():
     
     st.info(f"Loaded {len(prices)} trading days of data from {prices.index[0].date()} to {prices.index[-1].date()}")
 
-    # RUN MA GRID SEARCH (unchanged)
+    # RUN MA GRID SEARCH with tax support
     best_cfg, best_result = run_grid_search(
-        prices, risk_on_weights, risk_off_weights, FLIP_COST
+        prices, risk_on_weights, risk_off_weights, FLIP_COST,
+        tax_rate if include_tax_analysis else 0.0,
+        include_tax_analysis
     )
     best_len, best_type, best_tol = best_cfg
     sig = best_result["signal"]
@@ -693,6 +972,8 @@ def main():
 
     st.subheader(f"Current MA Regime: {current_regime}")
     st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
+    if include_tax_analysis:
+        st.write(f"**Tax Rate Applied:** {tax_rate*100:.1f}%")
 
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
@@ -885,7 +1166,7 @@ def main():
     st.write("**Tax-Sheltered:** " + rebalance_text(prog_2["Gap ($)"], next_q_end, days_to_next_q))
     st.write("**Joint:** " + rebalance_text(prog_3["Gap ($)"], next_q_end, days_to_next_q))
 
-    # ADVANCED METRICS (unchanged)
+    # ADVANCED METRICS
     def time_in_drawdown(dd): return (dd < 0).mean() if len(dd) > 0 else 0
     def mar(c, dd): return c / abs(dd) if dd != 0 else 0
     def ulcer(dd): return np.sqrt((dd**2).mean()) if len(dd) > 0 and (dd**2).mean() != 0 else 0
@@ -944,8 +1225,11 @@ def main():
         0,
     )
 
-    # STAT TABLE (unchanged)
+    # STAT TABLE (with tax note if applicable)
     st.subheader("MA vs Sharpe-Optimal vs Buy & Hold vs Hybrid SIG/MA vs Pure SIG")
+    if include_tax_analysis:
+        st.caption(f"*Performance metrics shown include {tax_rate*100:.1f}% tax impact*")
+    
     rows = [
         ("CAGR", "CAGR"),
         ("Volatility", "Volatility"),
@@ -995,7 +1279,16 @@ def main():
 
     st.dataframe(stat_table, use_container_width=True)
 
-    # ALLOCATION TABLES (unchanged)
+    # ============================================================
+    # TAX ANALYSIS SECTION
+    # ============================================================
+    
+    if include_tax_analysis:
+        display_tax_analysis(best_result, risk_on_simple, hybrid_simple,
+                           prices, risk_on_weights, risk_off_weights,
+                           tax_rate, tax_on_flips, tax_on_rebalances)
+
+    # ALLOCATION TABLES
     def compute_allocations(account_value, risky_w, safe_w, ron_w, roff_w):
         risky_dollars = account_value * risky_w
         safe_dollars  = account_value * safe_w
@@ -1059,7 +1352,7 @@ def main():
                 ma_alloc = compute_allocations(cap, 0.0, 1.0, {}, risk_off_weights)
             st.dataframe(add_pct(ma_alloc))
 
-    # MA Distance (unchanged)
+    # MA Distance
     st.subheader("Next MA Signal Distance")
     if len(opt_ma) > 0 and len(portfolio_index) > 0:
         latest_date = opt_ma.dropna().index[-1]
@@ -1078,7 +1371,7 @@ def main():
     else:
         st.write("**Insufficient data for MA distance calculation**")
 
-    # Regime stats plot (unchanged)
+    # Regime stats plot
     st.subheader("Regime Statistics")
     if len(sig) > 0:
         sig_int = sig.astype(int)
@@ -1116,7 +1409,7 @@ def main():
         st.write("No regime data available")
 
     # ============================================================
-    # STRATEGY VALIDATION DASHBOARD (NEW SECTION)
+    # STRATEGY VALIDATION DASHBOARD
     # ============================================================
     
     if run_validation:
@@ -1520,7 +1813,7 @@ def main():
     
     st.markdown("---")  # Separator before final plot
 
-    # Final Performance Plot (unchanged)
+    # Final Performance Plot
     st.subheader("Portfolio Strategy Performance Comparison")
 
     plot_index = build_portfolio_index(prices, risk_on_weights)
@@ -1566,6 +1859,7 @@ def main():
 - At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
 - Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
 - At each rebalance, re-evaluate the Sharpe-optimal portfolio weighting.
+- Consider tax implications when implementing strategies in taxable accounts.
 
 Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=9TIGHucZuaJ
 
