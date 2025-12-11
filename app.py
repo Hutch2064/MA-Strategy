@@ -519,45 +519,6 @@ def calculate_consistency_metrics(strategy_returns):
         'avg_consecutive_wins': 0,
         'avg_consecutive_losses': 0
     }
-    
-def calculate_consistency_metrics(strategy_returns):
-    """
-    Calculate hit ratio and other consistency metrics
-    """
-    if len(strategy_returns) == 0:
-        return {
-            'monthly_hit_ratio': 0,
-            'avg_win_pct': 0,
-            'avg_loss_pct': 0,
-            'win_loss_ratio': 0,
-            'max_consecutive_wins': 0,
-            'max_consecutive_losses': 0,
-            'avg_consecutive_wins': 0,
-            'avg_consecutive_losses': 0
-        }
-    
-    # Monthly hit ratio
-    monthly_returns = strategy_returns.resample('M').apply(lambda x: (1+x).prod()-1)
-    hit_ratio = (monthly_returns > 0).mean() if len(monthly_returns) > 0 else 0
-    
-    # Win/Loss metrics
-    wins = strategy_returns[strategy_returns > 0]
-    losses = strategy_returns[strategy_returns < 0]
-    
-    avg_win = wins.mean() if len(wins) > 0 else 0
-    avg_loss = losses.mean() if len(losses) > 0 else 0
-    win_loss_ratio = abs(avg_win / avg_loss) if avg_loss != 0 else 0
-    
-    return {
-        'monthly_hit_ratio': hit_ratio,
-        'avg_win_pct': avg_win,
-        'avg_loss_pct': avg_loss,
-        'win_loss_ratio': win_loss_ratio,
-        'max_consecutive_wins': 0,  # Simplified
-        'max_consecutive_losses': 0,
-        'avg_consecutive_wins': 0,
-        'avg_consecutive_losses': 0
-    }
 
 # ======== ADD THIS FUNCTION RIGHT HERE ========
 def visualize_optuna_results(study, best_params):
@@ -844,9 +805,6 @@ def main():
     # ADD THIS SECTION RIGHT BEFORE "Quarterly Portfolio Values"
     st.sidebar.header("Optimization Settings")
     n_trials = st.sidebar.slider("Number of Optuna Trials", 50, 300, 150, 10)
-
-    st.sidebar.header("Quarterly Portfolio Values")
-    qs_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=75815.26, step=100.0)
 
     st.sidebar.header("Quarterly Portfolio Values")
     qs_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=75815.26, step=100.0)
