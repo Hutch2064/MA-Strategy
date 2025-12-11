@@ -355,12 +355,7 @@ def adaptive_ma_optimization(prices, risk_on_weights, risk_off_weights, flip_cos
         # Create candidate parameter space
         candidate_params = []
         
-        # Center around adaptive MA
-        base_lengths = [adaptive_ma]
-        if adaptive_ma > 50:
-            base_lengths.extend([adaptive_ma - 25, adaptive_ma + 25])
-        if adaptive_ma > 100:
-            base_lengths.extend([adaptive_ma - 50, adaptive_ma + 50])
+        base_lengths = list(range(100, 301, 25))  # Test 100, 125, 150, 175, 200, 225, 250, 275, 300
         
         # Ensure reasonable bounds
         min_len = max(20, int(0.1 * total_days))
