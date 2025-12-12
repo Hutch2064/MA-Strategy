@@ -748,7 +748,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     
     return best_params, final_result, {
         "method": "optuna_oos_optimization",
-        "train_test_split": f"{split_idx}/{total_days - split_idx} days",
+        "train_test_split": f"Train: {split_idx} days | Test: {total_days - split_idx} days (Fixed 2Y OOS)",
         "train_sharpe": train_sharpe,
         "oos_sharpe": best_oos_sharpe,
         "generalization_ratio": best_oos_sharpe / train_sharpe if train_sharpe != 0 else 0,
