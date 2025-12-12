@@ -584,7 +584,19 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
     """
     Sensitivity analysis for MA Strategy (NOT Hybrid SIG - uses the same backtest as MA optimization)
     """
-    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+    # ============================================================
+    # STATIC BUY & HOLD BASELINE (ALWAYS RISK-ON, NO TIMING)
+    # ============================================================
+
+    simple = prices.pct_change().fillna(0)
+
+    bh_returns = pd.Series(0.0, index=simple.index)
+    for a, w in risk_on_weights.items():
+        if a in simple.columns:
+            bh_returns += simple[a] * w
+
+    bh_equity = (1 + bh_returns).cumprod()
+    bh_perf = compute_performance(bh_returns, bh_equity)
     base_len, base_type, base_tol = base_params
     
     # Test different MA lengths (using MA Strategy backtest, not Hybrid SIG)
