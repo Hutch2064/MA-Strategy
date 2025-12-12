@@ -657,10 +657,19 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
             "reason": "Insufficient data for OOS optimization (need at least 2 years)"
         }
     
-    # Split data chronologically (70% train, 30% test for OOS)
-    split_idx = int(0.7 * total_days)
-    train_prices = prices.iloc[:split_idx]
-    test_prices = prices.iloc[split_idx:]
+    # ============================================================
+    # FIXED OUT-OF-SAMPLE SPLIT (ACADEMICALLY DEFENSIBLE)
+    # ============================================================
+
+    TEST_DAYS = 252 * 2  # 2 years out-of-sample
+
+    if total_days <= TEST_DAYS:
+        raise ValueError("Not enough data for fixed OOS window")
+
+    train_prices = prices.iloc[:-TEST_DAYS]
+    test_prices  = prices.iloc[-TEST_DAYS:]
+
+    split_idx = len(train_prices)  # keep for reporting
     
     # Build portfolio indices for both sets
     portfolio_index_train = build_portfolio_index(train_prices, risk_on_weights)
