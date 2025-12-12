@@ -827,7 +827,7 @@ def main():
 
     # Add validation toggle to sidebar
     st.sidebar.header("Validation Settings")
-    run_validation = st.sidebar.checkbox("Run Validation Suite", value=True)
+    run_validation = st.sidebar.checkbox("Run Data Validation", value=True)
 
     run_clicked = st.sidebar.button("Run Backtest & Optimize")
     if not run_clicked:
