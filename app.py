@@ -723,7 +723,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
         pruner=optuna.pruners.MedianPruner()
     )
     
-    with st.spinner(f'Running Optuna optimization ({n_trials} trials)...'):
+    with st.spinner(f'Running Out-of-Sample Optimization ({n_trials} trials)...'):
         study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
     
     # Get best parameters (highest OOS Sharpe)
