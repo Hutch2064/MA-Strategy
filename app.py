@@ -1644,9 +1644,6 @@ def main():
                 plt.tight_layout()
                 st.pyplot(fig)
                 
-                # 6. Key Takeaways
-                st.write("### 6. Key Takeaways for Hybrid SIG Strategy")
-                
                 takeaways = []
                 
                 if hybrid_sharpe > bh_sharpe:
