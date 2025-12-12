@@ -748,7 +748,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     
     return best_params, final_result, {
         "method": "optuna_oos_optimization",
-        "train_test_split": f"Train: {split_idx} days | Test: {total_days - split_idx} days (Fixed 2Y OOS)",
+        "train_test_split": f"Train: {split_idx} days | Test: {total_days - split_idx} days",
         "train_sharpe": train_sharpe,
         "oos_sharpe": best_oos_sharpe,
         "generalization_ratio": best_oos_sharpe / train_sharpe if train_sharpe != 0 else 0,
@@ -940,8 +940,6 @@ def main():
 
     st.subheader(f"Current MA Regime: {current_regime}")
 
-    # NEW DISPLAY FOR OPTUNA
-    st.write(f"**Optimization Method:** Optuna OOS Optimization")
     st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
 
     if optimization_summary.get('oos_available', False):
@@ -959,7 +957,6 @@ def main():
         else:
             st.warning("⚠️ Lower generalization (OOS < 50% of in-sample)")
     
-        st.write(f"**Trials:** {optimization_summary.get('n_trials', 0)}")
         st.write(f"**Train/Test Split:** {optimization_summary.get('train_test_split', 'N/A')}")
     else:
         reason = optimization_summary.get('reason', 'Using fallback parameters')
@@ -1122,8 +1119,8 @@ def main():
         st.subheader("Hybrid SIG – Actual Rebalance Dates (Historical)")
         st.dataframe(reb_df)
     else:
-        st.subheader("Hybrid SIG – Actual Rebalance Dates (Historical)")
-        st.write("No hybrid SIG rebalances occurred during the backtest.")
+        st.subheader("Hybrid SIG/MA – Historical Rebalance Dates")
+        st.write("No hybrid SIG/MA rebalances occurred during the backtest.")
 
     # Quarter start should follow the last actual SIG rebalance
     if len(hybrid_rebals) > 0:
