@@ -661,7 +661,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     # FIXED OUT-OF-SAMPLE SPLIT (ACADEMICALLY DEFENSIBLE)
     # ============================================================
 
-    TEST_DAYS = 252 * 5  # 2 years out-of-sample
+    TEST_DAYS = 252 * 4  # 2 years out-of-sample
 
     if total_days <= TEST_DAYS:
         raise ValueError("Not enough data for fixed OOS window")
