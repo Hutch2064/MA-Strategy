@@ -813,7 +813,7 @@ def main():
     
     # ADD THIS SECTION RIGHT BEFORE "Quarterly Portfolio Values"
     st.sidebar.header("Optimization Settings")
-    n_trials = st.sidebar.slider("Number of Optuna Trials", 50, 300, 150, 10)
+    n_trials = st.sidebar.slider("Number of Optuna Trials", 50, 1000, 150, 10)
 
     st.sidebar.header("Quarterly Portfolio Values")
     qs_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=75815.26, step=100.0)
