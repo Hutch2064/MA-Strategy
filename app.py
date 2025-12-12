@@ -597,6 +597,9 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
 
     bh_equity = (1 + bh_returns).cumprod()
     bh_perf = compute_performance(bh_returns, bh_equity)
+    # MA signal is generated on a price-like index (not equity)
+    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+
     base_len, base_type, base_tol = base_params
     
     # Test different MA lengths (using MA Strategy backtest, not Hybrid SIG)
