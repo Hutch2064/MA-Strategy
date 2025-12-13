@@ -804,7 +804,7 @@ def _optimize_in_sample(prices, portfolio_index, risk_on_weights, risk_off_weigh
 def main():
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
-    st.title("Portfolio Strategy")
+    st.title("Portfolio Cooper Strategy")
 
     # Backtest inputs unchanged...
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
