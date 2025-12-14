@@ -18,8 +18,16 @@ RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
     "UGL": .25,
-    "TQQQ": .30,
-    "BTC-USD": .45,
+    "BTC-USD": .35,
+    "META": .1285,
+    "AAPL": .1285,
+    "AMZN": .1285,
+    "NVDA": .1285,
+    "GOOGL": .1285,
+    "TSLA": .1285,
+    "MSFT": .1285,
+    "SHY": -.45,
+    
 }
 
 RISK_OFF_WEIGHTS = {
@@ -804,7 +812,7 @@ def _optimize_in_sample(prices, portfolio_index, risk_on_weights, risk_off_weigh
 def main():
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
-    st.title("Portfolio Cooper Strategy")
+    st.title("Portfolio Strategy")
 
     # Backtest inputs unchanged...
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
