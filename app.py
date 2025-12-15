@@ -1071,7 +1071,7 @@ def main():
     simple_rets = prices.pct_change().fillna(0)
 
     risk_on_simple = pd.Series(0.0, index=simple_rets.index)
-    for a, w in risk_on_weights.items():
+    for a, w in hybrid_opt_weights.items():
         if a in simple_rets.columns:
             risk_on_simple += simple_rets[a] * w
 
@@ -1131,6 +1131,38 @@ def main():
             mapped_q_ends.append(valid_dates.max())
 
     mapped_q_ends = pd.to_datetime(mapped_q_ends)
+
+    # ============================================================
+    # HYBRID SIG — OOS RISK-ON WEIGHT OPTIMIZATION (NEW)
+    # ============================================================
+
+    hybrid_opt_weights, hybrid_weight_oos_sharpe, hybrid_weight_study = (
+        optimize_hybrid_sig_weights_oos(
+            prices=prices,
+            ma_params=best_cfg,
+            risk_off_weights=risk_off_weights,
+            flip_cost=FLIP_COST,
+            mapped_q_ends=mapped_q_ends,
+            n_trials=150
+        )
+    )
+
+st.subheader("Hybrid SIG — OOS-Optimal Risk-On Weights")
+st.write(hybrid_opt_weights)
+st.write(f"**Hybrid SIG OOS Sharpe (weights only):** {hybrid_weight_oos_sharpe:.3f}")
+
+# Sanity check
+st.write("Sum of optimized weights:", sum(hybrid_opt_weights.values()))
+
+
+
+
+
+
+
+
+
+
 
     # -----------------------------------------------------------
     # FIXED: TRUE CALENDAR QUARTER LOGIC (never depends on prices)
@@ -1440,7 +1472,7 @@ def main():
     for (label, cap), tab in zip(accounts, (tab1, tab2, tab3)):
         with tab:
             st.write(f"### {label} — Hybrid SIG")
-            st.dataframe(add_pct(compute_allocations(cap, hyb_r, hyb_s, risk_on_weights, risk_off_weights)))
+            st.dataframe(add_pct(compute_allocations(cap, hyb_r, hyb_s, hybrid_opt_weights, risk_off_weights)))
 
             st.write(f"### {label} — Pure SIG")
             st.dataframe(add_pct(compute_allocations(cap, pure_r, pure_s, risk_on_weights, risk_off_weights)))
