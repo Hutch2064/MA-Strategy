@@ -991,7 +991,16 @@ def main():
     for a, w in risk_on_weights.items():
         if a in simple_rets.columns:
             risk_on_simple += simple_rets[a] * w
+    
+    # ============================================================
+    # HYBRID SIG — SHARPE-OPTIMAL WEIGHT RETURNS
+    # ============================================================
 
+    hybrid_opt_risk_on = pd.Series(0.0, index=simple_rets.index)
+    for a, w in hybrid_opt_weights.items():
+        if a in simple_rets.columns:
+            hybrid_opt_risk_on += simple_rets[a] * w
+            
     risk_on_eq = (1 + risk_on_simple).cumprod()
     risk_on_perf = compute_performance(risk_on_simple, risk_on_eq)
 
@@ -1048,6 +1057,19 @@ def main():
             mapped_q_ends.append(valid_dates.max())
 
     mapped_q_ends = pd.to_datetime(mapped_q_ends)
+    
+    # ============================================================
+    # HYBRID SIG — SHARPE-OPTIMAL WEIGHTS (OOS, DIAGNOSTIC ONLY)
+    # ============================================================
+
+    hybrid_opt_weights, hybrid_opt_oos_sharpe, _ = optimize_hybrid_sig_weights_oos(
+        prices=prices,
+        ma_params=best_cfg,
+        risk_off_weights=risk_off_weights,
+        flip_cost=FLIP_COST,
+        mapped_q_ends=mapped_q_ends,
+        n_trials=150
+    )
 
     # -----------------------------------------------------------
     # FIXED: TRUE CALENDAR QUARTER LOGIC (never depends on prices)
@@ -1107,6 +1129,23 @@ def main():
         quarter_end_dates=mapped_q_ends,
         quarterly_multiplier=2.0,  # 2x quarterly part
         ma_flip_multiplier=4.0     # 4x when MA flips
+    )
+    
+    
+    # ============================================================
+    # HYBRID SIG — SHARPE-OPTIMAL WEIGHTS (OOS)
+    # ============================================================
+
+    hybrid_opt_eq, _, _, _ = run_sig_engine(
+        hybrid_opt_risk_on,
+        risk_off_daily,
+        quarterly_target,
+        sig,                     # SAME MA SIGNAL
+        pure_sig_rw=pure_sig_rw,
+        pure_sig_sw=pure_sig_sw,
+        quarter_end_dates=mapped_q_ends,
+        quarterly_multiplier=2.0,
+        ma_flip_multiplier=4.0
     )
     
     
@@ -1218,6 +1257,21 @@ def main():
     pure_sig_simple = pure_sig_eq.pct_change().fillna(0) if len(pure_sig_eq) > 0 else pd.Series([], dtype=float)
     pure_sig_perf = compute_performance(pure_sig_simple, pure_sig_eq)
 
+    # ============================================================
+    # HYBRID SIG — SHARPE-OPTIMAL STATS
+    # ============================================================
+
+    hybrid_opt_simple = hybrid_opt_eq.pct_change().fillna(0)
+    hybrid_opt_perf = compute_performance(hybrid_opt_simple, hybrid_opt_eq)
+
+    hybrid_opt_stats = compute_stats(
+        hybrid_opt_perf,
+        hybrid_opt_simple,
+        hybrid_opt_perf["DD_Series"],
+        np.zeros(len(hybrid_opt_simple), dtype=bool),
+        0
+    )
+
     strat_stats = compute_stats(
         perf,
         best_result["returns"],
@@ -1287,27 +1341,29 @@ def main():
         rv = risk_stats.get(key, np.nan)
         hv = hybrid_stats.get(key, np.nan)
         ps = pure_sig_stats.get(key, np.nan)
+        ho = hybrid_opt_stats.get(key, np.nan)
 
         if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
-            row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(bh), fmt_pct(rv), fmt_pct(hv), fmt_pct(ps)]
+            row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(bh), fmt_pct(rv), fmt_pct(hv), fmt_pct(ho), fmt_pct(ps)]
         elif key in ["Sharpe", "MAR", "PainGain", "Skew", "Kurtosis"]:
-            row = [label, fmt_dec(sv), fmt_dec(sh), fmt_dec(bh), fmt_dec(rv), fmt_dec(hv), fmt_dec(ps)]
+            row = [label, fmt_dec(sv), fmt_dec(sh), fmt_dec(bh), fmt_dec(rv), fmt_dec(hv), fmt_pct(ho), fmt_dec(ps)]
         else:
-            row = [label, fmt_num(sv), fmt_num(sh), fmt_num(bh), fmt_num(rv), fmt_num(hv), fmt_num(ps)]
+            row = [label, fmt_num(sv), fmt_num(sh), fmt_num(bh), fmt_num(rv), fmt_num(hv), fmt_pct(ho), fmt_num(ps)]
 
         table_data.append(row)
 
     stat_table = pd.DataFrame(
         table_data,
         columns=[
-            "Metric",
-            "MA Strategy",
-            "Sharpe-Optimal",
-            "Buy & Hold (Quarterly Rebalancing)",
-            "Buy & Hold (Static)",
-            "Hybrid SIG",
-            "Pure SIG",
-        ],
+        "Metric",
+        "MA Strategy",
+        "Sharpe-Optimal",
+        "Buy & Hold (Quarterly Rebalancing)",
+        "Buy & Hold (Static)",
+        "Hybrid SIG",
+        "Hybrid SIG (Sharpe-Optimal, OOS)",
+        "Pure SIG",
+    ],
     )
 
     st.dataframe(stat_table, use_container_width=True)
