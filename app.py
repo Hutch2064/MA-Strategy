@@ -17,13 +17,13 @@ DEFAULT_START_DATE = "2000-01-01"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "UGL": .25,
-    "BTC-USD": .45,
-    "TQQQ": .3,
+    "BTC-USD": .6,
+    "TQQQ": .4,
 }
 
 RISK_OFF_WEIGHTS = {
-    "SHY": 1.0,
+    "SHY": .45,
+    "GLD": .55,
 }
 
 FLIP_COST = 0.00
