@@ -1092,7 +1092,97 @@ def main():
     current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
     st.subheader(f"Current MA Regime: {current_regime}")
+    
+    # ============================================================
+    # DISPLAY OPTIMAL HYBRID SIG WEIGHTS
+    # ============================================================
+    st.subheader("🎯 Optimal Hybrid SIG Weights (For Max Sharpe)")
 
+    # Simple weight optimization display
+    st.write("**To maximize Hybrid SIG Sharpe ratio, use these weights:**")
+
+    # Get current risk-on tickers
+    risk_on_tickers = list(risk_on_weights.keys())
+
+    if len(risk_on_tickers) > 0:
+        # Create test portfolio index with current weights
+        portfolio_index = build_portfolio_index(prices, risk_on_weights)
+    
+        # Test a few weight combinations (simplified - you can expand this)
+        weight_options = []
+    
+        # Test equal weight
+        equal_weights = {ticker: 1.0/len(risk_on_tickers) for ticker in risk_on_tickers}
+    
+        # Test some variations
+        if len(risk_on_tickers) == 3:
+            # For 3 assets, test different allocations
+            test_combos = [
+                {"name": "Equal Weight", "weights": equal_weights},
+                {"name": "Heavy BTC", "weights": {"UGL": 0.2, "BTC-USD": 0.6, "TQQQ": 0.2}},
+                {"name": "Heavy TQQQ", "weights": {"UGL": 0.2, "BTC-USD": 0.2, "TQQQ": 0.6}},
+                {"name": "Balanced", "weights": {"UGL": 0.33, "BTC-USD": 0.34, "TQQQ": 0.33}},
+            ]
+        else:
+            # Generic test
+            test_combos = [{"name": "Equal Weight", "weights": equal_weights}]
+    
+        results = []
+    
+        for combo in test_combos:
+            # Build portfolio with these weights
+            test_portfolio = build_portfolio_index(prices, combo["weights"])
+        
+            # Generate signal with optimized MA parameters
+            ma = compute_ma_matrix(test_portfolio, [best_len], best_type)[best_len]
+            test_signal = generate_testfol_signal_vectorized(test_portfolio, ma, best_tol)
+        
+            # Run backtest to get Sharpe
+            test_result = backtest(prices, test_signal, combo["weights"], 
+                                 risk_off_weights, FLIP_COST, ma_flip_multiplier=4.0)
+        
+            sharpe = test_result["performance"]["Sharpe"]
+        
+            results.append({
+                "Name": combo["name"],
+                "Sharpe": sharpe,
+                "Weights": combo["weights"]
+            })
+    
+        # Find best
+        if results:
+            best_result = max(results, key=lambda x: x["Sharpe"])
+        
+            # Display in a nice format
+            col1, col2 = st.columns(2)
+        
+            with col1:
+                st.metric("**Best Sharpe Ratio**", f"{best_result['Sharpe']:.3f}")
+                st.write(f"**Strategy:** {best_result['Name']}")
+        
+            with col2:
+                st.write("**Optimal Weights:**")
+                for ticker, weight in best_result['Weights'].items():
+                    st.write(f"- {ticker}: {weight:.1%}")
+        
+            # Show all tested combinations
+            st.write("**All Tested Combinations:**")
+            for r in results:
+                weight_str = ", ".join([f"{k}: {v:.1%}" for k, v in r['Weights'].items()])
+                st.write(f"- **{r['Name']}**: Sharpe = {r['Sharpe']:.3f} ({weight_str})")
+    
+        # Instructions
+        st.info("""
+        **To use these weights:**
+        1. Copy the percentages above into the "Weights" input in the sidebar
+        2. Make sure the ticker order matches
+        3. Click "Run Backtest & Optimize" again
+        """)
+    else:
+        st.warning("No risk-on tickers found for optimization")
+
+    st.markdown("---")
+    
     st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
 
     if optimization_summary.get('oos_available', False):
