@@ -1147,12 +1147,12 @@ def main():
         )
     )
 
-st.subheader("Hybrid SIG — OOS-Optimal Risk-On Weights")
-st.write(hybrid_opt_weights)
-st.write(f"**Hybrid SIG OOS Sharpe (weights only):** {hybrid_weight_oos_sharpe:.3f}")
+    st.subheader("Hybrid SIG — OOS-Optimal Risk-On Weights")
+    st.write(hybrid_opt_weights)
+    st.write(f"**Hybrid SIG OOS Sharpe (weights only):** {hybrid_weight_oos_sharpe:.3f}")
 
-# Sanity check
-st.write("Sum of optimized weights:", sum(hybrid_opt_weights.values()))
+    # Sanity check
+    st.write("Sum of optimized weights:", sum(hybrid_opt_weights.values()))
 
 
 
