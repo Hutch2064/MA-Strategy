@@ -19,14 +19,8 @@ RISK_FREE_RATE = 0.0
 RISK_ON_WEIGHTS = {
     "UGL": .25,
     "BTC-USD": .35,
-    "META": .1285,
-    "AAPL": .1285,
-    "AMZN": .1285,
-    "NVDA": .1285,
-    "GOOGL": .1285,
-    "TSLA": .1285,
-    "MSFT": .1285,
-    "SHY": -.45,
+    "MGK": 1.35,
+    "SHY": -.90,
     
 }
 
