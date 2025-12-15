@@ -791,90 +791,7 @@ def _optimize_in_sample(prices, portfolio_index, risk_on_weights, risk_off_weigh
     
     return best_params or (100, "sma", 0.02)
 
-def optimize_hybrid_sig_weights_oos(
-    prices,
-    ma_params,
-    risk_off_weights,
-    flip_cost,
-    mapped_q_ends,
-    n_trials=150,
-    test_days=252*3
-):
-    tickers = list(RISK_ON_WEIGHTS.keys())
 
-    train_prices = prices.iloc[:-test_days]
-    test_prices  = prices.iloc[-test_days:]
-
-    L, ma_type, tol = ma_params
-
-    def run_hybrid(prices_slice, weights):
-        simple = prices_slice.pct_change().fillna(0)
-
-        risk_on = sum(
-            simple[t] * weights[t]
-            for t in weights if t in simple.columns
-        )
-
-        risk_off = sum(
-            simple[t] * risk_off_weights[t]
-            for t in risk_off_weights if t in simple.columns
-        )
-
-        portfolio_index = build_portfolio_index(prices_slice, weights)
-        ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
-        sig = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-
-        eq, _, _, _ = run_sig_engine(
-            risk_on,
-            risk_off,
-            target_quarter=0.0,
-            ma_signal=sig,
-            pure_sig_rw=None,
-            pure_sig_sw=None,
-            flip_cost=flip_cost,
-            quarter_end_dates=mapped_q_ends,
-            quarterly_multiplier=2.0,
-            ma_flip_multiplier=4.0
-        )
-
-        rets = eq.pct_change().dropna()
-        return rets
-
-    def objective(trial):
-        raw = np.array([
-            trial.suggest_float("UGL", 0.10, 0.40),
-            trial.suggest_float("BTC", 0.25, 0.60),
-            trial.suggest_float("TQQQ", 0.15, 0.45),
-        ])
-        w = raw / raw.sum()
-        weights = dict(zip(tickers, w))
-
-        rets = run_hybrid(train_prices, weights)
-        if len(rets) < 50 or rets.std() == 0:
-            return 1e6
-
-        sharpe = rets.mean() / rets.std() * np.sqrt(252)
-        return -sharpe
-
-    study = optuna.create_study(direction="minimize")
-    study.optimize(objective, n_trials=n_trials)
-
-    best_raw = np.array([
-        study.best_params["UGL"],
-        study.best_params["BTC"],
-        study.best_params["TQQQ"],
-    ])
-    best_w = best_raw / best_raw.sum()
-    best_weights = dict(zip(tickers, best_w))
-
-    # -------- TRUE OOS EVALUATION --------
-    test_rets = run_hybrid(test_prices, best_weights)
-    oos_sharpe = (
-        test_rets.mean() / test_rets.std() * np.sqrt(252)
-        if test_rets.std() > 0 else 0
-    )
-
-    return best_weights, oos_sharpe, study
 
 
 
@@ -1071,7 +988,7 @@ def main():
     simple_rets = prices.pct_change().fillna(0)
 
     risk_on_simple = pd.Series(0.0, index=simple_rets.index)
-    for a, w in hybrid_opt_weights.items():
+    for a, w in risk_on_weights.items():
         if a in simple_rets.columns:
             risk_on_simple += simple_rets[a] * w
 
@@ -1131,38 +1048,6 @@ def main():
             mapped_q_ends.append(valid_dates.max())
 
     mapped_q_ends = pd.to_datetime(mapped_q_ends)
-
-    # ============================================================
-    # HYBRID SIG — OOS RISK-ON WEIGHT OPTIMIZATION (NEW)
-    # ============================================================
-
-    hybrid_opt_weights, hybrid_weight_oos_sharpe, hybrid_weight_study = (
-        optimize_hybrid_sig_weights_oos(
-            prices=prices,
-            ma_params=best_cfg,
-            risk_off_weights=risk_off_weights,
-            flip_cost=FLIP_COST,
-            mapped_q_ends=mapped_q_ends,
-            n_trials=150
-        )
-    )
-
-    st.subheader("Hybrid SIG — OOS-Optimal Risk-On Weights")
-    st.write(hybrid_opt_weights)
-    st.write(f"**Hybrid SIG OOS Sharpe (weights only):** {hybrid_weight_oos_sharpe:.3f}")
-
-    # Sanity check
-    st.write("Sum of optimized weights:", sum(hybrid_opt_weights.values()))
-
-
-
-
-
-
-
-
-
-
 
     # -----------------------------------------------------------
     # FIXED: TRUE CALENDAR QUARTER LOGIC (never depends on prices)
@@ -1472,7 +1357,7 @@ def main():
     for (label, cap), tab in zip(accounts, (tab1, tab2, tab3)):
         with tab:
             st.write(f"### {label} — Hybrid SIG")
-            st.dataframe(add_pct(compute_allocations(cap, hyb_r, hyb_s, hybrid_opt_weights, risk_off_weights)))
+            st.dataframe(add_pct(compute_allocations(cap, hyb_r, hyb_s, risk_on_weights, risk_off_weights)))
 
             st.write(f"### {label} — Pure SIG")
             st.dataframe(add_pct(compute_allocations(cap, pure_r, pure_s, risk_on_weights, risk_off_weights)))
