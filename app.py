@@ -791,7 +791,90 @@ def _optimize_in_sample(prices, portfolio_index, risk_on_weights, risk_off_weigh
     
     return best_params or (100, "sma", 0.02)
 
+def optimize_hybrid_sig_weights_oos(
+    prices,
+    ma_params,
+    risk_off_weights,
+    flip_cost,
+    mapped_q_ends,
+    n_trials=150,
+    test_days=252*3
+):
+    tickers = list(RISK_ON_WEIGHTS.keys())
 
+    train_prices = prices.iloc[:-test_days]
+    test_prices  = prices.iloc[-test_days:]
+
+    L, ma_type, tol = ma_params
+
+    def run_hybrid(prices_slice, weights):
+        simple = prices_slice.pct_change().fillna(0)
+
+        risk_on = sum(
+            simple[t] * weights[t]
+            for t in weights if t in simple.columns
+        )
+
+        risk_off = sum(
+            simple[t] * risk_off_weights[t]
+            for t in risk_off_weights if t in simple.columns
+        )
+
+        portfolio_index = build_portfolio_index(prices_slice, weights)
+        ma = compute_ma_matrix(portfolio_index, [L], ma_type)[L]
+        sig = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
+
+        eq, _, _, _ = run_sig_engine(
+            risk_on,
+            risk_off,
+            target_quarter=0.0,
+            ma_signal=sig,
+            pure_sig_rw=None,
+            pure_sig_sw=None,
+            flip_cost=flip_cost,
+            quarter_end_dates=mapped_q_ends,
+            quarterly_multiplier=2.0,
+            ma_flip_multiplier=4.0
+        )
+
+        rets = eq.pct_change().dropna()
+        return rets
+
+    def objective(trial):
+        raw = np.array([
+            trial.suggest_float("UGL", 0.10, 0.40),
+            trial.suggest_float("BTC", 0.25, 0.60),
+            trial.suggest_float("TQQQ", 0.15, 0.45),
+        ])
+        w = raw / raw.sum()
+        weights = dict(zip(tickers, w))
+
+        rets = run_hybrid(train_prices, weights)
+        if len(rets) < 50 or rets.std() == 0:
+            return 1e6
+
+        sharpe = rets.mean() / rets.std() * np.sqrt(252)
+        return -sharpe
+
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=n_trials)
+
+    best_raw = np.array([
+        study.best_params["UGL"],
+        study.best_params["BTC"],
+        study.best_params["TQQQ"],
+    ])
+    best_w = best_raw / best_raw.sum()
+    best_weights = dict(zip(tickers, best_w))
+
+    # -------- TRUE OOS EVALUATION --------
+    test_rets = run_hybrid(test_prices, best_weights)
+    oos_sharpe = (
+        test_rets.mean() / test_rets.std() * np.sqrt(252)
+        if test_rets.std() > 0 else 0
+    )
+
+    return best_weights, oos_sharpe, study
 
 
 
