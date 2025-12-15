@@ -945,174 +945,143 @@ def main():
     sig = best_result["signal"]
     perf = best_result["performance"]
     
-# ============================================================
-# HYBRID SIG WEIGHT OPTIMIZATION DISPLAY
-# ============================================================
+    # ============================================================
+    # HYBRID SIG WEIGHT OPTIMIZATION DISPLAY
+    # ============================================================
 
-def display_optimal_hybrid_weights(prices, risk_on_weights, risk_off_weights, 
-                                   best_cfg, flip_cost, quarter_end_dates):
-    """Calculate and display optimal weights for Hybrid SIG strategy"""
+    def display_optimal_hybrid_weights(prices, risk_on_weights, risk_off_weights, 
+                                       best_cfg, flip_cost, quarter_end_dates):
+        """Calculate and display optimal weights for Hybrid SIG strategy"""
     
-    st.subheader("🎯 Optimal Hybrid SIG Weights (Max Sharpe)")
+        st.subheader("🎯 Optimal Hybrid SIG Weights (Max Sharpe)")
     
-    # Get the optimized signal
-    portfolio_index = build_portfolio_index(prices, risk_on_weights)
-    best_len, best_type, best_tol = best_cfg
-    ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
-    sig = generate_testfol_signal_vectorized(portfolio_index, ma, best_tol)
+        # Get the optimized signal
+        portfolio_index = build_portfolio_index(prices, risk_on_weights)
+        best_len, best_type, best_tol = best_cfg
+        ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
+        sig = generate_testfol_signal_vectorized(portfolio_index, ma, best_tol)
     
-    # Prepare optimization
-    simple = prices.pct_change().fillna(0)
+        # Prepare optimization
+        simple = prices.pct_change().fillna(0)
     
-    # Get all tickers
-    all_tickers = list(risk_on_weights.keys()) + list(risk_off_weights.keys())
+        # Get all tickers
+        all_tickers = list(risk_on_weights.keys()) + list(risk_off_weights.keys())
     
-    # Function to run Hybrid SIG with given weights
-    def run_hybrid_sig_with_weights(sig, risk_on_weights_dict, risk_off_weights_dict):
-        # Calculate daily returns for sleeves
-        risk_on_simple = pd.Series(0.0, index=simple.index)
-        for a, w in risk_on_weights_dict.items():
-            if a in simple.columns:
-                risk_on_simple += simple[a] * w
+        # Function to run Hybrid SIG with given weights
+        def run_hybrid_sig_with_weights(sig, risk_on_weights_dict, risk_off_weights_dict):
+            # Calculate daily returns for sleeves
+            risk_on_simple = pd.Series(0.0, index=simple.index)
+            for a, w in risk_on_weights_dict.items():
+                if a in simple.columns:
+                    risk_on_simple += simple[a] * w
         
-        risk_off_simple = pd.Series(0.0, index=simple.index)
-        for a, w in risk_off_weights_dict.items():
-            if a in simple.columns:
-                risk_off_simple += simple[a] * w
+            risk_off_simple = pd.Series(0.0, index=simple.index)
+            for a, w in risk_off_weights_dict.items():
+                if a in simple.columns:
+                    risk_off_simple += simple[a] * w
         
-        # Get Pure SIG weights first (always RISK-ON)
-        pure_sig_signal = pd.Series(True, index=sig.index)
+            # Get Pure SIG weights first (always RISK-ON)
+            pure_sig_signal = pd.Series(True, index=sig.index)
         
-        pure_sig_eq, pure_sig_rw, pure_sig_sw, _ = run_sig_engine(
-            risk_on_simple,
-            risk_off_simple,
-            0.02,  # Placeholder quarterly target
-            pure_sig_signal,
-            quarter_end_dates=quarter_end_dates,
-            quarterly_multiplier=2.0,
-            ma_flip_multiplier=0.0
-        )
+            pure_sig_eq, pure_sig_rw, pure_sig_sw, _ = run_sig_engine(
+                risk_on_simple,
+                risk_off_simple,
+                0.02,  # Placeholder quarterly target
+                pure_sig_signal,
+                quarter_end_dates=quarter_end_dates,
+                quarterly_multiplier=2.0,
+                ma_flip_multiplier=0.0
+            )
         
-        # Run Hybrid SIG
-        hybrid_eq, _, _, _ = run_sig_engine(
-            risk_on_simple,
-            risk_off_simple,
-            0.02,  # Placeholder quarterly target
-            sig,
-            pure_sig_rw=pure_sig_rw,
-            pure_sig_sw=pure_sig_sw,
-            quarter_end_dates=quarter_end_dates,
-            quarterly_multiplier=2.0,
-            ma_flip_multiplier=4.0
-        )
+            # Run Hybrid SIG
+            hybrid_eq, _, _, _ = run_sig_engine(
+                risk_on_simple,
+                risk_off_simple,
+                0.02,  # Placeholder quarterly target
+                sig,
+                pure_sig_rw=pure_sig_rw,
+                pure_sig_sw=pure_sig_sw,
+                quarter_end_dates=quarter_end_dates,
+                quarterly_multiplier=2.0,
+                ma_flip_multiplier=4.0
+            )
         
-        # Calculate Sharpe
-        hybrid_returns = hybrid_eq.pct_change().fillna(0)
-        if len(hybrid_returns) > 0 and hybrid_returns.std() > 0:
-            sharpe = hybrid_returns.mean() / hybrid_returns.std() * np.sqrt(252)
-            return sharpe
-        else:
-            return 0.0
+            # Calculate Sharpe
+            hybrid_returns = hybrid_eq.pct_change().fillna(0)
+            if len(hybrid_returns) > 0 and hybrid_returns.std() > 0:
+                sharpe = hybrid_returns.mean() / hybrid_returns.std() * np.sqrt(252)
+                return sharpe
+            else:
+                return 0.0
     
-    # Simple optimization: test different weight combinations
-    st.write("**Testing weight combinations for Hybrid SIG...**")
+        # Simple optimization: test different weight combinations
+        st.write("**Testing weight combinations for Hybrid SIG...**")
     
-    # Test a few reasonable combinations (you can expand this)
-    weight_combinations = []
+        # Test a few reasonable combinations (you can expand this)
+        weight_combinations = []
     
-    # Keep risk-off as SHY=1.0 (simplification)
-    risk_off_weights_opt = {"SHY": 1.0}
+        # Keep risk-off as SHY=1.0 (simplification)
+        risk_off_weights_opt = {"SHY": 1.0}
     
-    # Test different risk-on allocations
-    combos_to_test = [
-        {"UGL": 0.25, "BTC-USD": 0.45, "TQQQ": 0.30},
-        {"UGL": 0.30, "BTC-USD": 0.40, "TQQQ": 0.30},
-        {"UGL": 0.20, "BTC-USD": 0.50, "TQQQ": 0.30},
-        {"UGL": 0.25, "BTC-USD": 0.40, "TQQQ": 0.35},
-        {"UGL": 0.33, "BTC-USD": 0.33, "TQQQ": 0.34},
-    ]
+        # Test different risk-on allocations
+        combos_to_test = [
+            {"UGL": 0.25, "BTC-USD": 0.45, "TQQQ": 0.30},
+            {"UGL": 0.30, "BTC-USD": 0.40, "TQQQ": 0.30},
+            {"UGL": 0.20, "BTC-USD": 0.50, "TQQQ": 0.30},
+            {"UGL": 0.25, "BTC-USD": 0.40, "TQQQ": 0.35},
+            {"UGL": 0.33, "BTC-USD": 0.33, "TQQQ": 0.34},
+        ]
     
-    best_sharpe = -999
-    best_weights = None
+        best_sharpe = -999
+        best_weights = None
     
-    with st.spinner("Finding optimal weights for Hybrid SIG..."):
-        for combo in combos_to_test:
-            sharpe = run_hybrid_sig_with_weights(sig, combo, risk_off_weights_opt)
-            weight_combinations.append({
-                "weights": combo,
-                "sharpe": sharpe
-            })
+        with st.spinner("Finding optimal weights for Hybrid SIG..."):
+            for combo in combos_to_test:
+                sharpe = run_hybrid_sig_with_weights(sig, combo, risk_off_weights_opt)
+                weight_combinations.append({
+                    "weights": combo,
+                    "sharpe": sharpe
+                })
             
-            if sharpe > best_sharpe:
-                best_sharpe = sharpe
-                best_weights = combo
+                if sharpe > best_sharpe:
+                    best_sharpe = sharpe
+                    best_weights = combo
     
-    # Display results
-    if best_weights:
-        st.success(f"**Optimal Hybrid SIG Weights (Sharpe: {best_sharpe:.3f})**")
+        # Display results
+        if best_weights:
+            st.success(f"**Optimal Hybrid SIG Weights (Sharpe: {best_sharpe:.3f})**")
         
-        # Create a nice display
-        col1, col2, col3 = st.columns(3)
+            # Create a nice display
+            col1, col2, col3 = st.columns(3)
         
-        with col1:
-            st.metric("UGL", f"{best_weights.get('UGL', 0):.1%}")
-        with col2:
-            st.metric("BTC-USD", f"{best_weights.get('BTC-USD', 0):.1%}")
-        with col3:
-            st.metric("TQQQ", f"{best_weights.get('TQQQ', 0):.1%}")
+            with col1:
+                st.metric("UGL", f"{best_weights.get('UGL', 0):.1%}")
+            with col2:
+                st.metric("BTC-USD", f"{best_weights.get('BTC-USD', 0):.1%}")
+            with col3:
+                st.metric("TQQQ", f"{best_weights.get('TQQQ', 0):.1%}")
         
-        st.write("**Treasury Sleeve:** SHY = 100%")
+            st.write("**Treasury Sleeve:** SHY = 100%")
         
-        # Show comparison
-        st.write("**Comparison to current weights:**")
-        comp_data = {
-            "Asset": ["UGL", "BTC-USD", "TQQQ", "SHY"],
-            "Current": [
-                f"{risk_on_weights.get('UGL', 0):.1%}",
-                f"{risk_on_weights.get('BTC-USD', 0):.1%}",
-                f"{risk_on_weights.get('TQQQ', 0):.1%}",
-                "100%"
-            ],
-            "Optimal (Max Sharpe)": [
-                f"{best_weights.get('UGL', 0):.1%}",
-                f"{best_weights.get('BTC-USD', 0):.1%}",
-                f"{best_weights.get('TQQQ', 0):.1%}",
-                "100%"
-            ]
-        }
+            # Show comparison
+            st.write("**Comparison to current weights:**")
+            comp_data = {
+                "Asset": ["UGL", "BTC-USD", "TQQQ", "SHY"],
+                "Current": [
+                    f"{risk_on_weights.get('UGL', 0):.1%}",
+                    f"{risk_on_weights.get('BTC-USD', 0):.1%}",
+                    f"{risk_on_weights.get('TQQQ', 0):.1%}",
+                    "100%"
+                ],
+                "Optimal (Max Sharpe)": [
+                    f"{best_weights.get('UGL', 0):.1%}",
+                    f"{best_weights.get('BTC-USD', 0):.1%}",
+                    f"{best_weights.get('TQQQ', 0):.1%}",
+                    "100%"
+                ]
+            }
         
-        st.dataframe(pd.DataFrame(comp_data))
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+            st.dataframe(pd.DataFrame(comp_data))
     
 
     best_len, best_type, best_tol = best_cfg
