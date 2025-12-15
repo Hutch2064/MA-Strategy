@@ -657,7 +657,7 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
         'tolerance_sensitivity': pd.DataFrame(tol_results)
     }
 
-def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost, n_trials=150):
+def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost, n_trials=300):
     """
     Uses Optuna to find MA parameters with highest out-of-sample Sharpe ratio
     """
@@ -836,7 +836,7 @@ def main():
     
     # ADD THIS SECTION RIGHT BEFORE "Quarterly Portfolio Values"
     st.sidebar.header("Optimization Settings")
-    n_trials = st.sidebar.slider("Number of Optuna Trials", 150, 300, 150, 10)
+    n_trials = st.sidebar.slider("Number of Optuna Trials", 150, 300, 300, 10)
 
     st.sidebar.header("Quarterly Portfolio Values")
     qs_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=75815.26, step=100.0)
