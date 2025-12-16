@@ -17,8 +17,8 @@ DEFAULT_START_DATE = "2000-01-01"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "BTC-USD": .6,
-    "TQQQ": .4,
+    "BTC-USD": .5,
+    "FNGO": .5,
 }
 
 RISK_OFF_WEIGHTS = {
