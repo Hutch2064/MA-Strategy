@@ -140,9 +140,8 @@ def main():
     sig = generate_signal(idx, ma, tol)
 
     latest_signal = bool(sig.iloc[-1])
-    last_valid = ma.dropna().index[-1]
-    P  = idx.loc[last_valid]
-    MA = ma.loc[last_valid]
+    P  = idx.iloc[-1]
+    MA = ma.iloc[-1]
 
     # Gain required to flip back ON (only relevant if OFF)
     upper = MA * (1 + tol)
