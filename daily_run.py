@@ -1,24 +1,25 @@
+# ============================================================
+# DAILY HYBRID SIG RUN — CANONICAL VERSION
+# ============================================================
+
 import numpy as np
 import pandas as pd
 import yfinance as yf
 import optuna
-from scipy.optimize import minimize
 import datetime
-import os
-import ssl
 import smtplib
-from email.message import EmailMessage
+from email.mime.text import MIMEText
 
 # ============================================================
-# CONFIG — IDENTICAL TO MAIN
+# CONFIG (IDENTICAL)
 # ============================================================
 
 DEFAULT_START_DATE = "2000-01-01"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "BTC-USD": 0.50,
-    "FNGO": 0.50,
+    "BTC-USD": 0.5,
+    "FNGO": 0.5,
 }
 
 RISK_OFF_WEIGHTS = {
@@ -30,198 +31,201 @@ FLIP_COST = 0.00
 START_RISKY = 0.70
 START_SAFE  = 0.30
 
-OPTUNA_TRIALS = 300
-
 # ============================================================
-# DATA LOADING
+# DATA LOADING (IDENTICAL)
 # ============================================================
 
-def load_price_data(tickers, start_date, end_date=None):
-    data = yf.download(tickers, start=start_date, end=end_date, progress=False)
+def load_price_data(tickers, start_date):
+    data = yf.download(tickers, start=start_date, progress=False)
     px = data["Adj Close"] if "Adj Close" in data.columns else data["Close"]
     if isinstance(px, pd.Series):
         px = px.to_frame(name=tickers[0])
     return px.dropna(how="any")
 
 # ============================================================
-# PORTFOLIO INDEX (IDENTICAL)
+# BUILD PORTFOLIO INDEX (IDENTICAL)
 # ============================================================
 
 def build_portfolio_index(prices, weights):
     rets = prices.pct_change().fillna(0)
-    idx = pd.Series(0.0, index=rets.index)
+    out = pd.Series(0.0, index=rets.index)
     for a, w in weights.items():
         if a in rets.columns:
-            idx += rets[a] * w
-    return (1 + idx).cumprod()
+            out += rets[a] * w
+    return (1 + out).cumprod()
 
 # ============================================================
-# MA + SIGNAL (ROBUST VERSION)
+# MA + SIGNAL (IDENTICAL)
 # ============================================================
 
-def compute_ma_matrix(series, lengths):
-    return {L: series.rolling(L, min_periods=1).mean().shift(1) for L in lengths}
+def compute_ma_matrix(px, lengths):
+    return {L: px.rolling(L, min_periods=1).mean().shift(1) for L in lengths}
 
-def generate_testfol_signal(price, ma, tol):
-    px = price.values
-    ma = ma.values
+def generate_testfol_signal_vectorized(px, ma, tol):
     upper = ma * (1 + tol)
     lower = ma * (1 - tol)
-
     sig = np.zeros(len(px), dtype=bool)
-
     for i in range(1, len(px)):
         if not sig[i-1]:
-            sig[i] = px[i] > upper[i]
+            sig[i] = px.iloc[i] > upper.iloc[i]
         else:
-            sig[i] = not (px[i] < lower[i])
-
-    return pd.Series(sig, index=price.index)
-
-# ============================================================
-# BACKTEST (MA STRATEGY)
-# ============================================================
-
-def backtest(prices, signal):
-    rets = prices.pct_change().fillna(0)
-    weights = pd.DataFrame(0.0, index=prices.index, columns=prices.columns)
-
-    for a, w in RISK_ON_WEIGHTS.items():
-        weights.loc[signal, a] = w
-    for a, w in RISK_OFF_WEIGHTS.items():
-        weights.loc[~signal, a] = w
-
-    strat = (weights.shift(1).fillna(0) * rets).sum(axis=1)
-    flips = signal.astype(int).diff().abs() == 1
-    strat += np.where(flips, -FLIP_COST * 4.0, 0.0)
-
-    eq = (1 + strat).cumprod()
-
-    sharpe = strat.mean() / strat.std() * np.sqrt(252) if strat.std() > 0 else 0
-
-    return eq, strat, sharpe
+            sig[i] = not (px.iloc[i] < lower.iloc[i])
+    return pd.Series(sig, index=px.index)
 
 # ============================================================
-# OPTUNA OOS OPTIMIZATION (IDENTICAL LOGIC)
+# PERFORMANCE (IDENTICAL)
 # ============================================================
 
-def optuna_oos(prices):
-    TEST_DAYS = 252 * 3
-
-    train = prices.iloc[:-TEST_DAYS]
-    test  = prices.iloc[-TEST_DAYS:]
-
-    pi_train = build_portfolio_index(train, RISK_ON_WEIGHTS)
-    pi_test  = build_portfolio_index(test,  RISK_ON_WEIGHTS)
-
-    def objective(trial):
-        L = trial.suggest_int("L", 100, 252)
-        tol = trial.suggest_float("tol", 0.01, 0.03, step=0.0025)
-
-        ma_train = compute_ma_matrix(pi_train, [L])[L]
-        ma_test  = compute_ma_matrix(pi_test,  [L])[L]
-
-        sig_test = generate_testfol_signal(pi_test, ma_test, tol)
-        _, _, sharpe = backtest(test, sig_test)
-
-        return -sharpe
-
-    study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler(seed=42))
-    study.optimize(objective, n_trials=OPTUNA_TRIALS)
-
-    best_L = study.best_params["L"]
-    best_tol = study.best_params["tol"]
-
-    pi_full = build_portfolio_index(prices, RISK_ON_WEIGHTS)
-    ma_full = compute_ma_matrix(pi_full, [best_L])[best_L]
-    sig = generate_testfol_signal(pi_full, ma_full, best_tol)
-
-    eq, rets, sharpe = backtest(prices, sig)
-
-    return sig, best_L, best_tol, sharpe
-
-# ============================================================
-# TRUE CALENDAR QUARTERS
-# ============================================================
-
-def calendar_quarters(dates):
-    q_ends = pd.date_range(dates.min(), dates.max(), freq="Q")
-    return pd.to_datetime([dates[dates <= q].max() for q in q_ends])
-
-# ============================================================
-# DAILY ENGINE
-# ============================================================
-
-def run_daily_engine():
-
-    tickers = sorted(set(RISK_ON_WEIGHTS) | set(RISK_OFF_WEIGHTS))
-    prices = load_price_data(tickers, DEFAULT_START_DATE)
-
-    sig, L, tol, sharpe = optuna_oos(prices)
-
-    regime = "RISK-ON" if sig.iloc[-1] else "RISK-OFF"
-
-    q_ends = calendar_quarters(prices.index)
-
-    today = pd.Timestamp.today().normalize()
-    next_q = pd.date_range(start=today, periods=2, freq="Q")[0]
-    days_to_q = (next_q - today).days
-
+def compute_performance(returns, eq):
+    cagr = (eq.iloc[-1] / eq.iloc[0]) ** (252 / len(eq)) - 1
+    vol  = returns.std() * np.sqrt(252)
+    sharpe = returns.mean() * 252 / vol if vol > 0 else 0
+    dd = eq / eq.cummax() - 1
     return {
-        "regime": regime,
-        "L": L,
-        "tol": tol,
-        "sharpe": sharpe,
-        "next_q": next_q.date(),
-        "days": days_to_q,
+        "CAGR": cagr,
+        "Volatility": vol,
+        "Sharpe": sharpe,
+        "MaxDrawdown": dd.min(),
+        "TotalReturn": eq.iloc[-1] / eq.iloc[0] - 1,
+        "DD_Series": dd,
     }
 
 # ============================================================
-# EMAIL
+# SIG ENGINE (IDENTICAL)
 # ============================================================
 
-def build_email(o):
-    return f"""
-CURRENT REGIME
-{ o['regime'] }
+def run_sig_engine(
+    risk_on_returns,
+    risk_off_returns,
+    quarterly_target,
+    ma_signal,
+    pure_sig_rw=None,
+    pure_sig_sw=None,
+    quarter_end_dates=None,
+    quarterly_multiplier=2.0,
+    ma_flip_multiplier=4.0,
+):
 
-OPTIMIZED MA PARAMETERS
-Length: {o['L']}
-Tolerance: {o['tol']:.2%}
+    dates = risk_on_returns.index
+    eq = 10000.0
+    risky_val = eq * START_RISKY
+    safe_val  = eq * START_SAFE
 
-OUT-OF-SAMPLE SHARPE
-{o['sharpe']:.3f}
+    eq_curve = []
+    risky_w = []
+    safe_w  = []
 
-NEXT REBALANCE
-{o['next_q']}  ({o['days']} days)
+    sig = ma_signal.astype(int)
+    flip_mask = sig.diff().abs() == 1
+    q_set = set(quarter_end_dates)
 
-IMPLEMENTATION CHECKLIST
-- Rotate 100% to treasury sleeve on MA flip
-- Execute rebalance only on calendar quarter-end
-- Apply SIG gap mechanically
-- Re-evaluate Sharpe-optimal weights quarterly
+    frozen_r = frozen_s = None
 
-Dashboard:
-https://portofliostrategy.streamlit.app/
-"""
+    for i, d in enumerate(dates):
+        r_on  = risk_on_returns.iloc[i]
+        r_off = risk_off_returns.iloc[i]
+        ma_on = bool(ma_signal.iloc[i])
 
-def send_email(text):
-    msg = EmailMessage()
-    msg["Subject"] = "Daily Portfolio SIG Update"
-    msg["From"] = os.environ["EMAIL_USER"]
-    msg["To"] = os.environ["EMAIL_TO"]
-    msg.set_content(text)
+        if i > 0 and flip_mask.iloc[i]:
+            eq *= (1 - FLIP_COST * ma_flip_multiplier)
 
-    ctx = ssl.create_default_context()
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx) as s:
-        s.login(os.environ["EMAIL_USER"], os.environ["EMAIL_PASS"])
-        s.send_message(msg)
+        if ma_on:
+            if frozen_r is not None:
+                risky_val = eq * pure_sig_rw.iloc[i]
+                safe_val  = eq * pure_sig_sw.iloc[i]
+                frozen_r = frozen_s = None
+
+            risky_val *= (1 + r_on)
+            safe_val  *= (1 + r_off)
+
+            if d in q_set:
+                eq *= (1 - FLIP_COST * quarterly_multiplier)
+
+            eq = risky_val + safe_val
+            rw = risky_val / eq
+            sw = safe_val / eq
+        else:
+            if frozen_r is None:
+                frozen_r, frozen_s = risky_val, safe_val
+            eq *= (1 + r_off)
+            rw, sw = 0.0, 1.0
+
+        eq_curve.append(eq)
+        risky_w.append(rw)
+        safe_w.append(sw)
+
+    return (
+        pd.Series(eq_curve, index=dates),
+        pd.Series(risky_w, index=dates),
+        pd.Series(safe_w, index=dates),
+    )
 
 # ============================================================
-# RUN
+# OPTUNA — MA PARAMS ONLY (IDENTICAL OBJECTIVE)
 # ============================================================
+
+def optuna_ma_params(prices, n_trials=300):
+    idx = build_portfolio_index(prices, RISK_ON_WEIGHTS)
+    train, test = idx[:-756], idx[-756:]
+
+    def obj(trial):
+        L = trial.suggest_int("L", 100, 252)
+        tol = trial.suggest_float("tol", 0.01, 0.03)
+        ma = compute_ma_matrix(train, [L])[L]
+        sig = generate_testfol_signal_vectorized(train, ma, tol)
+        rets = train.pct_change().fillna(0)[sig]
+        return -rets.mean() / rets.std() if rets.std() > 0 else 1e9
+
+    study = optuna.create_study(direction="minimize")
+    study.optimize(obj, n_trials=n_trials)
+    return study.best_params["L"], study.best_params["tol"]
+
+# ============================================================
+# DAILY RUN
+# ============================================================
+
+def main():
+
+    tickers = list(RISK_ON_WEIGHTS) + list(RISK_OFF_WEIGHTS)
+    prices = load_price_data(tickers, DEFAULT_START_DATE)
+
+    # MA params
+    L, tol = optuna_ma_params(prices)
+
+    # MA signal
+    idx = build_portfolio_index(prices, RISK_ON_WEIGHTS)
+    ma = compute_ma_matrix(idx, [L])[L]
+    sig = generate_testfol_signal_vectorized(idx, ma, tol)
+
+    # Quarterly logic
+    q_ends = pd.date_range(prices.index.min(), prices.index.max(), freq="Q")
+    q_ends = [prices.index[prices.index <= q].max() for q in q_ends]
+
+    # Quarterly target
+    ron = sum(prices[a].pct_change().fillna(0) * w for a, w in RISK_ON_WEIGHTS.items())
+    roff = sum(prices[a].pct_change().fillna(0) * w for a, w in RISK_OFF_WEIGHTS.items())
+    bh_cagr = (1 + ron).prod() ** (252 / len(ron)) - 1
+    quarterly_target = (1 + bh_cagr) ** 0.25 - 1
+
+    # PURE SIG
+    pure_eq, pure_rw, pure_sw = run_sig_engine(
+        ron, roff, quarterly_target, pd.Series(True, index=sig.index),
+        quarter_end_dates=q_ends, ma_flip_multiplier=0.0
+    )
+
+    # HYBRID SIG (THIS IS THE PORTFOLIO)
+    hybrid_eq, hybrid_rw, hybrid_sw = run_sig_engine(
+        ron, roff, quarterly_target, sig,
+        pure_rw, pure_sw, q_ends
+    )
+
+    hybrid_returns = hybrid_eq.pct_change().fillna(0)
+    perf = compute_performance(hybrid_returns, hybrid_eq)
+
+    print("=== DAILY HYBRID SIG ===")
+    for k, v in perf.items():
+        if k != "DD_Series":
+            print(f"{k}: {v:.4f}")
 
 if __name__ == "__main__":
-    out = run_daily_engine()
-    email = build_email(out)
-    send_email(email)
+    main()
