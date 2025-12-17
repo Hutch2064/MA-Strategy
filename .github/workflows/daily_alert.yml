@@ -4,7 +4,7 @@ on:
   schedule:
     # Runs at 7 PM CST (01:00 UTC next day)
     - cron: "0 1 * * *"
-  workflow_dispatch:     # Allows manual runs
+  workflow_dispatch:
 
 jobs:
   run-strategy:
@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install --upgrade pip
-        pip install numpy pandas yfinance matplotlib scipy
+        pip install numpy pandas yfinance matplotlib scipy optuna
 
     - name: Run daily script
       env:
