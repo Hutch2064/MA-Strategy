@@ -101,7 +101,7 @@ def compute_ma(price_series, length, ma_type):
 # TESTFOL SIGNAL LOGIC - ROBUST VERSION
 # ============================================================
 
-def generate_testfol_signal_vectorized(price, ma, tol):
+def generate_testfol_signal_vectorized(price, ma, tol_series):
     px = price.values
     ma_vals = ma.values
     n = len(px)
@@ -110,8 +110,9 @@ def generate_testfol_signal_vectorized(price, ma, tol):
     if np.all(np.isnan(ma_vals)):
         return pd.Series(False, index=ma.index)
     
-    upper = ma_vals * (1 + tol)
-    lower = ma_vals * (1 - tol)
+    tol_vals = tol_series.values
+    upper = ma_vals * (1 + tol_vals)
+    lower = ma_vals * (1 - tol_vals)
     
     sig = np.zeros(n, dtype=bool)
     
@@ -448,6 +449,15 @@ def plot_diagnostics(hybrid_eq, bh_eq, hybrid_signal):
     plt.tight_layout()
     return fig
     
+def compute_expanding_volatility_tolerance(price_series, min_obs=60):
+    """
+    Computes an expanding (no look-ahead) estimate of daily volatility.
+    Uses only information available up to each point in time.
+    """
+    daily_rets = price_series.pct_change()
+    vol = daily_rets.expanding(min_periods=min_obs).std()
+    return vol.fillna(0.0)
+    
 # ============================================================
 # STREAMLIT APP
 # ============================================================
@@ -520,7 +530,11 @@ def main():
     st.info(f"Loaded {len(prices)} trading days of data from {prices.index[0].date()} to {prices.index[-1].date()}")
     
     # USE FIXED PARAMETERS INSTEAD OF OPTIMIZATION
-    best_len, best_type, best_tol = FIXED_MA_LENGTH, FIXED_MA_TYPE, FIXED_TOLERANCE
+    best_len  = FIXED_MA_LENGTH
+    best_type = FIXED_MA_TYPE
+
+    # Expanding volatility-based tolerance (no look-ahead)
+    tol_series = compute_expanding_volatility_tolerance(portfolio_index
     
     st.subheader("Fixed MA Parameters")
     st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
@@ -528,7 +542,7 @@ def main():
     # Generate signal with fixed parameters
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     opt_ma = compute_ma(portfolio_index, best_len, best_type)
-    sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, best_tol)
+    sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, tol_series)
     
     # Run backtest with fixed parameters
     best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=4.0)
