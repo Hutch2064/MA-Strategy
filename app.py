@@ -932,7 +932,7 @@ def main():
         else:
             best_len, best_type, best_tol = best_cfg
             sig = best_result["signal"]
-            perf = best_result["performance"]
+            
         
     except Exception as e:
         st.error(f"Optuna optimization failed: {str(e)}")
@@ -981,7 +981,7 @@ def main():
 
     # Get the signal and performance for display
     sig = best_result["signal"]
-    perf = best_result["performance"]
+    
     
 
     best_len, best_type, best_tol = best_cfg
@@ -1147,7 +1147,14 @@ def main():
         ma_flip_multiplier=4.0     # 4x when MA flips
     )
     
-    
+    # ============================================================
+    # CANONICAL STRATEGY PERFORMANCE — HYBRID SIG ONLY
+    # ============================================================
+    hybrid_simple = hybrid_eq.pct_change().fillna(0)
+    hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
+
+    # IMPORTANT: `perf` always means Hybrid SIG performance
+    perf = hybrid_perf
     # ============================================================
     # BUY & HOLD WITH QUARTERLY REBALANCE (1x flip costs)
     # ============================================================
@@ -1252,7 +1259,7 @@ def main():
 
     hybrid_simple = hybrid_eq.pct_change().fillna(0) if len(hybrid_eq) > 0 else pd.Series([], dtype=float)
     hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
-    perf = best_result["performance"]
+    
     
     pure_sig_simple = pure_sig_eq.pct_change().fillna(0) if len(pure_sig_eq) > 0 else pd.Series([], dtype=float)
     pure_sig_perf = compute_performance(pure_sig_simple, pure_sig_eq)
