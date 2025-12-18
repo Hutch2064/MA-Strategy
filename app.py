@@ -1066,7 +1066,7 @@ The strategy is designed to:
 - **Risk-Off (Treasury sleeve):**
   - 100% STRC
 
-**Sigma (Quarterly Target-Growth) Logic**
+**Sig (Quarterly Target-Growth) Logic**
 - When RISK-ON, the portfolio follows the Pure Sig rebalancing methodology:
   - Initial allocation: **70% Risk-On / 30% Risk-Off**
   - At each true calendar quarter-end:
