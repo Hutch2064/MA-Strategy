@@ -669,10 +669,14 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
         result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
                          flip_cost, ma_flip_multiplier=4.0)
         
+        in_sample_sharpe = result["performance"]["Sharpe"]
+
         return best_params, result, {
-            "method": "in_sample_fallback",
+            "method": "in_sample_only",
             "oos_available": False,
-            "reason": "Insufficient data for OOS optimization (need at least 2 years)"
+            "in_sample_sharpe": in_sample_sharpe,
+            "train_sharpe": in_sample_sharpe,
+            "reason": "Insufficient data for OOS optimization"
         }
     
     # ============================================================
