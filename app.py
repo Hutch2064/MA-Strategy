@@ -744,9 +744,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
         # Optimize for robustness, not peak
         return -(0.7 * avg_oos + 0.3 * worst_oos)
             
-            except Exception as e:
-                # Return a very bad score for failed trials
-                return 1e9
+           
     
     # Create and run Optuna study
     study = optuna.create_study(
