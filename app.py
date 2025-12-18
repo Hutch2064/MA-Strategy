@@ -1042,7 +1042,7 @@ Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=4AyOVH9iLlj
 ## **Portfolio Allocation & Implementation Notes**
 
 This system implements a dual-account portfolio framework built around
-a Moving Average (MA) regime filter combined with a quarterly Sigma
+a Moving Average (MA) regime filter combined with a quarterly signal
 (target-growth) rebalancing engine.
 
 The strategy is designed to:
@@ -1065,11 +1065,10 @@ The strategy is designed to:
   - 50% QQUP
   - 50% IBIT
 - **Risk-Off (Treasury sleeve):**
-  - 45% STRC
-  - 55% GLD
+  - 100% STRC
 
 **Sigma (Quarterly Target-Growth) Logic**
-- When RISK-ON, the portfolio follows a Sigma rebalancing process:
+- When RISK-ON, the portfolio follows the Pure Sig rebalancing methodology:
   - Initial allocation: **70% Risk-On / 30% Risk-Off**
   - At each true calendar quarter-end:
     - A target quarterly growth rate is derived from the long-run CAGR
@@ -1086,7 +1085,7 @@ The strategy is designed to:
   - Risk-On capital is frozen.
   - 100% of portfolio exposure is shifted to the Treasury sleeve.
 - Upon re-entering RISK-ON:
-  - The system resumes Sigma allocations using the last valid weights.
+  - The system resumes Pure Sig allocations using the last valid weights.
 
 **Leverage Rationale**
 - Backtesting indicates that **2× exposure via QQUP** provides meaningfully
@@ -1099,8 +1098,6 @@ The strategy is designed to:
 **Sharpe-Optimal References**
 - Risk-On: 50% QQUP / 50% IBIT  
   https://testfol.io/optimizer?s=jW78ayfue1r
-- Risk-Off: 55% GLD / 45% STRC  
-  https://testfol.io/optimizer?s=9noZ2EvLKf6
 
 ---
 
