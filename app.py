@@ -806,7 +806,7 @@ def main():
     )
 
     # STAT TABLE (updated with Buy & Hold with rebalance)
-    st.subheader("MA vs Sharpe-Optimal vs Buy & Hold (with rebalance) vs Sigma/MA vs SIG")
+    st.subheader("MA vs Sharpe vs Buy & Hold (with rebalance) vs Sigma/MA vs SIG")
     rows = [
         ("CAGR", "CAGR"),
         ("Volatility", "Volatility"),
@@ -847,7 +847,7 @@ def main():
         columns=[
             "Metric",
             "MA Strategy",
-            "Sharpe-Optimal",
+            "Sharpe",
             "Buy & Hold",
             "Sigma",
             "SIG",
@@ -907,7 +907,7 @@ def main():
             st.dataframe(add_pct(compute_allocations(cap, pure_r, pure_s, risk_on_weights, risk_off_weights)))
 
             if len(w_opt) > 0:
-                st.write(f"### {label} — Sharpe-Optimal")
+                st.write(f"### {label} — Sharpe")
                 st.dataframe(add_pct(compute_sharpe_alloc(cap, risk_on_px.columns, w_opt)))
 
             st.write(f"### {label} — MA Strategy")
@@ -994,7 +994,7 @@ def main():
         fig, ax = plt.subplots(figsize=(12, 6))
         ax.plot(strat_eq_norm, label="MA Strategy", linewidth=2)
         if len(sharp_eq_norm) > 0:
-            ax.plot(sharp_eq_norm, label="Sharpe-Optimal", linewidth=2, color="magenta")
+            ax.plot(sharp_eq_norm, label="Sharpe", linewidth=2, color="magenta")
         if len(risk_on_norm) > 0:
             ax.plot(risk_on_norm, label="Buy & Hold", alpha=0.65)
         if len(hybrid_eq_norm) > 0:
@@ -1035,7 +1035,7 @@ def main():
 - Rotate 100% of portfolio to treasury sleeve whenever the MA regime flips.
 - At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
 - Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
-- At each rebalance, re-evaluate the Sharpe-optimal portfolio weighting.
+- At each rebalance, re-evaluate the Sharpe portfolio weighting.
 
 Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=4AyOVH9iLlj
 
