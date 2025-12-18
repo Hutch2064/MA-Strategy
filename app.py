@@ -18,7 +18,7 @@ RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
     "BTC-USD": .5,
-    "FNGO": .5,
+    "TQQQ": .5,
 }
 
 RISK_OFF_WEIGHTS = {
