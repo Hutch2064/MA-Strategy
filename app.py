@@ -844,7 +844,7 @@ def main():
             "Metric",
             "MA Strategy",
             "Sharpe-Optimal",
-            "Buy & Hold (Static)",
+            "Buy & Hold",
             "Hybrid SIG",
             "Pure SIG",
         ],
