@@ -604,7 +604,7 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
     
     # Test different MA lengths (using MA Strategy backtest, not Hybrid SIG)
     length_results = []
-    for L in range(126,252,2):
+    for L in range(125,301,5):
         if L > len(portfolio_index) * 0.5:  # Don't use MA longer than 50% of data
             continue
             
@@ -916,7 +916,7 @@ def main():
             """Fallback optimization if Optuna fails"""
             portfolio_index = build_portfolio_index(prices, risk_on_weights)
             param_combinations = []
-            for L in range(126, 252, 2):
+            for L in range(125, 301, 5):
                 for ma_type in ["sma", "ema"]:
                     for tol in np.arange(0.01, 0.031, 0.0025):
                         param_combinations.append((L, ma_type, tol))
