@@ -539,7 +539,7 @@ def main():
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
     # Expanding volatility-based tolerance (no look-ahead)
     tol_series = compute_expanding_volatility_tolerance(portfolio_index)
-    tol_series = tol_series.clip(lower=0.005, upper=0.03)
+    tol_series = tol_series.clip(lower=0.00, upper=0.10)
 
     # Current tolerance for display & diagnostics
     best_tol = float(tol_series.iloc[-1])
