@@ -1036,7 +1036,7 @@ def main():
 - Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
 - At each rebalance, re-evaluate the Sharpe portfolio weighting.
 
-Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=4AyOVH9iLlj
+Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=a9xtQg7FUS9
 
 ## **Portfolio Allocation & Implementation Notes**
 
@@ -1096,7 +1096,7 @@ The strategy is designed to:
 
 **Sharpe-Optimal References**
 - Risk-On: 50% QQUP / 50% IBIT  
-  https://testfol.io/optimizer?s=jW78ayfue1r
+  https://testfol.io/optimizer?s=a9xtQg7FUS9
 
 ---
 
