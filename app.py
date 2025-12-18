@@ -674,13 +674,6 @@ def main():
 
     best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=4.0)
 
-    optimization_summary = {
-        'selected_params': best_cfg,
-        'method': 'fixed_params',
-        'oos_available': False,
-        'reason': 'Fixed MA parameters (SMA 200, 2% tolerance) — Optuna removed'
-    }
-
     # Get the signal and performance for display
     sig = best_result["signal"]
     
