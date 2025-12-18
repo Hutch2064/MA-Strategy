@@ -3,10 +3,8 @@ import pandas as pd
 import yfinance as yf
 import matplotlib.pyplot as plt
 import streamlit as st
-import io
-from scipy.optimize import minimize
 import datetime
-from statsmodels.tsa.stattools import adfuller
+from scipy.optimize import minimize
 
 # ============================================================
 # CONFIG
@@ -31,6 +29,10 @@ FLIP_COST = 0.0015
 START_RISKY = 0.70
 START_SAFE  = 0.30
 
+# FIXED PARAMETERS
+FIXED_MA_LENGTH = 200
+FIXED_MA_TYPE = "sma"  # or "ema" - you can choose which one to fix
+FIXED_TOLERANCE = 0.02  # 2%
 
 # ============================================================
 # DATA LOADING
@@ -86,17 +88,14 @@ def build_portfolio_index(prices, weights_dict):
 # MA MATRIX
 # ============================================================
 
-def compute_ma_matrix(price_series, lengths, ma_type):
-    ma_dict = {}
+def compute_ma(price_series, length, ma_type):
+    """Compute a single MA with fixed parameters"""
     if ma_type == "ema":
-        for L in lengths:
-            ma = price_series.ewm(span=L, adjust=False).mean()
-            ma_dict[L] = ma.shift(1)
+        ma = price_series.ewm(span=length, adjust=False).mean()
     else:
-        for L in lengths:
-            ma = price_series.rolling(window=L, min_periods=1).mean()
-            ma_dict[L] = ma.shift(1)
-    return ma_dict
+        ma = price_series.rolling(window=length, min_periods=1).mean()
+    
+    return ma.shift(1)
 
 
 # ============================================================
@@ -140,17 +139,6 @@ def generate_testfol_signal_vectorized(price, ma, tol):
             sig[t] = not (px[t] < lower[t])
     
     return pd.Series(sig, index=ma.index).fillna(False)
-
-
-# ============================================================
-# DATA-ADAPTIVE MA SELECTION (NEW)
-# ============================================================
-
-
-
-
-
-
 
 
 # ============================================================
@@ -427,248 +415,6 @@ def normalize(eq):
 
 
 # ============================================================
-# VALIDATION FUNCTIONS
-# ============================================================
-
-def calculate_max_dd(prices_series):
-    """Calculate maximum drawdown for a price series"""
-    if len(prices_series) == 0:
-        return 0
-    cumulative = (1 + prices_series.pct_change().fillna(0)).cumprod()
-    running_max = cumulative.cummax()
-    drawdown = (cumulative - running_max) / running_max
-    return drawdown.min() if len(drawdown) > 0 else 0
-
-def walk_forward_validation(prices, strategy_returns, window_years=3):
-    """
-    Simple walk-forward validation
-    """
-    results = []
-    total_days = len(prices)
-    
-    # Adaptive window based on available data
-    min_days_needed = 252  # At least 1 year
-    if total_days < min_days_needed * 2:  # Need at least 2x for train/test
-        return pd.DataFrame()  # Not enough data
-    
-    window_days = min(window_years * 252, total_days // 2)
-    
-    for start in range(0, total_days - window_days, 126):  # Slide every 6 months
-        train_end = start + window_days
-        test_end = min(train_end + 252, total_days)  # 1 year test or less
-        
-        if test_end - train_end < 63:  # Skip if test too short
-            continue
-            
-        train_data = prices.iloc[start:train_end]
-        test_data = prices.iloc[train_end:test_end]
-        
-        # Simple: just track how strategy performs out-of-sample
-        test_returns = strategy_returns.iloc[train_end:test_end]
-        
-        if len(test_returns) > 0 and test_returns.std() > 0:
-            test_sharpe = test_returns.mean() / test_returns.std() * np.sqrt(252)
-            test_cagr = (1 + test_returns).prod() ** (252/len(test_returns)) - 1
-            
-            results.append({
-                'train_period': f"{train_data.index[0].date()} to {train_data.index[-1].date()}",
-                'test_period': f"{test_data.index[0].date()} to {test_data.index[-1].date()}",
-                'test_sharpe': test_sharpe,
-                'test_cagr': test_cagr,
-                'test_length_days': len(test_returns)
-            })
-    
-    return pd.DataFrame(results)
-
-def calculate_consistency_metrics(strategy_returns):
-    """
-    Calculate hit ratio and other consistency metrics
-    """
-    if len(strategy_returns) == 0:
-        return {
-            'monthly_hit_ratio': 0,
-            'avg_win_pct': 0,
-            'avg_loss_pct': 0,
-            'win_loss_ratio': 0,
-            'max_consecutive_wins': 0,
-            'max_consecutive_losses': 0,
-            'avg_consecutive_wins': 0,
-            'avg_consecutive_losses': 0
-        }
-    
-    # Monthly hit ratio
-    monthly_returns = strategy_returns.resample('M').apply(lambda x: (1+x).prod()-1)
-    hit_ratio = (monthly_returns > 0).mean() if len(monthly_returns) > 0 else 0
-    
-    # Win/Loss metrics
-    wins = strategy_returns[strategy_returns > 0]
-    losses = strategy_returns[strategy_returns < 0]
-    
-    avg_win = wins.mean() if len(wins) > 0 else 0
-    avg_loss = losses.mean() if len(losses) > 0 else 0
-    win_loss_ratio = abs(avg_win / avg_loss) if avg_loss != 0 else 0
-    
-    return {
-        'monthly_hit_ratio': hit_ratio,
-        'avg_win_pct': avg_win,
-        'avg_loss_pct': avg_loss,
-        'win_loss_ratio': win_loss_ratio,
-        'max_consecutive_wins': 0,  # Simplified
-        'max_consecutive_losses': 0,
-        'avg_consecutive_wins': 0,
-        'avg_consecutive_losses': 0
-    }
-
-
-def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_off_weights, flip_cost):
-    """
-    Sensitivity analysis for MA Strategy (NOT Hybrid SIG - uses the same backtest as MA optimization)
-    """
-    # ============================================================
-    # STATIC BUY & HOLD BASELINE (ALWAYS RISK-ON, NO TIMING)
-    # ============================================================
-
-    simple = prices.pct_change().fillna(0)
-
-    bh_returns = pd.Series(0.0, index=simple.index)
-    for a, w in risk_on_weights.items():
-        if a in simple.columns:
-            bh_returns += simple[a] * w
-
-    bh_equity = (1 + bh_returns).cumprod()
-    bh_perf = compute_performance(bh_returns, bh_equity)
-    # MA signal is generated on a price-like index (not equity)
-    portfolio_index = build_portfolio_index(prices, risk_on_weights)
-
-    base_len, base_type, base_tol = base_params
-    
-    # Test different MA lengths (using MA Strategy backtest, not Hybrid SIG)
-    length_results = []
-    for L in range(125,301,5):
-        if L > len(portfolio_index) * 0.5:  # Don't use MA longer than 50% of data
-            continue
-            
-        ma = compute_ma_matrix(portfolio_index, [L], base_type)[L]
-        signal = generate_testfol_signal_vectorized(portfolio_index, ma, base_tol)
-        
-        # Use MA Strategy backtest (NOT Hybrid SIG!)
-        result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
-                         flip_cost, ma_flip_multiplier=4.0)
-        perf = result["performance"]
-        
-        length_results.append({
-            'length': L,
-            'sharpe': perf['Sharpe'],
-            'cagr': perf['CAGR'],
-            'max_dd': perf['MaxDrawdown'],
-            'switches': signal.astype(int).diff().abs().sum()
-        })
-    
-    # Test different tolerances
-    tol_results = []
-    ma = compute_ma_matrix(portfolio_index, [base_len], base_type)[base_len]
-    
-    for tol in np.arange(0.01, 0.051, 0.01):
-        signal = generate_testfol_signal_vectorized(portfolio_index, ma, tol)
-        
-        # Use MA Strategy backtest (NOT Hybrid SIG!)
-        result = backtest(prices, signal, risk_on_weights, risk_off_weights, 
-                         flip_cost, ma_flip_multiplier=4.0)
-        perf = result["performance"]
-        
-        tol_results.append({
-            'tolerance': tol,
-            'sharpe': perf['Sharpe'],
-            'cagr': perf['CAGR'],
-            'max_dd': perf['MaxDrawdown'],
-            'switches': signal.astype(int).diff().abs().sum()
-        })
-    
-    return {
-        'length_sensitivity': pd.DataFrame(length_results),
-        'tolerance_sensitivity': pd.DataFrame(tol_results)
-    }
-
-
-# ============================================================
-# 4-PANEL DIAGNOSTIC PERFORMANCE PLOT
-# ============================================================
-
-def plot_diagnostics(hybrid_eq, bh_eq, hybrid_signal):
-
-    hybrid_ret = hybrid_eq.pct_change().fillna(0)
-    bh_ret = bh_eq.pct_change().fillna(0)
-
-    hybrid_dd = hybrid_eq / hybrid_eq.cummax() - 1
-    bh_dd = bh_eq / bh_eq.cummax() - 1
-
-    window = 252
-    roll_sharpe_h = hybrid_ret.rolling(window).mean() / hybrid_ret.rolling(window).std() * np.sqrt(252)
-    roll_sharpe_b = bh_ret.rolling(window).mean() / bh_ret.rolling(window).std() * np.sqrt(252)
-
-    hybrid_m = hybrid_ret.resample("M").apply(lambda x: (1 + x).prod() - 1)
-    bh_m = bh_ret.resample("M").apply(lambda x: (1 + x).prod() - 1)
-
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
-
-    # --- Cumulative returns with regime shading ---
-    ax1.plot(hybrid_eq, label="Hybrid SIG", linewidth=2, color="green")
-    ax1.plot(bh_eq, label="Buy & Hold", linewidth=2, alpha=0.7)
-
-    in_off = False
-    start = None
-    for date, on in hybrid_signal.items():
-        if not on and not in_off:
-            start = date
-            in_off = True
-        elif on and in_off:
-            ax1.axvspan(start, date, color="red", alpha=0.15)
-            in_off = False
-    if in_off:
-        ax1.axvspan(start, hybrid_signal.index[-1], color="red", alpha=0.15)
-
-    ax1.set_title("Cumulative Returns with Regime Shading")
-    ax1.set_ylabel("Growth of $1")
-    ax1.legend()
-    ax1.grid(alpha=0.3)
-
-    # --- Drawdowns ---
-    ax2.plot(hybrid_dd * 100, label="Hybrid SIG", linewidth=1.5, color="green")
-    ax2.plot(bh_dd * 100, label="Buy & Hold", linewidth=1.5, alpha=0.7)
-    ax2.set_title("Drawdown Comparison (%)")
-    ax2.set_ylabel("Drawdown %")
-    ax2.legend()
-    ax2.grid(alpha=0.3)
-
-    # --- Rolling Sharpe ---
-    ax3.plot(roll_sharpe_h, label="Hybrid SIG", linewidth=1.5, color="green")
-    ax3.plot(roll_sharpe_b, label="Buy & Hold", linewidth=1.5, alpha=0.7)
-    ax3.axhline(0, color="black", linewidth=0.5)
-    ax3.set_title("Rolling 252-Day Sharpe Ratio")
-    ax3.legend()
-    ax3.grid(alpha=0.3)
-
-    # --- Monthly return distribution ---
-    bins = np.linspace(
-        min(hybrid_m.min(), bh_m.min()),
-        max(hybrid_m.max(), bh_m.max()),
-        20
-    )
-
-    ax4.hist(hybrid_m, bins=bins, alpha=0.7, density=True, label="Hybrid SIG")
-    ax4.hist(bh_m, bins=bins, alpha=0.5, density=True, label="Buy & Hold")
-    ax4.axvline(0, color="black", linestyle="--", linewidth=1)
-    ax4.set_title("Monthly Returns Distribution")
-    ax4.legend()
-    ax4.grid(alpha=0.3)
-
-    plt.tight_layout()
-    return fig
-
-
-
-
-# ============================================================
 # STREAMLIT APP
 # ============================================================
 
@@ -697,6 +443,8 @@ def main():
         "Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values())
     )
     
+    # REMOVED OPTIMIZATION SETTINGS
+    
     st.sidebar.header("Quarterly Portfolio Values")
     qs_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=75815.26, step=100.0)
     qs_cap_2 = st.sidebar.number_input("Tax-Sheltered – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=10074.83, step=100.0)
@@ -707,9 +455,11 @@ def main():
     real_cap_2 = st.sidebar.number_input("Tax-Sheltered – Portfolio Value Today ($)", min_value=0.0, value=8988.32, step=100.0)
     real_cap_3 = st.sidebar.number_input("Joint – Portfolio Value Today ($)", min_value=0.0, value=4064.94, step=100.0)
 
-    # Add validation toggle to sidebar
-    st.sidebar.header("Validation Settings")
-    run_validation = st.sidebar.checkbox("Run Data Validation", value=True)
+    # Add fixed parameters display
+    st.sidebar.header("Fixed Parameters")
+    st.sidebar.write(f"**MA Length:** {FIXED_MA_LENGTH}")
+    st.sidebar.write(f"**MA Type:** {FIXED_MA_TYPE.upper()}")
+    st.sidebar.write(f"**Tolerance:** {FIXED_TOLERANCE:.1%}")
 
     run_clicked = st.sidebar.button("Run Backtest")
     if not run_clicked:
@@ -734,66 +484,27 @@ def main():
         st.stop()
     
     st.info(f"Loaded {len(prices)} trading days of data from {prices.index[0].date()} to {prices.index[-1].date()}")
-
-    # ============================================================
-    # FIXED MA PARAMETERS (NO OPTUNA / NO OPTIMIZATION)
-    # ============================================================
-    best_cfg = (200, "sma", 0.02)
-    best_len, best_type, best_tol = best_cfg
-
+    
+    # USE FIXED PARAMETERS INSTEAD OF OPTIMIZATION
+    best_len, best_type, best_tol = FIXED_MA_LENGTH, FIXED_MA_TYPE, FIXED_TOLERANCE
+    
+    st.subheader("Fixed MA Parameters")
+    st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
+    
+    # Generate signal with fixed parameters
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
-    opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
+    opt_ma = compute_ma(portfolio_index, best_len, best_type)
     sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, best_tol)
-
+    
+    # Run backtest with fixed parameters
     best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=4.0)
-
-    optimization_summary = {
-        'selected_params': best_cfg,
-        'method': 'fixed_params',
-        'oos_available': False,
-        'reason': 'Fixed MA parameters (SMA 200, 2% tolerance) — Optuna removed'
-    }
-
-    # Get the signal and performance for display
-    sig = best_result["signal"]
     
-    
-
-    best_len, best_type, best_tol = best_cfg
-    sig = best_result["signal"]
-    perf = best_result["performance"]
-
     latest_signal = sig.iloc[-1]
     current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
 
     st.subheader(f"Current MA Regime: {current_regime}")
 
-    st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
-
-    if optimization_summary.get('oos_available', False):
-        st.success("✅ Parameters optimized for highest Out-of-Sample Sharpe")
-        st.write(f"**OOS Sharpe:** {optimization_summary.get('oos_sharpe', 0):.3f}")
-        st.write(f"**In-Sample Sharpe:** {optimization_summary.get('train_sharpe', 0):.3f}")
-        st.write(f"**Generalization Ratio:** {optimization_summary.get('generalization_ratio', 0):.2f}")
-    
-        # Add color-coded generalization assessment
-        gen_ratio = optimization_summary.get('generalization_ratio', 0)
-        if gen_ratio > 0.8:
-            st.success("✅ Excellent generalization (OOS > 80% of in-sample)")
-        elif gen_ratio > 0.5:
-            st.info("ℹ️ Good generalization (OOS 50-80% of in-sample)")
-        else:
-            st.warning("⚠️ Lower generalization (OOS < 50% of in-sample)")
-    
-        st.write(f"**Train/Test Split:** {optimization_summary.get('train_test_split', 'N/A')}")
-    else:
-        reason = optimization_summary.get('reason', 'Using fallback parameters')
-        st.warning(f"⚠️ {reason}")
-        if 'Insufficient data' in reason:
-            st.info(f"*For out-of-sample optimization, need at least 2 years of data*")
-
-    portfolio_index = build_portfolio_index(prices, risk_on_weights)
-    opt_ma = compute_ma_matrix(portfolio_index, [best_len], best_type)[best_len]
+    perf = best_result["performance"]
 
     switches = sig.astype(int).diff().abs().sum()
     trades_per_year = switches / (len(sig) / 252) if len(sig) > 0 else 0
@@ -1256,94 +967,13 @@ def main():
     else:
         st.write("No regime data available")
 
-    # ============================================================
-    # STRATEGY VALIDATION DASHBOARD
-    # ============================================================
-    
-    if run_validation:
-        st.header("🎯 Strategy Validation")
-        
-        # Create tabs for different validation tests
-        val_tab1, val_tab2, val_tab3, val_tab4 = st.tabs([
-            "Statistical Significance", 
-            "Out-of-Sample Performance",
-            "Parameter Sensitivity (MA Strategy)",  # Changed from "SIG Engine"
-            "Strategy Consistency"
-        ])
-        
-        with val_tab1:
-            st.subheader("Hybrid SIG vs Buy & Hold Analysis")
-            # (UNCHANGED — leaving your full tab as-is)
-            # ... your existing code continues here unchanged ...
-
-
-        with val_tab2:
-            st.subheader("Out-of-Sample Performance")
-            reason = optimization_summary.get('reason', 'Using fixed parameters')
-            st.info(f"Out-of-sample optimization was not performed: {reason}")
-            st.write("**Note:** Optuna optimization has been removed; MA parameters are fixed.")
-        
-        with val_tab3:
-            st.subheader("Parameter Sensitivity Analysis (MA Strategy)")  # Changed
-            
-            sens_results = sig_based_sensitivity_analysis(
-                prices, best_cfg, risk_on_weights, risk_off_weights, FLIP_COST
-            )
-            
-            if not sens_results['length_sensitivity'].empty and not sens_results['tolerance_sensitivity'].empty:
-                # Plot MA length sensitivity
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-                
-                ax1.plot(sens_results['length_sensitivity']['length'], 
-                        sens_results['length_sensitivity']['sharpe'], 
-                        marker='o', linewidth=2)
-                ax1.axvline(x=best_len, color='r', linestyle='--', label=f'Fixed ({best_len})')
-                ax1.set_title('Sharpe Ratio vs MA Length')
-                ax1.set_xlabel('MA Length (days)')
-                ax1.set_ylabel('Sharpe Ratio')
-                ax1.legend()
-                ax1.grid(alpha=0.3)
-                
-                # Plot tolerance sensitivity
-                ax2.plot(sens_results['tolerance_sensitivity']['tolerance'], 
-                        sens_results['tolerance_sensitivity']['sharpe'], 
-                        marker='o', linewidth=2)
-                ax2.axvline(x=best_tol, color='r', linestyle='--', label=f'Fixed ({best_tol:.2%})')
-                ax2.set_title('Sharpe Ratio vs Tolerance')
-                ax2.set_xlabel('Tolerance')
-                ax2.set_ylabel('Sharpe Ratio')
-                ax2.legend()
-                ax2.grid(alpha=0.3)
-                
-                st.pyplot(fig)
-                
-                # Calculate robustness scores
-                length_std = sens_results['length_sensitivity']['sharpe'].std()
-                length_range = sens_results['length_sensitivity']['sharpe'].max() - sens_results['length_sensitivity']['sharpe'].min()
-                
-                tol_std = sens_results['tolerance_sensitivity']['sharpe'].std()
-                tol_range = sens_results['tolerance_sensitivity']['sharpe'].max() - sens_results['tolerance_sensitivity']['sharpe'].min()
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("MA Length Robustness", f"{1 - (length_std/length_range if length_range > 0 else 0):.2%}")
-                with col2:
-                    st.metric("Tolerance Robustness", f"{1 - (tol_std/tol_range if tol_range > 0 else 0):.2%}")
-            else:
-                st.info("Insufficient data for parameter sensitivity analysis")
-        
-        with val_tab4:
-            st.subheader("Strategy Consistency Metrics")
-            # (UNCHANGED — leaving your tab as-is)
-            # ... your existing code continues here unchanged ...
-
     st.markdown("---")  # Separator before final plot
 
     # Final Performance Plot (updated with Buy & Hold with rebalance)
     st.subheader("Portfolio Strategy Performance Comparison")
 
     plot_index = build_portfolio_index(prices, risk_on_weights)
-    plot_ma = compute_ma_matrix(plot_index, [best_len], best_type)[best_len]
+    plot_ma = compute_ma(plot_index, best_len, best_type)
 
     plot_index_norm = normalize(plot_index)
     plot_ma_norm = normalize(plot_ma.dropna()) if len(plot_ma.dropna()) > 0 else pd.Series([], dtype=float)
@@ -1375,19 +1005,6 @@ def main():
         st.pyplot(fig)
     else:
         st.info("Insufficient data for performance plot")
-    # ============================================================
-    # DIAGNOSTIC PERFORMANCE PANELS
-    # ============================================================
-
-    st.subheader("Strategy Diagnostics")
-
-    diag_fig = plot_diagnostics(
-        hybrid_eq = hybrid_eq,
-        bh_eq     = bh_rebalance_result["equity_curve"],
-        hybrid_signal = sig
-    )
-
-    st.pyplot(diag_fig)
 
     # ============================================================
     # IMPLEMENTATION CHECKLIST (Displayed at Bottom)
