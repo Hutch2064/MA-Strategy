@@ -534,8 +534,6 @@ def main():
     best_len  = FIXED_MA_LENGTH
     best_type = FIXED_MA_TYPE
     
-    st.subheader("Fixed MA Parameters")
-    st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
     
     # Generate signal with fixed parameters
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
@@ -546,6 +544,7 @@ def main():
     # Current tolerance for display & diagnostics
     best_tol = float(tol_series.iloc[-1])
     st.sidebar.write(f"**Tolerance (Vol-Based):** {best_tol:.2%}")
+    st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
     opt_ma = compute_ma(portfolio_index, best_len, best_type)
     sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, tol_series)
     
