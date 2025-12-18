@@ -924,7 +924,7 @@ def main():
                     best_sharpe = sharpe
                     best_params = (L, ma_type, tol)
         
-            return best_params or (100, "sma", 0.02)
+            return best_params or (114, "sma", .0125)
     
         best_cfg = simple_optimization_fallback(prices, risk_on_weights, risk_off_weights, FLIP_COST)
         best_len, best_type, best_tol = best_cfg
