@@ -906,9 +906,6 @@ def main():
             st.write(f"### {label} — SIG")
             st.dataframe(add_pct(compute_allocations(cap, pure_r, pure_s, risk_on_weights, risk_off_weights)))
 
-            st.write(f"### {label} — 100% Risk-On Portfolio")
-            st.dataframe(add_pct(compute_allocations(cap, 1.0, 0.0, risk_on_weights, {"SHY": 0})))
-
             if len(w_opt) > 0:
                 st.write(f"### {label} — Sharpe-Optimal")
                 st.dataframe(add_pct(compute_sharpe_alloc(cap, risk_on_px.columns, w_opt)))
