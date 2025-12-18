@@ -800,7 +800,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
         "oos_windows_years": [w // 252 for w in OOS_WINDOWS],
         "train_sharpe": train_sharpe,
         "oos_sharpe": best_oos_sharpe,
-        "generalization_ratio": (best_oos_sharpe / train_sharpe if np.isfinite(train_sharpe) and train_sharpe != 0 else np.nan)
+        "generalization_ratio": (best_oos_sharpe / train_sharpe if np.isfinite(train_sharpe) and train_sharpe != 0 else np.nan),
         "oos_available": True,
         "n_trials": n_trials,
         "best_trial_number": study.best_trial.number
