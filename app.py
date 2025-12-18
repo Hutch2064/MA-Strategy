@@ -22,7 +22,7 @@ RISK_OFF_WEIGHTS = {
     "SHY": 1.0,
 }
 
-FLIP_COST = 0.0015
+FLIP_COST = 0.0005
 
 # Starting weights inside the SIG engine (unchanged)
 START_RISKY = 0.70
@@ -153,7 +153,7 @@ def run_sig_engine(
     pure_sig_sw=None,
     flip_cost=FLIP_COST,
     quarter_end_dates=None,   # <-- must be mapped_q_ends
-    quarterly_multiplier=2.0,  # NEW: 2x for SIG, 2x for Sigma (quarterly part)
+    quarterly_multiplier=4.0,  # NEW: 2x for SIG, 2x for Sigma (quarterly part)
     ma_flip_multiplier=4.0     # NEW: 4x for Sigma when MA flips
 ):
 
@@ -650,8 +650,8 @@ def main():
         quarterly_target,
         pure_sig_signal,
         quarter_end_dates=mapped_q_ends,
-        quarterly_multiplier=2.0,  # 2x for SIG
-        ma_flip_multiplier=0.0     # No MA flips for SIG
+        quarterly_multiplier=4.0,  # 2x for SIG
+        ma_flip_multiplier=4.0     # No MA flips for SIG
     )
 
     # Sigma (MA Filter) - 2x quarterly + 4x MA flips = 6x total
@@ -663,7 +663,7 @@ def main():
         pure_sig_rw=pure_sig_rw,
         pure_sig_sw=pure_sig_sw,
         quarter_end_dates=mapped_q_ends,
-        quarterly_multiplier=2.0,  # 2x quarterly part
+        quarterly_multiplier=4.0,  # 2x quarterly part
         ma_flip_multiplier=4.0     # 4x when MA flips
     )
     
