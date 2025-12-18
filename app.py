@@ -846,7 +846,7 @@ def main():
         table_data,
         columns=[
             "Metric",
-            "MA Strategy",
+            "MA",
             "Sharpe",
             "Buy & Hold",
             "Sigma",
@@ -910,7 +910,7 @@ def main():
                 st.write(f"### {label} — Sharpe")
                 st.dataframe(add_pct(compute_sharpe_alloc(cap, risk_on_px.columns, w_opt)))
 
-            st.write(f"### {label} — MA Strategy")
+            st.write(f"### {label} — MA")
             if latest_signal:
                 ma_alloc = compute_allocations(cap, 1.0, 0.0, risk_on_weights, {"SHY": 0})
             else:
@@ -992,7 +992,7 @@ def main():
 
     if len(strat_eq_norm) > 0:
         fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(strat_eq_norm, label="MA Strategy", linewidth=2)
+        ax.plot(strat_eq_norm, label="MA", linewidth=2)
         if len(sharp_eq_norm) > 0:
             ax.plot(sharp_eq_norm, label="Sharpe", linewidth=2, color="magenta")
         if len(risk_on_norm) > 0:
