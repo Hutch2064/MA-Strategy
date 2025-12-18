@@ -31,7 +31,7 @@ START_SAFE  = 0.30
 # FIXED PARAMETERS
 FIXED_MA_LENGTH = 200
 FIXED_MA_TYPE = "sma"  # or "ema" - you can choose which one to fix
-FIXED_TOLERANCE = 0.0  # 2%
+FIXED_TOLERANCE = 2.0  # 2%
 
 # ============================================================
 # DATA LOADING
