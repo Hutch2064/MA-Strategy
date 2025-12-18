@@ -916,9 +916,9 @@ def main():
             """Fallback optimization if Optuna fails"""
             portfolio_index = build_portfolio_index(prices, risk_on_weights)
             param_combinations = []
-            for L in range(64, 301, 2):
+            for L in range(126, 252, 2):
                 for ma_type in ["sma", "ema"]:
-                    for tol in np.arange(0.01, 0.051, 0.01):
+                    for tol in np.arange(0.01, 0.031, 0.0025):
                         param_combinations.append((L, ma_type, tol))
         
             best_sharpe = -1e9
