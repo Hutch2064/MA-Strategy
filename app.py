@@ -1252,7 +1252,8 @@ def main():
 
     hybrid_simple = hybrid_eq.pct_change().fillna(0) if len(hybrid_eq) > 0 else pd.Series([], dtype=float)
     hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
-
+    perf = hybrid_perf
+    
     pure_sig_simple = pure_sig_eq.pct_change().fillna(0) if len(pure_sig_eq) > 0 else pd.Series([], dtype=float)
     pure_sig_perf = compute_performance(pure_sig_simple, pure_sig_eq)
 
