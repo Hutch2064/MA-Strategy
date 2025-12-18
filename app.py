@@ -994,8 +994,8 @@ def main():
         ax.plot(strat_eq_norm, label="MA Strategy", linewidth=2)
         if len(sharp_eq_norm) > 0:
             ax.plot(sharp_eq_norm, label="Sharpe-Optimal", linewidth=2, color="magenta")
-        if len(bh_rebalance_norm) > 0:
-            ax.plot(risk_on_norm, label="Buy & Hold (No Rebalance)", alpha=0.65)
+        if len(risk_on_norm) > 0:
+            ax.plot(risk_on_norm, label="Buy & Hold", alpha=0.65)
         if len(hybrid_eq_norm) > 0:
             ax.plot(hybrid_eq_norm, label="Sigma", linewidth=2, color="blue")
         if len(pure_sig_norm) > 0:
