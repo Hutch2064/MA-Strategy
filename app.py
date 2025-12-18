@@ -730,6 +730,23 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
             sharpe = result["performance"]["Sharpe"]
             if np.isfinite(sharpe):
                 oos_sharpes.append(sharpe)
+                
+            # Compute in-sample Sharpe ONCE using the largest training window
+            if TEST_DAYS == max(OOS_WINDOWS):
+                train_signal = generate_testfol_signal_vectorized(
+                    portfolio_index_train, ma_train, tol
+                )
+
+                train_result = backtest(
+                    train_prices,
+                    train_signal,
+                    risk_on_weights,
+                    risk_off_weights,
+                    flip_cost,
+                    ma_flip_multiplier=4.0
+                )
+
+                train_sharpe = train_result["performance"]["Sharpe"]
 
         if len(oos_sharpes) == 0:
             return 1e6
