@@ -346,50 +346,6 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_fl
         "performance": compute_performance(strat_adj, eq),
         "flip_mask": flip_mask,
     }
-
-
-# ============================================================
-# BUY & HOLD ENGINE WITH QUARTERLY REBALANCE
-# ============================================================
-
-def buy_and_hold_with_rebalance(prices, weights_dict, flip_cost, quarter_end_dates):
-    """Buy & Hold with quarterly rebalancing to target weights (1x flip cost)"""
-    simple = prices.pct_change().fillna(0)
-    
-    # Initial investment
-    eq = 10000.0
-    equity_curve = [eq]
-    
-    # Fast lookup for quarter ends
-    quarter_end_set = set(quarter_end_dates)
-    
-    for i in range(1, len(prices)):
-        date = prices.index[i]
-        
-        # Calculate portfolio return for the day
-        daily_return = 0.0
-        for asset, weight in weights_dict.items():
-            if asset in simple.columns:
-                daily_return += simple.iloc[i][asset] * weight
-        
-        # Apply daily return
-        eq *= (1 + daily_return)
-        
-        # Apply quarterly rebalancing cost (1x flip cost)
-        if date in quarter_end_set:
-            eq *= (1 - flip_cost)
-        
-        equity_curve.append(eq)
-    
-    eq_series = pd.Series(equity_curve, index=prices.index)
-    returns = eq_series.pct_change().fillna(0)
-    
-    return {
-        "returns": returns,
-        "equity_curve": eq_series,
-        "performance": compute_performance(returns, eq_series)
-    }
-
 # ============================================================
 # QUARTERLY PROGRESS HELPER (unchanged)
 # ============================================================
@@ -716,21 +672,6 @@ def main():
 
     # IMPORTANT: `perf` always means Hybrid SIG performance
     perf = hybrid_perf
-    # ============================================================
-    # BUY & HOLD WITH QUARTERLY REBALANCE (1x flip costs)
-    # ============================================================
-    
-    # Combine risk_on and risk_off weights for Buy & Hold
-    bh_weights = risk_on_weights.copy()
-    bh_weights.update(risk_off_weights)
-    
-    # Run Buy & Hold with quarterly rebalance (1x flip costs)
-    bh_rebalance_result = buy_and_hold_with_rebalance(
-        prices, 
-        bh_weights, 
-        FLIP_COST, 
-        mapped_q_ends
-    )
     
     # ============================================================
     # DISPLAY ACTUAL HYBRID SIG REBALANCE DATES (FULL HISTORY)
@@ -859,15 +800,6 @@ def main():
         np.zeros(len(pure_sig_simple), dtype=bool) if len(pure_sig_simple) > 0 else np.array([], dtype=bool),
         0,
     )
-    
-    # Buy & Hold stats (with quarterly rebalance)
-    bh_stats = compute_stats(
-        bh_rebalance_result["performance"],
-        bh_rebalance_result["returns"],
-        bh_rebalance_result["performance"]["DD_Series"],
-        np.zeros(len(bh_rebalance_result["returns"]), dtype=bool) if len(bh_rebalance_result["returns"]) > 0 else np.array([], dtype=bool),
-        0,
-    )
 
     # STAT TABLE (updated with Buy & Hold with rebalance)
     st.subheader("MA vs Sharpe-Optimal vs Buy & Hold (with rebalance) vs Hybrid SIG/MA vs Pure SIG")
@@ -893,13 +825,12 @@ def main():
     for label, key in rows:
         sv = strat_stats.get(key, np.nan)
         sh = sharp_perf.get(key, np.nan)
-        bh = bh_stats.get(key, np.nan)
         rv = risk_stats.get(key, np.nan)
         hv = hybrid_stats.get(key, np.nan)
         ps = pure_sig_stats.get(key, np.nan)
 
         if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
-            row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(bh), fmt_pct(rv), fmt_pct(hv), fmt_pct(ps)]
+            row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(rv), fmt_pct(hv), fmt_pct(ps)]
         elif key in ["Sharpe", "MAR", "PainGain", "Skew", "Kurtosis"]:
             row = [label, fmt_dec(sv), fmt_dec(sh), fmt_dec(bh), fmt_dec(rv), fmt_dec(hv), fmt_dec(ps)]
         else:
@@ -913,7 +844,6 @@ def main():
             "Metric",
             "MA Strategy",
             "Sharpe-Optimal",
-            "Buy & Hold (Quarterly Rebalancing)",
             "Buy & Hold (Static)",
             "Hybrid SIG",
             "Pure SIG",
@@ -1058,7 +988,6 @@ def main():
     hybrid_eq_norm = normalize(hybrid_eq) if len(hybrid_eq) > 0 else pd.Series([], dtype=float)
     pure_sig_norm  = normalize(pure_sig_eq) if len(pure_sig_eq) > 0 else pd.Series([], dtype=float)
     risk_on_norm   = normalize(risk_on_eq) if len(risk_on_eq) > 0 else pd.Series([], dtype=float)
-    bh_rebalance_norm = normalize(bh_rebalance_result["equity_curve"]) if len(bh_rebalance_result["equity_curve"]) > 0 else pd.Series([], dtype=float)
 
     if len(strat_eq_norm) > 0:
         fig, ax = plt.subplots(figsize=(12, 6))
@@ -1066,8 +995,7 @@ def main():
         if len(sharp_eq_norm) > 0:
             ax.plot(sharp_eq_norm, label="Sharpe-Optimal", linewidth=2, color="magenta")
         if len(bh_rebalance_norm) > 0:
-            ax.plot(bh_rebalance_norm, label="Buy & Hold (Rebalanced)", linewidth=2, color="purple", linestyle=":")
-        ax.plot(risk_on_norm, label="Buy & Hold (No Rebalance)", alpha=0.65)
+            ax.plot(risk_on_norm, label="Buy & Hold (No Rebalance)", alpha=0.65)
         if len(hybrid_eq_norm) > 0:
             ax.plot(hybrid_eq_norm, label="Hybrid SIG", linewidth=2, color="blue")
         if len(pure_sig_norm) > 0:
@@ -1089,7 +1017,7 @@ def main():
 
     diag_fig = plot_diagnostics(
         hybrid_eq = hybrid_eq,
-        bh_eq     = bh_rebalance_result["equity_curve"],
+        bh_eq     = risk_on_eq,
         hybrid_signal = sig
     )
 
