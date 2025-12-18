@@ -604,7 +604,7 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
     
     # Test different MA lengths (using MA Strategy backtest, not Hybrid SIG)
     length_results = []
-    for L in range(64,301,2):
+    for L in range(126,252,2):
         if L > len(portfolio_index) * 0.5:  # Don't use MA longer than 50% of data
             continue
             
@@ -658,8 +658,11 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     min_days_needed = 504  # At least 2 years
     
     if total_days < min_days_needed:
-        # Not enough data for proper OOS
-        best_params = (114, "sma", 0.0125)
+        adaptive_L = int(min(200, total_days * 0.33))
+        adaptive_L = max(adaptive_L, 100)
+
+        best_params = (adaptive_L, "sma", 0.02)
+        
         portfolio_index = build_portfolio_index(prices, risk_on_weights)
         ma = compute_ma_matrix(portfolio_index, [best_params[0]], best_params[1])[best_params[0]]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, best_params[2])
@@ -673,16 +676,20 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
         }
     
     # ============================================================
-    # FIXED OUT-OF-SAMPLE SPLIT (ACADEMICALLY DEFENSIBLE)
+    # MULTI-WINDOW OUT-OF-SAMPLE SPLITS (ROBUST)
     # ============================================================
 
-    TEST_DAYS = 252 * 3  # 2 years out-of-sample
+    # Candidate OOS windows (in trading days)
+    CANDIDATE_OOS_WINDOWS = [252 * 3, 252 * 5, 252 * 7]
 
-    if total_days <= TEST_DAYS:
-        raise ValueError("Not enough data for fixed OOS window")
+    # Only keep windows that fit the available data
+    OOS_WINDOWS = [
+        w for w in CANDIDATE_OOS_WINDOWS
+        if total_days > w + 252  # require at least 1 year of training
+    ]
 
-    train_prices = prices.iloc[:-TEST_DAYS]
-    test_prices  = prices.iloc[-TEST_DAYS:]
+    if len(OOS_WINDOWS) == 0:
+        raise ValueError("Not enough data for any OOS window")
 
     split_idx = len(train_prices)  # keep for reporting
     
@@ -691,45 +698,55 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     portfolio_index_test = build_portfolio_index(test_prices, risk_on_weights)
     
     def objective(trial):
-        """Objective function for Optuna - maximizes OOS Sharpe"""
-        # Suggest parameters
-        L = trial.suggest_int('ma_length', 126, 252, step=1)  # Wider range than before
+        L = trial.suggest_int('ma_length', 150, 300, step=5)
         ma_type = 'sma'
         tol = trial.suggest_float('tolerance', 0.01, 0.03, step=0.0025)
-        
-        try:
-            # Generate MA on training data
+
+        oos_sharpes = []
+
+        for TEST_DAYS in OOS_WINDOWS:
+            train_prices = prices.iloc[:-TEST_DAYS]
+            test_prices  = prices.iloc[-TEST_DAYS:]
+
+            portfolio_index_train = build_portfolio_index(train_prices, risk_on_weights)
+            portfolio_index_test  = build_portfolio_index(test_prices, risk_on_weights)
+
+            # Guard: MA cannot exceed data
+            if L > len(portfolio_index_train) * 0.5:
+                continue
+
             ma_train = compute_ma_matrix(portfolio_index_train, [L], ma_type)[L]
+            ma_test  = compute_ma_matrix(portfolio_index_test,  [L], ma_type)[L]
+
+            signal_test = generate_testfol_signal_vectorized(
+                portfolio_index_test, ma_test, tol
+            )
+
+            result = backtest(
+                test_prices,
+                signal_test,
+                risk_on_weights,
+                risk_off_weights,
+                flip_cost,
+                ma_flip_multiplier=4.0
+            )
+
+            sharpe = result["performance"]["Sharpe"]
+            if np.isfinite(sharpe):
+                oos_sharpes.append(sharpe)
+
+        if len(oos_sharpes) == 0:
+            return 1e6
+
+        avg_oos   = np.mean(oos_sharpes)
+        worst_oos = np.min(oos_sharpes)
+
+        # Optimize for robustness, not peak
+        return -(0.7 * avg_oos + 0.3 * worst_oos)
             
-            # Apply SAME parameters to test data (OOS)
-            ma_test = compute_ma_matrix(portfolio_index_test, [L], ma_type)[L]
-            
-            # Generate signals
-            signal_test = generate_testfol_signal_vectorized(portfolio_index_test, ma_test, tol)
-            
-            # Backtest on TEST data only (this is what we optimize for)
-            test_result = backtest(test_prices, signal_test, risk_on_weights, 
-                                 risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
-            
-            oos_sharpe = test_result["performance"]["Sharpe"]
-            
-            # Also calculate in-sample for reference
-            signal_train = generate_testfol_signal_vectorized(portfolio_index_train, ma_train, tol)
-            train_result = backtest(train_prices, signal_train, risk_on_weights,
-                                  risk_off_weights, flip_cost, ma_flip_multiplier=4.0)
-            train_sharpe = train_result["performance"]["Sharpe"]
-            
-            # Store additional metrics
-            trial.set_user_attr('train_sharpe', train_sharpe)
-            trial.set_user_attr('train_cagr', train_result["performance"]["CAGR"])
-            trial.set_user_attr('oos_cagr', test_result["performance"]["CAGR"])
-            
-            # Return NEGATIVE Sharpe (Optuna minimizes)
-            return -oos_sharpe
-            
-        except Exception as e:
-            # Return a very bad score for failed trials
-            return 1e9
+            except Exception as e:
+                # Return a very bad score for failed trials
+                return 1e9
     
     # Create and run Optuna study
     study = optuna.create_study(
