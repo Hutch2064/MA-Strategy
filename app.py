@@ -694,7 +694,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     split_idx = total_days - min(OOS_WINDOWS)  # keep for reporting
     
     def objective(trial):
-        L = trial.suggest_int('ma_length', 150, 300, step=5)
+        L = trial.suggest_int('ma_length', 126, 301, step=5)
         ma_type = 'sma'
         tol = trial.suggest_float('tolerance', 0.01, 0.03, step=0.0025)
 
