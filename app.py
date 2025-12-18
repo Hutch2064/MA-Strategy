@@ -704,7 +704,6 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
 
         oos_sharpes = []
         
-        train_sharpe = np.nan  # initialize to avoid unbound local error
 
         for TEST_DAYS in OOS_WINDOWS:
             train_prices = prices.iloc[:-TEST_DAYS]
@@ -737,22 +736,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
             if np.isfinite(sharpe):
                 oos_sharpes.append(sharpe)
                 
-            # Compute in-sample Sharpe ONCE using the largest training window
-            if TEST_DAYS == max(OOS_WINDOWS):
-                train_signal = generate_testfol_signal_vectorized(
-                    portfolio_index_train, ma_train, tol
-                )
-
-                train_result = backtest(
-                    train_prices,
-                    train_signal,
-                    risk_on_weights,
-                    risk_off_weights,
-                    flip_cost,
-                    ma_flip_multiplier=4.0
-                )
-
-                train_sharpe = train_result["performance"]["Sharpe"]
+            
 
         if len(oos_sharpes) == 0:
             return 1e6
@@ -760,7 +744,6 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
         avg_oos   = np.mean(oos_sharpes)
         worst_oos = np.min(oos_sharpes)
         
-        trial.set_user_attr("train_sharpe", train_sharpe)
 
         # Optimize for robustness, not peak
         return -(0.7 * avg_oos + 0.3 * worst_oos)
@@ -783,6 +766,38 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
         'sma',  # hard-coded
         study.best_params['tolerance']
     )
+    
+    # ============================================================
+    # FINAL IN-SAMPLE SHARPE (computed cleanly, once)
+    # ============================================================
+
+    max_test_days = max(OOS_WINDOWS)
+    train_prices = prices.iloc[:-max_test_days]
+
+    portfolio_index_train = build_portfolio_index(train_prices, risk_on_weights)
+
+    ma_train = compute_ma_matrix(
+        portfolio_index_train,
+        [best_params[0]],
+        best_params[1]
+    )[best_params[0]]
+
+    train_signal = generate_testfol_signal_vectorized(
+        portfolio_index_train,
+        ma_train,
+        best_params[2]
+    )
+
+    train_result = backtest(
+        train_prices,
+        train_signal,
+        risk_on_weights,
+        risk_off_weights,
+        flip_cost,
+        ma_flip_multiplier=4.0
+    )
+
+    train_sharpe = train_result["performance"]["Sharpe"]
     
     # Generate FINAL signal using FULL dataset with best parameters
     portfolio_index_full = build_portfolio_index(prices, risk_on_weights)
