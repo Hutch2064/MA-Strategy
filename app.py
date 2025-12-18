@@ -707,6 +707,10 @@ def main():
     real_cap_2 = st.sidebar.number_input("Tax-Sheltered – Portfolio Value Today ($)", min_value=0.0, value=8988.32, step=100.0)
     real_cap_3 = st.sidebar.number_input("Joint – Portfolio Value Today ($)", min_value=0.0, value=4064.94, step=100.0)
 
+    # Add validation toggle to sidebar
+    st.sidebar.header("Validation Settings")
+    run_validation = st.sidebar.checkbox("Run Data Validation", value=True)
+
     run_clicked = st.sidebar.button("Run Backtest")
     if not run_clicked:
         st.stop()
@@ -1256,7 +1260,7 @@ def main():
     # STRATEGY VALIDATION DASHBOARD
     # ============================================================
     
-    
+    if run_validation:
         st.header("🎯 Strategy Validation")
         
         # Create tabs for different validation tests
@@ -1274,7 +1278,10 @@ def main():
 
 
         with val_tab2:
-            
+            st.subheader("Out-of-Sample Performance")
+            reason = optimization_summary.get('reason', 'Using fixed parameters')
+            st.info(f"Out-of-sample optimization was not performed: {reason}")
+            st.write("**Note:** Optuna optimization has been removed; MA parameters are fixed.")
         
         with val_tab3:
             st.subheader("Parameter Sensitivity Analysis (MA Strategy)")  # Changed
