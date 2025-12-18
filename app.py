@@ -691,7 +691,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     if len(OOS_WINDOWS) == 0:
         raise ValueError("Not enough data for any OOS window")
 
-    split_idx = len(train_prices)  # keep for reporting
+    split_idx = total_days - min(OOS_WINDOWS)  # keep for reporting
     
     # Build portfolio indices for both sets
     portfolio_index_train = build_portfolio_index(train_prices, risk_on_weights)
