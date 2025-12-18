@@ -795,10 +795,12 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     
     return best_params, final_result, {
         "method": "optuna_oos_optimization",
-        "train_test_split": f"Train: {split_idx} days | Test: {total_days - split_idx} days",
+        "train_test_split": f"Train: {split_idx} days | Test (min): {min(OOS_WINDOWS)} days",
+        "oos_windows_days": OOS_WINDOWS,
+        "oos_windows_years": [w // 252 for w in OOS_WINDOWS],
         "train_sharpe": train_sharpe,
         "oos_sharpe": best_oos_sharpe,
-        "generalization_ratio": best_oos_sharpe / train_sharpe if train_sharpe != 0 else 0,
+        "generalization_ratio": best_oos_sharpe / train_sharpe if train_sharpe not in [0, np.nan] else np.nan,
         "oos_available": True,
         "n_trials": n_trials,
         "best_trial_number": study.best_trial.number
