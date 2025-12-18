@@ -1029,7 +1029,123 @@ def main():
     # ============================================================
     st.markdown("""
 ---
+    # ============================================================
+    # PORTFOLIO ALLOCATION & IMPLEMENTATION NOTES
+    # ============================================================
+    """
+    This system implements a dual-account portfolio framework built around
+    a Moving Average (MA) regime filter combined with a quarterly Sigma
+    (target-growth) rebalancing engine.
 
+    The strategy is designed to:
+    1) Concentrate risk during favorable regimes,
+    2) Systematically de-risk during adverse regimes,
+    3) Enforce disciplined quarterly capital deployment,
+    4) Preserve asymmetry while maintaining long-term solvency.
+
+    #------------------------------------------------------------
+    # TAXABLE & JOINT ACCOUNTS — SIGMA STRATEGY
+    #------------------------------------------------------------
+
+    Regime Filter:
+    - A fixed moving average (MA) is applied to the risk-on portfolio index.
+    - When price is ABOVE the MA → RISK-ON regime.
+    - When price is BELOW the MA → RISK-OFF regime.
+
+    Base Allocations:
+    - RISK-ON (Buy & Hold overlay):
+        • 50% QQUP
+        • 50% IBIT
+    - RISK-OFF (Treasury sleeve):
+        • 45% STRC
+        • 55% GLD
+
+    Sigma (Quarterly Target-Growth) Logic:
+    - When RISK-ON, the portfolio follows a Sigma rebalancing process:
+        • Initial allocation: 70% Risk-On / 30% Risk-Off
+        • At each calendar quarter-end:
+            - A target quarterly growth rate is derived from the long-run
+              CAGR of the Risk-On portfolio.
+            - If Risk-On capital exceeds the target:
+                → Excess is trimmed and moved to Risk-Off.
+            - If Risk-On capital falls short of the target:
+                → Capital is transferred from Risk-Off to Risk-On (subject to availability).
+    - Rebalancing is strictly calendar-quarter based (true quarter-ends),
+      not rolling or price-dependent.
+
+    Risk-Off Behavior:
+    - Upon entering a RISK-OFF regime:
+        • Risk-On capital is frozen.
+        • 100% of portfolio exposure is shifted to the Treasury sleeve.
+    - Upon re-entering RISK-ON:
+        • The system resumes Sigma allocations using the last valid weights.
+
+    Leverage Rationale:
+    - Backtesting indicates that 2x exposure via QQUP provides meaningfully
+      higher growth with comparable Sharpe relative to 1x exposure.
+    - 3x exposure is avoided due to product availability and inferior
+      long-term CAGR characteristics (e.g., TQQQ).
+    - Objective: maximize upside asymmetry while remaining solvent across
+      extended drawdown regimes.
+
+    Sharpe-Optimal Risk-On Reference:
+    - 50% QQUP / 50% IBIT
+    - Source: https://testfol.io/optimizer?s=jW78ayfue1r
+
+    Sharpe-Optimal Risk-Off Reference:
+    - 55% GLD / 45% STRC
+    - Source: https://testfol.io/optimizer?s=9noZ2EvLKf6
+
+    #------------------------------------------------------------
+    ROTH IRA — MODIFIED RISK-ON (BUY & HOLD)
+    #------------------------------------------------------------
+
+    The Roth IRA is treated as a permanent risk-on vehicle with no MA-based
+    de-risking, prioritizing long-term asymmetric growth and tax efficiency.
+
+    Core Allocation (50% total):
+    - 25% QQUP
+    - 25% IBIT
+    (Represents the Sharpe-optimal risk-on foundation.)
+
+    Asymmetric Growth Sleeve (50% total):
+
+    Bitcoin Treasury Companies:
+    - Equal-weighted exposure to "pure-play" Bitcoin treasury firms:
+        • MSTR (Strategy)
+        • XXI (Twenty One Capital)
+        • ASST (Strive)
+    - Each position weighted at ~8.33%.
+    - These equities provide leveraged Bitcoin exposure with an embedded
+      equity risk premium, historically producing higher Sharpe ratios than
+      direct leveraged Bitcoin ETFs.
+    - Additional treasury companies may be added as new listings emerge.
+
+    Equities (Private Market Exposure):
+    - 25% allocation to DXYZ (Destiny Tech 100).
+    - Provides access to late-stage private companies (e.g., OpenAI,
+      SpaceX, Stripe) and pre-IPO growth not available in public indices.
+
+    Overall Roth Allocation:
+    - 25% QQUP
+    - 25% IBIT
+    - 25% DXYZ
+    - ~8.33% each to Bitcoin treasury equities
+
+    This structure ensures:
+    - 50% of the portfolio remains in a Sharpe-optimal risk-on base.
+    - 50% targets convex, asymmetric exposure to equities and Bitcoin.
+
+    #------------------------------------------------------------
+    # IMPORTANT NOTES
+    #------------------------------------------------------------
+    - This system is rules-based and non-discretionary.
+    - All rebalances are executed only at true calendar quarter-ends.
+    - MA parameters and tolerances are fixed to avoid overfitting.
+    - The objective is not short-term optimization, but long-horizon
+      robustness, asymmetry, and behavioral discipline.
+    ""
+    
 ## **Implementation Checklist**
 
 - Rotate 100% of portfolio to treasury sleeve whenever the MA regime flips.
