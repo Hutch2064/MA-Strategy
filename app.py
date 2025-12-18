@@ -1027,7 +1027,7 @@ def main():
     # ============================================================
     # IMPLEMENTATION CHECKLIST (Displayed at Bottom)
     # ============================================================
-        st.markdown("""
+    st.markdown("""
 ---
 
 ## **Implementation Checklist**
@@ -1040,7 +1040,7 @@ def main():
 Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=4AyOVH9iLlj
 
 ---
-    """)
+""")
 
 # ============================================================
 # PORTFOLIO ALLOCATION & IMPLEMENTATION NOTES
