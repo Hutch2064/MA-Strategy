@@ -932,7 +932,7 @@ def main():
         else:
             best_len, best_type, best_tol = best_cfg
             sig = best_result["signal"]
-            perf = hybrid_perf
+            perf = best_result["performance"]
         
     except Exception as e:
         st.error(f"Optuna optimization failed: {str(e)}")
@@ -981,12 +981,12 @@ def main():
 
     # Get the signal and performance for display
     sig = best_result["signal"]
-    perf = hybrid_perf
+    perf = best_result["performance"]
     
 
     best_len, best_type, best_tol = best_cfg
     sig = best_result["signal"]
-    perf = hybrid_perf
+    perf = best_result["performance"]
 
     latest_signal = sig.iloc[-1]
     current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
@@ -1252,7 +1252,7 @@ def main():
 
     hybrid_simple = hybrid_eq.pct_change().fillna(0) if len(hybrid_eq) > 0 else pd.Series([], dtype=float)
     hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
-    perf = hybrid_perf
+    perf = best_result["performance"]
     
     pure_sig_simple = pure_sig_eq.pct_change().fillna(0) if len(pure_sig_eq) > 0 else pd.Series([], dtype=float)
     pure_sig_perf = compute_performance(pure_sig_simple, pure_sig_eq)
@@ -1757,7 +1757,7 @@ def main():
                     st.metric("Optuna Trials", f"{optimization_summary.get('n_trials', 0)}")
         
                 # Compare with in-sample
-                in_sample_perf = perf = hybrid_perf
+                in_sample_perf = perf = best_result["performance"]
                 comparison = pd.DataFrame({
                     'In-Sample': [
                         in_sample_perf.get('Sharpe', 0),
