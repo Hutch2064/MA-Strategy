@@ -659,7 +659,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     
     if total_days < min_days_needed:
         # Not enough data for proper OOS
-        best_params = (100, "sma", 0.02)
+        best_params = (114, "sma", 0.0125)
         portfolio_index = build_portfolio_index(prices, risk_on_weights)
         ma = compute_ma_matrix(portfolio_index, [best_params[0]], best_params[1])[best_params[0]]
         signal = generate_testfol_signal_vectorized(portfolio_index, ma, best_params[2])
