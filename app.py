@@ -154,8 +154,8 @@ def run_sig_engine(
     pure_sig_sw=None,
     flip_cost=FLIP_COST,
     quarter_end_dates=None,   # <-- must be mapped_q_ends
-    quarterly_multiplier=2.0,  # NEW: 2x for Pure SIG, 2x for Hybrid SIG (quarterly part)
-    ma_flip_multiplier=4.0     # NEW: 4x for Hybrid SIG when MA flips
+    quarterly_multiplier=2.0,  # NEW: 2x for Pure SIG, 2x for Sigma (quarterly part)
+    ma_flip_multiplier=4.0     # NEW: 4x for Sigma when MA flips
 ):
 
     dates = risk_on_returns.index
@@ -197,7 +197,7 @@ def run_sig_engine(
         # FIX: Apply MA flip costs BEFORE checking regime
         # ============================================
         if i > 0 and flip_mask.iloc[i]:  # Skip first day (no diff)
-            eq *= (1 - flip_cost * ma_flip_multiplier)  # 4x cost for Hybrid SIG
+            eq *= (1 - flip_cost * ma_flip_multiplier)  # 4x cost for Sigma
         # ============================================
 
         if ma_on:
@@ -246,7 +246,7 @@ def run_sig_engine(
                         risky_val += move
                         rebalance_dates.append(date)
 
-                    # Apply quarterly fee with multiplier (2x for Pure SIG, 2x for Hybrid SIG quarterly part)
+                    # Apply quarterly fee with multiplier (2x for Pure SIG, 2x for Sigma quarterly part)
                     eq *= (1 - flip_cost * quarterly_multiplier)  # Remove target_quarter!
 
             # Update equity
@@ -392,7 +392,7 @@ def plot_diagnostics(hybrid_eq, bh_eq, hybrid_signal):
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
 
     # === Panel 1: Cumulative returns + regime shading ===
-    ax1.plot(hybrid_eq, label="Hybrid SIG", linewidth=2, color="green")
+    ax1.plot(hybrid_eq, label="Sigma", linewidth=2, color="green")
     ax1.plot(bh_eq, label="Buy & Hold", linewidth=2, alpha=0.7)
 
     in_off = False
@@ -413,7 +413,7 @@ def plot_diagnostics(hybrid_eq, bh_eq, hybrid_signal):
     ax1.grid(alpha=0.3)
 
     # === Panel 2: Drawdowns ===
-    ax2.plot(hybrid_dd * 100, label="Hybrid SIG", linewidth=1.5, color="green")
+    ax2.plot(hybrid_dd * 100, label="Sigma", linewidth=1.5, color="green")
     ax2.plot(bh_dd * 100, label="Buy & Hold", linewidth=1.5, alpha=0.7)
     ax2.set_title("Drawdown Comparison (%)")
     ax2.set_ylabel("Drawdown %")
@@ -421,7 +421,7 @@ def plot_diagnostics(hybrid_eq, bh_eq, hybrid_signal):
     ax2.grid(alpha=0.3)
 
     # === Panel 3: Rolling Sharpe ===
-    ax3.plot(roll_sharpe_h, label="Hybrid SIG", linewidth=1.5, color="green")
+    ax3.plot(roll_sharpe_h, label="Sigma", linewidth=1.5, color="green")
     ax3.plot(roll_sharpe_b, label="Buy & Hold", linewidth=1.5, alpha=0.7)
     ax3.axhline(0, color="black", linewidth=0.5)
     ax3.set_title("Rolling 252-Day Sharpe Ratio")
@@ -435,7 +435,7 @@ def plot_diagnostics(hybrid_eq, bh_eq, hybrid_signal):
         20
     )
 
-    ax4.hist(hybrid_m, bins=bins, alpha=0.7, density=True, label="Hybrid SIG")
+    ax4.hist(hybrid_m, bins=bins, alpha=0.7, density=True, label="Sigma")
     ax4.hist(bh_m, bins=bins, alpha=0.5, density=True, label="Buy & Hold")
     ax4.axvline(0, color="black", linestyle="--", linewidth=1)
     ax4.set_title("Monthly Returns Distribution")
@@ -622,7 +622,7 @@ def main():
     days_to_next_q = (next_q_end - today_date).days
     
     # ============================================================
-    # HYBRID SIG ENGINE USING REAL CALENDAR QUARTERS
+    # Sigma ENGINE USING REAL CALENDAR QUARTERS
     # ============================================================
 
     # Annualized CAGR → quarterly target unchanged
@@ -651,7 +651,7 @@ def main():
         ma_flip_multiplier=0.0     # No MA flips for Pure SIG
     )
 
-    # HYBRID SIG (MA Filter) - 2x quarterly + 4x MA flips = 6x total
+    # Sigma (MA Filter) - 2x quarterly + 4x MA flips = 6x total
     hybrid_eq, hybrid_rw, hybrid_sw, hybrid_rebals = run_sig_engine(
         risk_on_simple,
         risk_off_daily,
@@ -665,24 +665,24 @@ def main():
     )
     
     # ============================================================
-    # CANONICAL STRATEGY PERFORMANCE — HYBRID SIG ONLY
+    # CANONICAL STRATEGY PERFORMANCE — Sigma ONLY
     # ============================================================
     hybrid_simple = hybrid_eq.pct_change().fillna(0)
     hybrid_perf = compute_performance(hybrid_simple, hybrid_eq)
 
-    # IMPORTANT: `perf` always means Hybrid SIG performance
+    # IMPORTANT: `perf` always means Sigma performance
     perf = hybrid_perf
     
     # ============================================================
-    # DISPLAY ACTUAL HYBRID SIG REBALANCE DATES (FULL HISTORY)
+    # DISPLAY ACTUAL Sigma REBALANCE DATES (FULL HISTORY)
     # ============================================================
     if len(hybrid_rebals) > 0:
         reb_df = pd.DataFrame({"Rebalance Date": pd.to_datetime(hybrid_rebals)})
-        st.subheader("Hybrid SIG – Actual Rebalance Dates (Historical)")
+        st.subheader("Sigma – Actual Rebalance Dates (Historical)")
         st.dataframe(reb_df)
     else:
-        st.subheader("Hybrid SIG/MA – Historical Rebalance Dates")
-        st.write("No hybrid SIG/MA rebalances occurred during the backtest.")
+        st.subheader("Sigma/MA – Historical Rebalance Dates")
+        st.write("No Sigma/MA rebalances occurred during the backtest.")
 
     # Quarter start should follow the last actual SIG rebalance
     if len(hybrid_rebals) > 0:
@@ -802,7 +802,7 @@ def main():
     )
 
     # STAT TABLE (updated with Buy & Hold with rebalance)
-    st.subheader("MA vs Sharpe-Optimal vs Buy & Hold (with rebalance) vs Hybrid SIG/MA vs Pure SIG")
+    st.subheader("MA vs Sharpe-Optimal vs Buy & Hold (with rebalance) vs Sigma/MA vs Pure SIG")
     rows = [
         ("CAGR", "CAGR"),
         ("Volatility", "Volatility"),
@@ -845,7 +845,7 @@ def main():
             "MA Strategy",
             "Sharpe-Optimal",
             "Buy & Hold",
-            "Hybrid SIG",
+            "Sigma",
             "Pure SIG",
         ],
     )
@@ -896,7 +896,7 @@ def main():
 
     for (label, cap), tab in zip(accounts, (tab1, tab2, tab3)):
         with tab:
-            st.write(f"### {label} — Hybrid SIG")
+            st.write(f"### {label} — Sigma")
             st.dataframe(add_pct(compute_allocations(cap, hyb_r, hyb_s, risk_on_weights, risk_off_weights)))
 
             st.write(f"### {label} — Pure SIG")
@@ -997,7 +997,7 @@ def main():
         if len(bh_rebalance_norm) > 0:
             ax.plot(risk_on_norm, label="Buy & Hold (No Rebalance)", alpha=0.65)
         if len(hybrid_eq_norm) > 0:
-            ax.plot(hybrid_eq_norm, label="Hybrid SIG", linewidth=2, color="blue")
+            ax.plot(hybrid_eq_norm, label="Sigma", linewidth=2, color="blue")
         if len(pure_sig_norm) > 0:
             ax.plot(pure_sig_norm, label="Pure SIG", linewidth=2, color="orange")
         if len(plot_ma_norm) > 0:
