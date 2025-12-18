@@ -708,9 +708,6 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
             train_prices = prices.iloc[:-TEST_DAYS]
             test_prices  = prices.iloc[-TEST_DAYS:]
 
-            portfolio_index_train = build_portfolio_index(train_prices, risk_on_weights)
-            portfolio_index_test  = build_portfolio_index(test_prices, risk_on_weights)
-
             # Guard: MA cannot exceed data
             if L > len(portfolio_index_train) * 0.5:
                 continue
