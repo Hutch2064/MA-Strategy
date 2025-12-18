@@ -590,7 +590,80 @@ def sig_based_sensitivity_analysis(prices, base_params, risk_on_weights, risk_of
     }
 
 
+# ============================================================
+# 4-PANEL DIAGNOSTIC PERFORMANCE PLOT
+# ============================================================
 
+def plot_diagnostics(hybrid_eq, bh_eq, hybrid_signal):
+
+    hybrid_ret = hybrid_eq.pct_change().fillna(0)
+    bh_ret = bh_eq.pct_change().fillna(0)
+
+    hybrid_dd = hybrid_eq / hybrid_eq.cummax() - 1
+    bh_dd = bh_eq / bh_eq.cummax() - 1
+
+    window = 252
+    roll_sharpe_h = hybrid_ret.rolling(window).mean() / hybrid_ret.rolling(window).std() * np.sqrt(252)
+    roll_sharpe_b = bh_ret.rolling(window).mean() / bh_ret.rolling(window).std() * np.sqrt(252)
+
+    hybrid_m = hybrid_ret.resample("M").apply(lambda x: (1 + x).prod() - 1)
+    bh_m = bh_ret.resample("M").apply(lambda x: (1 + x).prod() - 1)
+
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
+
+    # --- Cumulative returns with regime shading ---
+    ax1.plot(hybrid_eq, label="Hybrid SIG", linewidth=2, color="green")
+    ax1.plot(bh_eq, label="Buy & Hold", linewidth=2, alpha=0.7)
+
+    in_off = False
+    start = None
+    for date, on in hybrid_signal.items():
+        if not on and not in_off:
+            start = date
+            in_off = True
+        elif on and in_off:
+            ax1.axvspan(start, date, color="red", alpha=0.15)
+            in_off = False
+    if in_off:
+        ax1.axvspan(start, hybrid_signal.index[-1], color="red", alpha=0.15)
+
+    ax1.set_title("Cumulative Returns with Regime Shading")
+    ax1.set_ylabel("Growth of $1")
+    ax1.legend()
+    ax1.grid(alpha=0.3)
+
+    # --- Drawdowns ---
+    ax2.plot(hybrid_dd * 100, label="Hybrid SIG", linewidth=1.5, color="green")
+    ax2.plot(bh_dd * 100, label="Buy & Hold", linewidth=1.5, alpha=0.7)
+    ax2.set_title("Drawdown Comparison (%)")
+    ax2.set_ylabel("Drawdown %")
+    ax2.legend()
+    ax2.grid(alpha=0.3)
+
+    # --- Rolling Sharpe ---
+    ax3.plot(roll_sharpe_h, label="Hybrid SIG", linewidth=1.5, color="green")
+    ax3.plot(roll_sharpe_b, label="Buy & Hold", linewidth=1.5, alpha=0.7)
+    ax3.axhline(0, color="black", linewidth=0.5)
+    ax3.set_title("Rolling 252-Day Sharpe Ratio")
+    ax3.legend()
+    ax3.grid(alpha=0.3)
+
+    # --- Monthly return distribution ---
+    bins = np.linspace(
+        min(hybrid_m.min(), bh_m.min()),
+        max(hybrid_m.max(), bh_m.max()),
+        20
+    )
+
+    ax4.hist(hybrid_m, bins=bins, alpha=0.7, density=True, label="Hybrid SIG")
+    ax4.hist(bh_m, bins=bins, alpha=0.5, density=True, label="Buy & Hold")
+    ax4.axvline(0, color="black", linestyle="--", linewidth=1)
+    ax4.set_title("Monthly Returns Distribution")
+    ax4.legend()
+    ax4.grid(alpha=0.3)
+
+    plt.tight_layout()
+    return fig
 
 
 
@@ -1302,6 +1375,19 @@ def main():
         st.pyplot(fig)
     else:
         st.info("Insufficient data for performance plot")
+    # ============================================================
+    # DIAGNOSTIC PERFORMANCE PANELS
+    # ============================================================
+
+    st.subheader("Strategy Diagnostics")
+
+    diag_fig = plot_diagnostics(
+        hybrid_eq = hybrid_eq,
+        bh_eq     = bh_rebalance_result["equity_curve"],
+        hybrid_signal = sig
+    )
+
+    st.pyplot(diag_fig)
 
     # ============================================================
     # IMPLEMENTATION CHECKLIST (Displayed at Bottom)
