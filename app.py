@@ -549,7 +549,7 @@ def main():
     sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, tol_series)
     
     # Run backtest with fixed parameters
-    best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=4.0)
+    best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=3.0)
     
     latest_signal = sig.iloc[-1]
     current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
@@ -668,8 +668,8 @@ def main():
         quarterly_target,
         pure_sig_signal,
         quarter_end_dates=mapped_q_ends,
-        quarterly_multiplier=4.0,  # 2x for SIG
-        ma_flip_multiplier=4.0     # No MA flips for SIG
+        quarterly_multiplier=2.0,  # 2x for SIG
+        ma_flip_multiplier=0.0     # No MA flips for SIG
     )
 
     # Sigma (MA Filter) - 2x quarterly + 4x MA flips = 6x total
@@ -681,8 +681,8 @@ def main():
         pure_sig_rw=pure_sig_rw,
         pure_sig_sw=pure_sig_sw,
         quarter_end_dates=mapped_q_ends,
-        quarterly_multiplier=4.0,  # 2x quarterly part
-        ma_flip_multiplier=4.0     # 4x when MA flips
+        quarterly_multiplier=2.0,  # 2x quarterly part
+        ma_flip_multiplier=3.0     # 4x when MA flips
     )
     
     # ============================================================
