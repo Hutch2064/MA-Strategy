@@ -376,6 +376,10 @@ def normalize(eq):
 
 def plot_diagnostics(hybrid_eq, bh_eq, hybrid_signal):
 
+    # Normalize to common starting value
+    hybrid_eq = hybrid_eq / hybrid_eq.iloc[0]
+    bh_eq     = bh_eq / bh_eq.iloc[0]
+
     hybrid_ret = hybrid_eq.pct_change().fillna(0)
     bh_ret = bh_eq.pct_change().fillna(0)
 
