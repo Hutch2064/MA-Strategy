@@ -699,6 +699,8 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
         tol = trial.suggest_float('tolerance', 0.01, 0.03, step=0.0025)
 
         oos_sharpes = []
+        
+        train_sharpe = np.nan  # initialize to avoid unbound local error
 
         for TEST_DAYS in OOS_WINDOWS:
             train_prices = prices.iloc[:-TEST_DAYS]
