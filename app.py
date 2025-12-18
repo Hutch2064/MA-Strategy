@@ -534,7 +534,7 @@ def main():
     best_type = FIXED_MA_TYPE
 
     # Expanding volatility-based tolerance (no look-ahead)
-    tol_series = compute_expanding_volatility_tolerance(portfolio_index
+    tol_series = compute_expanding_volatility_tolerance(portfolio_index)
     
     st.subheader("Fixed MA Parameters")
     st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
