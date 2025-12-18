@@ -693,10 +693,6 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
 
     split_idx = total_days - min(OOS_WINDOWS)  # keep for reporting
     
-    # Build portfolio indices for both sets
-    portfolio_index_train = build_portfolio_index(train_prices, risk_on_weights)
-    portfolio_index_test = build_portfolio_index(test_prices, risk_on_weights)
-    
     def objective(trial):
         L = trial.suggest_int('ma_length', 150, 300, step=5)
         ma_type = 'sma'
@@ -707,6 +703,9 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
         for TEST_DAYS in OOS_WINDOWS:
             train_prices = prices.iloc[:-TEST_DAYS]
             test_prices  = prices.iloc[-TEST_DAYS:]
+
+            portfolio_index_train = build_portfolio_index(train_prices, risk_on_weights)
+            portfolio_index_test  = build_portfolio_index(test_prices,  risk_on_weights)
 
             # Guard: MA cannot exceed data
             if L > len(portfolio_index_train) * 0.5:
