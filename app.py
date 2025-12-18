@@ -832,9 +832,9 @@ def main():
         if key in ["CAGR", "Volatility", "MaxDD", "Total", "TID"]:
             row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(rv), fmt_pct(hv), fmt_pct(ps)]
         elif key in ["Sharpe", "MAR", "PainGain", "Skew", "Kurtosis"]:
-            row = [label, fmt_dec(sv), fmt_dec(sh), fmt_dec(bh), fmt_dec(rv), fmt_dec(hv), fmt_dec(ps)]
+            row = [label, fmt_dec(sv), fmt_dec(sh), fmt_dec(rv), fmt_dec(hv), fmt_dec(ps)]
         else:
-            row = [label, fmt_num(sv), fmt_num(sh), fmt_num(bh), fmt_num(rv), fmt_num(hv), fmt_num(ps)]
+            row = [label, fmt_num(sv), fmt_num(sh), fmt_num(rv), fmt_num(hv), fmt_num(ps)]
 
         table_data.append(row)
 
