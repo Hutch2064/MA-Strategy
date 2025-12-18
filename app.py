@@ -753,6 +753,8 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
 
         avg_oos   = np.mean(oos_sharpes)
         worst_oos = np.min(oos_sharpes)
+        
+        trial.set_user_attr("train_sharpe", train_sharpe)
 
         # Optimize for robustness, not peak
         return -(0.7 * avg_oos + 0.3 * worst_oos)
