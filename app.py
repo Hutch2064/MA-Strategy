@@ -15,12 +15,11 @@ RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
     "BTC-USD": .5,
-    "TQQQ": .5,
+    "FNGO": .5,
 }
 
 RISK_OFF_WEIGHTS = {
-    "SHY": .45,
-    "GLD": .55,
+    "SHY": 1.0,
 }
 
 FLIP_COST = 0.0015
