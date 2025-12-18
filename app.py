@@ -1264,10 +1264,13 @@ def main():
     pure_sig_simple = pure_sig_eq.pct_change().fillna(0) if len(pure_sig_eq) > 0 else pd.Series([], dtype=float)
     pure_sig_perf = compute_performance(pure_sig_simple, pure_sig_eq)
 
+    # MA STRATEGY STATS (signal diagnostics ONLY)
+    ma_perf = best_result["performance"]
+
     strat_stats = compute_stats(
-        perf,
+        ma_perf,
         best_result["returns"],
-        perf["DD_Series"],
+        ma_perf["DD_Series"],
         best_result["flip_mask"],
         trades_per_year,
     )
