@@ -154,7 +154,7 @@ def run_sig_engine(
     pure_sig_sw=None,
     flip_cost=FLIP_COST,
     quarter_end_dates=None,   # <-- must be mapped_q_ends
-    quarterly_multiplier=2.0,  # NEW: 2x for Pure SIG, 2x for Sigma (quarterly part)
+    quarterly_multiplier=2.0,  # NEW: 2x for SIG, 2x for Sigma (quarterly part)
     ma_flip_multiplier=4.0     # NEW: 4x for Sigma when MA flips
 ):
 
@@ -246,7 +246,7 @@ def run_sig_engine(
                         risky_val += move
                         rebalance_dates.append(date)
 
-                    # Apply quarterly fee with multiplier (2x for Pure SIG, 2x for Sigma quarterly part)
+                    # Apply quarterly fee with multiplier (2x for SIG, 2x for Sigma quarterly part)
                     eq *= (1 - flip_cost * quarterly_multiplier)  # Remove target_quarter!
 
             # Update equity
@@ -642,7 +642,7 @@ def main():
         if a in simple_rets.columns:
             risk_off_daily += simple_rets[a] * w
 
-    # PURE SIG (always RISK-ON) - 2x flip costs quarterly
+    # SIG (always RISK-ON) - 2x flip costs quarterly
     pure_sig_signal = pd.Series(True, index=risk_on_simple.index)
 
     pure_sig_eq, pure_sig_rw, pure_sig_sw, pure_sig_rebals = run_sig_engine(
@@ -651,8 +651,8 @@ def main():
         quarterly_target,
         pure_sig_signal,
         quarter_end_dates=mapped_q_ends,
-        quarterly_multiplier=2.0,  # 2x for Pure SIG
-        ma_flip_multiplier=0.0     # No MA flips for Pure SIG
+        quarterly_multiplier=2.0,  # 2x for SIG
+        ma_flip_multiplier=0.0     # No MA flips for SIG
     )
 
     # Sigma (MA Filter) - 2x quarterly + 4x MA flips = 6x total
@@ -806,7 +806,7 @@ def main():
     )
 
     # STAT TABLE (updated with Buy & Hold with rebalance)
-    st.subheader("MA vs Sharpe-Optimal vs Buy & Hold (with rebalance) vs Sigma/MA vs Pure SIG")
+    st.subheader("MA vs Sharpe-Optimal vs Buy & Hold (with rebalance) vs Sigma/MA vs SIG")
     rows = [
         ("CAGR", "CAGR"),
         ("Volatility", "Volatility"),
@@ -850,7 +850,7 @@ def main():
             "Sharpe-Optimal",
             "Buy & Hold",
             "Sigma",
-            "Pure SIG",
+            "SIG",
         ],
     )
 
@@ -903,7 +903,7 @@ def main():
             st.write(f"### {label} — Sigma")
             st.dataframe(add_pct(compute_allocations(cap, hyb_r, hyb_s, risk_on_weights, risk_off_weights)))
 
-            st.write(f"### {label} — Pure SIG")
+            st.write(f"### {label} — SIG")
             st.dataframe(add_pct(compute_allocations(cap, pure_r, pure_s, risk_on_weights, risk_off_weights)))
 
             st.write(f"### {label} — 100% Risk-On Portfolio")
@@ -1003,7 +1003,7 @@ def main():
         if len(hybrid_eq_norm) > 0:
             ax.plot(hybrid_eq_norm, label="Sigma", linewidth=2, color="blue")
         if len(pure_sig_norm) > 0:
-            ax.plot(pure_sig_norm, label="Pure SIG", linewidth=2, color="orange")
+            ax.plot(pure_sig_norm, label="SIG", linewidth=2, color="orange")
         if len(plot_ma_norm) > 0:
             ax.plot(plot_ma_norm, label=f"MA({best_len}) {best_type.upper()}", linestyle="--", color="black", alpha=0.6)
 
