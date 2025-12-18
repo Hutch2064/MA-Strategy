@@ -503,7 +503,7 @@ def main():
     st.sidebar.header("Fixed Parameters")
     st.sidebar.write(f"**MA Length:** {FIXED_MA_LENGTH}")
     st.sidebar.write(f"**MA Type:** {FIXED_MA_TYPE.upper()}")
-    st.sidebar.write(f"**Tolerance:** {FIXED_TOLERANCE:.1%}")
+    st.sidebar.write(f"**Tolerance (Vol-Based):** {best_tol:.2%}")
 
     run_clicked = st.sidebar.button("Run Backtest")
     if not run_clicked:
@@ -532,15 +532,18 @@ def main():
     # USE FIXED PARAMETERS INSTEAD OF OPTIMIZATION
     best_len  = FIXED_MA_LENGTH
     best_type = FIXED_MA_TYPE
-
-    # Expanding volatility-based tolerance (no look-ahead)
-    tol_series = compute_expanding_volatility_tolerance(portfolio_index)
     
     st.subheader("Fixed MA Parameters")
     st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
     
     # Generate signal with fixed parameters
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
+    # Expanding volatility-based tolerance (no look-ahead)
+    tol_series = compute_expanding_volatility_tolerance(portfolio_index)
+    tol_series = tol_series.clip(lower=0.005, upper=0.03)
+
+    # Current tolerance for display & diagnostics
+    best_tol = float(tol_series.iloc[-1])
     opt_ma = compute_ma(portfolio_index, best_len, best_type)
     sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, tol_series)
     
