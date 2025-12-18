@@ -676,7 +676,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     # FIXED OUT-OF-SAMPLE SPLIT (ACADEMICALLY DEFENSIBLE)
     # ============================================================
 
-    TEST_DAYS = 252 * 10  # 2 years out-of-sample
+    TEST_DAYS = 252 * 3  # 2 years out-of-sample
 
     if total_days <= TEST_DAYS:
         raise ValueError("Not enough data for fixed OOS window")
@@ -693,7 +693,7 @@ def optuna_oos_optimization(prices, risk_on_weights, risk_off_weights, flip_cost
     def objective(trial):
         """Objective function for Optuna - maximizes OOS Sharpe"""
         # Suggest parameters
-        L = trial.suggest_int('ma_length', 100, 252, step=1)  # Wider range than before
+        L = trial.suggest_int('ma_length', 126, 252, step=1)  # Wider range than before
         ma_type = 'sma'
         tol = trial.suggest_float('tolerance', 0.01, 0.03, step=0.0025)
         
