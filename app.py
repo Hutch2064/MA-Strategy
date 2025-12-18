@@ -503,7 +503,8 @@ def main():
     st.sidebar.header("Fixed Parameters")
     st.sidebar.write(f"**MA Length:** {FIXED_MA_LENGTH}")
     st.sidebar.write(f"**MA Type:** {FIXED_MA_TYPE.upper()}")
-    st.sidebar.write(f"**Tolerance (Vol-Based):** {best_tol:.2%}")
+    
+    
 
     run_clicked = st.sidebar.button("Run Backtest")
     if not run_clicked:
@@ -544,6 +545,7 @@ def main():
 
     # Current tolerance for display & diagnostics
     best_tol = float(tol_series.iloc[-1])
+    st.sidebar.write(f"**Tolerance (Vol-Based):** {best_tol:.2%}")
     opt_ma = compute_ma(portfolio_index, best_len, best_type)
     sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, tol_series)
     
