@@ -31,7 +31,7 @@ START_SAFE  = 0.30
 # FIXED PARAMETERS
 FIXED_MA_LENGTH = 200
 FIXED_MA_TYPE = "sma"  # or "ema" - you can choose which one to fix
-FIXED_TOLERANCE = 0.0  # 2%
+
 
 # ============================================================
 # DATA LOADING
@@ -140,7 +140,54 @@ def generate_testfol_signal_vectorized(price, ma, tol_series):
     
     return pd.Series(sig, index=ma.index).fillna(False)
 
+def optimize_tolerance(portfolio_index, opt_ma, prices, risk_on_weights, risk_off_weights):
+    """
+    Selects tolerance in [0, 5%] that maximizes Sharpe / trades_per_year.
+    """
 
+    def objective(x):
+        tol = float(x[0])
+
+        # Safety bounds
+        if tol < 0 or tol > 0.05:
+            return 1e6
+
+        tol_series = pd.Series(tol, index=portfolio_index.index)
+
+        sig = generate_testfol_signal_vectorized(
+            portfolio_index,
+            opt_ma,
+            tol_series
+        )
+
+        result = backtest(
+            prices,
+            sig,
+            risk_on_weights,
+            risk_off_weights,
+            FLIP_COST,
+            ma_flip_multiplier=3.0
+        )
+
+        sharpe = result["performance"]["Sharpe"]
+
+        switches = sig.astype(int).diff().abs().sum()
+        trades_per_year = switches / (len(sig) / 252)
+
+        if sharpe <= 0 or trades_per_year <= 0:
+            return 1e6
+
+        # MINIMIZE negative Sharpe-per-trade
+        return -(sharpe / trades_per_year)
+
+    res = minimize(
+        objective,
+        x0=[0.002],               # starting guess (irrelevant to solution)
+        bounds=[(0.0, 0.05)],
+        method="L-BFGS-B"
+    )
+
+    return float(res.x[0])
 # ============================================================
 # SIG ENGINE — NOW USING CALENDAR QUARTER-ENDS (B1)
 # ============================================================
@@ -449,14 +496,7 @@ def plot_diagnostics(hybrid_eq, bh_eq, hybrid_signal):
     plt.tight_layout()
     return fig
     
-def compute_expanding_volatility_tolerance(price_series, min_obs=60):
-    """
-    Computes an expanding (no look-ahead) estimate of daily volatility.
-    Uses only information available up to each point in time.
-    """
-    daily_rets = price_series.pct_change()
-    vol = daily_rets.expanding(min_periods=min_obs).std()
-    return vol.fillna(0.0)
+
     
 # ============================================================
 # STREAMLIT APP
@@ -537,16 +577,35 @@ def main():
     
     # Generate signal with fixed parameters
     portfolio_index = build_portfolio_index(prices, risk_on_weights)
-    # Expanding volatility-based tolerance (no look-ahead)
-    tol_series = 0.0 * compute_expanding_volatility_tolerance(portfolio_index)
-    tol_series = tol_series.clip(lower=0.00, upper=0.10)
+    
+    # ============================================================
+    # OPTIMAL TOLERANCE (Sharpe per trade)
+    # ============================================================
 
-    # Current tolerance for display & diagnostics
-    best_tol = float(tol_series.iloc[-1])
-    st.sidebar.write(f"**Tolerance (Vol-Based):** {best_tol:.2%}")
-    st.write(f"**MA Type:** {best_type.upper()}  —  **Length:** {best_len}  —  **Tolerance:** {best_tol:.2%}")
     opt_ma = compute_ma(portfolio_index, best_len, best_type)
-    sig = generate_testfol_signal_vectorized(portfolio_index, opt_ma, tol_series)
+
+    best_tol = optimize_tolerance(
+        portfolio_index,
+        opt_ma,
+        prices,
+        risk_on_weights,
+        risk_off_weights
+    )
+
+    tol_series = pd.Series(best_tol, index=portfolio_index.index)
+
+    st.sidebar.write(f"**Optimal Tolerance:** {best_tol:.2%}")
+    st.write(
+        f"**MA Type:** {best_type.upper()}  —  "
+        f"**Length:** {best_len}  —  "
+        f"**Tolerance:** {best_tol:.2%}"
+    )
+
+    sig = generate_testfol_signal_vectorized(
+        portfolio_index,
+        opt_ma,
+        tol_series
+    )
     
     # Run backtest with fixed parameters
     best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=3.0)
