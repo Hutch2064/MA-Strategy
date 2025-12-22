@@ -1171,39 +1171,12 @@ The strategy is designed to:
 The Roth IRA is treated as a permanent risk-on vehicle with no MA-based
 de-risking, prioritizing long-term asymmetric growth and tax efficiency.
 
-**Core Allocation (50%)**
-- 25% QQUP
-- 25% IBIT  
-(Represents the Sharpe-optimal risk-on foundation.)
-
-**Asymmetric Growth Sleeve (50%)**
-
-**Bitcoin Treasury Companies**
-- Equal-weighted exposure to pure-play Bitcoin treasury firms:
-  - MSTR (Strategy)
-  - XXI (Twenty One Capital)
-  - ASST (Strive)
-- Each position weighted at approximately **8.33%**.
-- These equities provide leveraged Bitcoin exposure with an embedded
-  equity risk premium, historically producing higher Sharpe ratios than
-  direct leveraged Bitcoin ETFs.
-- Additional treasury companies may be added as new listings emerge.
-
-**Equities (Private Market Exposure)**
-- 25% allocation to **DXYZ (Destiny Tech 100)**.
-- Provides access to late-stage private companies such as OpenAI,
-  SpaceX, and Stripe, capturing pre-IPO growth not available in
-  traditional public equity indices.
+- Sharpe optimal of the underlying Risk-On Sigma sleeve (1x & Represents the Sharpe-optimal risk-on foundation).
 
 **Overall Roth Allocation**
-- 25% QQUP
+- 45% QBIG 
 - 25% IBIT
-- 25% DXYZ
-- ~8.33% each to Bitcoin treasury equities
-
-This structure ensures:
-- 50% of the portfolio remains in a Sharpe-optimal risk-on base.
-- 50% targets convex, asymmetric exposure to equities and Bitcoin.
+- 30% GLD
 
 ---
 
