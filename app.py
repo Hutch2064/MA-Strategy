@@ -14,9 +14,9 @@ DEFAULT_START_DATE = "1900-01-01"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "BTC-USD": .50,
-    "TQQQ": .25,
-    "UGL":.5,
+    "BTC-USD": .6666,
+    "TQQQ": .3333,
+    "UGL":.3333,
     "SHY":.00,
 }
 
