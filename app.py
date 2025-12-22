@@ -14,8 +14,9 @@ DEFAULT_START_DATE = "1900-01-01"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "BTC-USD": .5,
-    "FNGO": .5,
+    "BITU": .3333,
+    "FNGO": .3334,
+    "UGL":.3333,
 }
 
 RISK_OFF_WEIGHTS = {
