@@ -15,7 +15,7 @@ RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
     "BITU": .3333,
-    "FNGO": .3334,
+    "QQUP": .3334,
     "UGL":.3333,
 }
 
