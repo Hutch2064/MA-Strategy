@@ -25,8 +25,8 @@ RISK_OFF_WEIGHTS = {
 FLIP_COST = 0.0005
 
 # Starting weights inside the SIG engine (unchanged)
-START_RISKY = 0.70
-START_SAFE  = 0.30
+START_RISKY = 0.5
+START_SAFE  = 0.5
 
 # FIXED PARAMETERS
 FIXED_MA_LENGTH = 200
