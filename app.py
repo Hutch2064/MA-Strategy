@@ -14,9 +14,9 @@ DEFAULT_START_DATE = "1900-01-01"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "BITU": .3333,
-    "QQUP": .3334,
-    "UGL":.3333,
+    "BITU": .25,
+    "QQUP": .45,
+    "UGL":.3,
 }
 
 RISK_OFF_WEIGHTS = {
@@ -1112,9 +1112,8 @@ def main():
 - Rotate 100% of portfolio to treasury sleeve whenever the MA regime flips.
 - At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
 - Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
-- At each rebalance, re-evaluate the Sharpe portfolio weighting.
 
-Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=a9xtQg7FUS9
+Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=iLUBGrQrDwF
 
 ## **Portfolio Allocation & Implementation Notes**
 
@@ -1137,16 +1136,9 @@ The strategy is designed to:
 - When price is ABOVE the MA → **RISK-ON** regime.
 - When price is BELOW the MA → **RISK-OFF** regime.
 
-**Base Allocations**
-- **Risk-On (Buy & Hold overlay):**
-  - 50% QQUP
-  - 50% IBIT
-- **Risk-Off (Treasury sleeve):**
-  - 100% STRC
-
 **Sig (Quarterly Target-Growth) Logic**
 - When RISK-ON, the portfolio follows the Pure Sig rebalancing methodology:
-  - Initial allocation: **70% Risk-On / 30% Risk-Off**
+  - Initial allocation: **60% Risk-On / 40% Risk-Off**
   - At each true calendar quarter-end:
     - A target quarterly growth rate is derived from the long-run CAGR
       of the Risk-On portfolio.
@@ -1171,10 +1163,6 @@ The strategy is designed to:
   long-term CAGR characteristics (e.g., TQQQ).
 - Objective: maximize upside asymmetry while remaining solvent across
   extended drawdown regimes.
-
-**Sharpe-Optimal References**
-- Risk-On: 50% QQUP / 50% IBIT  
-  https://testfol.io/optimizer?s=a9xtQg7FUS9
 
 ---
 
