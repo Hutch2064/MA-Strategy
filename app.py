@@ -14,9 +14,10 @@ DEFAULT_START_DATE = "1900-01-01"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "BITU": .25,
-    "QQUP": .45,
-    "UGL":.3,
+    "BTC-USD": .5,
+    "QQUP": .40,
+    "UGL":.35,
+    "SHY":.00,
 }
 
 RISK_OFF_WEIGHTS = {
