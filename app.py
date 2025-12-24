@@ -1455,7 +1455,7 @@ def main():
     # Display portfolio value info
     st.write(f"**Current Total Portfolio Value:** ${total_current_portfolio:,.2f}")
     st.write(f"**Monte Carlo Projection Horizon:** 12 months (252 trading days)")
-    st.write(f"**Number of Simulations:** 10,000 per strategy")
+    st.write(f"**Number of Simulations:** 100,000 per strategy")
     
     # Display Monte Carlo results
     if any(v is not None for v in mc_results.values()):
@@ -1598,7 +1598,7 @@ def main():
                         **Monte Carlo Simulation Assumptions:**
                         - Based on historical return distributions (parametric bootstrap)
                         - Assumes future volatility similar to historical
-                        - 10,000 simulated 12-month paths per strategy
+                        - 100,000 simulated 12-month paths per strategy
                         - Does not account for structural breaks or regime changes
                         - Past performance ≠ future results
                         """)
