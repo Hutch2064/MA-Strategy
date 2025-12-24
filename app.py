@@ -633,7 +633,7 @@ def monte_carlo_strategy_analysis(strategy_returns, strategy_equity, n_sim=10000
     
     # Expected metrics
     expected_return = np.mean(terminal_returns)
-    expected_vol = np.std(terminal_returns) * np.sqrt(252)  # Annualize for display
+    expected_vol = np.std(terminal_returns) # Annualize for display
     prob_positive = np.mean(terminal_returns > 0)
     
     # Calculate terminal value percentiles
