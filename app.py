@@ -246,7 +246,7 @@ def run_sig_engine(
         # FIX: Apply MA flip costs BEFORE checking regime
         # ============================================
         if i > 0 and flip_mask.iloc[i]:  # Skip first day (no diff)
-            eq *= (1 - flip_cost * ma_flip_multiplier)  # 4x cost for Sigma
+            eq *= (1 - flip_cost * ma_flip_multiplier)  # Use parameter, not hardcoded
         # ============================================
 
         if ma_on:
@@ -295,8 +295,8 @@ def run_sig_engine(
                         risky_val += move
                         rebalance_dates.append(date)
 
-                    # Apply quarterly fee with multiplier (2x for SIG, 2x for Sigma quarterly part)
-                    eq *= (1 - flip_cost * quarterly_multiplier)  # Remove target_quarter!
+                    # Apply quarterly fee with multiplier
+                    eq *= (1 - flip_cost * quarterly_multiplier)
 
             # Update equity
             eq = risky_val + safe_val
@@ -459,7 +459,7 @@ def compute_enhanced_performance(simple_returns, eq_curve, rf=0.0):
         "DD_Series": dd
     }
 
-def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=4.0):
+def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=3.0):
     simple = prices.pct_change().fillna(0)
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
@@ -467,7 +467,7 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_fl
     sig_arr = signal.astype(int)
     flip_mask = sig_arr.diff().abs() == 1
 
-    # MA flip costs with 4x multiplier for MA Strategy
+    # MA flip costs with multiplier
     flip_costs = np.where(flip_mask, -flip_cost * ma_flip_multiplier, 0.0)
     strat_adj = strategy_simple + flip_costs
 
@@ -585,65 +585,79 @@ def plot_diagnostics(hybrid_eq, bh_eq, hybrid_signal):
     return fig
     
 # ============================================================
-# MONTE CARLO SIMULATION FUNCTIONS
+# MONTE CARLO SIMULATION FUNCTIONS - CORRECTED VERSION
 # ============================================================
 
-def monte_carlo_strategy_analysis(strategy_returns, strategy_equity, n_sim=10000, periods=252):
+def monte_carlo_strategy_analysis(strategy_returns, strategy_equity, n_sim=10000, periods=252, initial_capital=None):
     """
-    Run Monte Carlo simulation for a strategy.
+    Run Monte Carlo simulation for a strategy with user-specified initial capital.
     
-    Returns:
-    --------
-    dict with simulation results
+    Args:
+        strategy_returns: Daily returns series
+        strategy_equity: Equity curve series
+        n_sim: Number of simulations
+        periods: Number of trading days to simulate (252 = 1 year)
+        initial_capital: User-specified starting capital. If None, uses last equity value.
     """
-    if len(strategy_returns) < 50:  # Need minimum data
+    if len(strategy_returns) < 100:
         return None
     
-    # Fit parameters
-    mu = strategy_returns.mean() * 252  # Annualized drift
-    sigma = strategy_returns.std() * np.sqrt(252)  # Annualized volatility
+    # Use simple returns for simulation
+    mu_daily = strategy_returns.mean()
+    sigma_daily = strategy_returns.std()
     
-    # Simulate returns using geometric Brownian motion
-    sim_returns = np.random.normal(mu/252, sigma/np.sqrt(252), (n_sim, periods))
+    # Use user-specified initial capital or last equity value
+    if initial_capital is not None:
+        initial_price = initial_capital
+    else:
+        initial_price = strategy_equity.iloc[-1] if len(strategy_equity) > 0 else 10000
     
-    # Convert to price paths
-    initial_price = strategy_equity.iloc[-1] if len(strategy_equity) > 0 else 10000
-    sim_prices = initial_price * np.exp(np.cumsum(sim_returns, axis=1))
+    # Simulate daily returns using correct scaling
+    np.random.seed(42)  # For reproducibility
+    sim_returns = np.random.normal(mu_daily, sigma_daily, (n_sim, periods))
     
-    # Calculate terminal returns
-    terminal_returns = (sim_prices[:, -1] / initial_price) - 1
+    # Calculate cumulative portfolio values using simple returns (not log returns)
+    sim_values = initial_price * np.cumprod(1 + sim_returns, axis=1)
     
-    # Calculate percentiles
+    # Terminal values and returns
+    terminal_values = sim_values[:, -1]
+    terminal_returns = (terminal_values / initial_price) - 1
+    
+    # Analysis
     percentiles = np.percentile(terminal_returns, list(range(5, 100, 5)))
     
-    # Calculate CVaR for different confidence levels
-    cvar_90 = -np.mean(terminal_returns[terminal_returns <= np.percentile(terminal_returns, 10)])
-    cvar_95 = -np.mean(terminal_returns[terminal_returns <= np.percentile(terminal_returns, 5)])
-    cvar_99 = -np.mean(terminal_returns[terminal_returns <= np.percentile(terminal_returns, 1)])
+    # CVaR calculations
+    def calculate_cvar(returns, confidence):
+        threshold = np.percentile(returns, 100 - confidence)
+        bad_returns = returns[returns <= threshold]
+        return -np.mean(bad_returns) if len(bad_returns) > 0 else 0
     
-    # Calculate expected return and volatility
+    cvar_90 = calculate_cvar(terminal_returns, 90)
+    cvar_95 = calculate_cvar(terminal_returns, 95)
+    cvar_99 = calculate_cvar(terminal_returns, 99)
+    
+    # Expected metrics
     expected_return = np.mean(terminal_returns)
-    expected_vol = np.std(terminal_returns)
-    
-    # Probability of positive return
+    expected_vol = np.std(terminal_returns) * np.sqrt(252)  # Annualize for display
     prob_positive = np.mean(terminal_returns > 0)
     
-    # Calculate VaR
-    var_95 = np.percentile(terminal_returns, 5)
-    var_99 = np.percentile(terminal_returns, 1)
+    # Calculate terminal value percentiles
+    terminal_value_percentiles = np.percentile(terminal_values, [5, 25, 50, 75, 95])
     
     return {
-        'sim_prices': sim_prices,
+        'sim_prices': sim_values,
+        'terminal_values': terminal_values,
         'terminal_returns': terminal_returns,
         'percentiles': percentiles,
+        'terminal_value_percentiles': terminal_value_percentiles,
         'cvar_90': cvar_90,
         'cvar_95': cvar_95,
         'cvar_99': cvar_99,
         'expected_return': expected_return,
         'expected_vol': expected_vol,
         'prob_positive': prob_positive,
-        'var_95': var_95,
-        'var_99': var_99,
+        'var_95': np.percentile(terminal_returns, 5),
+        'var_99': np.percentile(terminal_returns, 1),
         'initial_price': initial_price
     }
 
@@ -655,40 +669,44 @@ def plot_monte_carlo_results(results_dict, strategy_names):
     
     colors = plt.cm.Set1(np.linspace(0, 1, len(results_dict)))
     
-    # Panel 1: Terminal return distributions
+    # Panel 1: Terminal return distributions (as percentages)
     ax = axes[0, 0]
     for i, (name, results) in enumerate(results_dict.items()):
         if results is not None:
-            ax.hist(results['terminal_returns'], bins=50, alpha=0.5, 
+            # Convert to percentages
+            returns_pct = results['terminal_returns'] * 100
+            ax.hist(returns_pct, bins=50, alpha=0.5, 
                    label=name, density=True, color=colors[i])
     ax.axvline(x=0, color='black', linestyle='--', linewidth=1)
     ax.set_title('12-Month Return Distributions')
-    ax.set_xlabel('Return')
+    ax.set_xlabel('Return (%)')
     ax.set_ylabel('Density')
     ax.legend()
     ax.grid(alpha=0.3)
     
-    # Panel 2: Percentile ranges
+    # Panel 2: Percentile ranges (as percentages)
     ax = axes[0, 1]
     percentile_levels = list(range(5, 100, 5))
     for i, (name, results) in enumerate(results_dict.items()):
         if results is not None:
-            ax.plot(percentile_levels, results['percentiles'], 
+            # Convert to percentages
+            percentiles_pct = results['percentiles'] * 100
+            ax.plot(percentile_levels, percentiles_pct, 
                    marker='o', label=name, color=colors[i])
     ax.axhline(y=0, color='black', linestyle='--', linewidth=1)
     ax.set_title('Percentile Return Ranges (5%-95%)')
     ax.set_xlabel('Percentile')
-    ax.set_ylabel('12-Month Return')
+    ax.set_ylabel('12-Month Return (%)')
     ax.legend()
     ax.grid(alpha=0.3)
     
-    # Panel 3: CVaR comparison
+    # Panel 3: CVaR comparison (as percentages)
     ax = axes[0, 2]
     cvar_data = []
     labels = []
     for name, results in results_dict.items():
         if results is not None:
-            cvar_data.append([results['cvar_95'], results['cvar_99']])
+            cvar_data.append([results['cvar_95'] * 100, results['cvar_99'] * 100])
             labels.append(name)
     
     if cvar_data:
@@ -698,38 +716,38 @@ def plot_monte_carlo_results(results_dict, strategy_names):
         ax.bar(x - width/2, cvar_data[:, 0], width, label='CVaR 95%', alpha=0.7)
         ax.bar(x + width/2, cvar_data[:, 1], width, label='CVaR 99%', alpha=0.7)
         ax.set_title('Conditional Value at Risk (CVaR)')
-        ax.set_ylabel('CVaR (Negative Return)')
+        ax.set_ylabel('CVaR (%)')
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=45, ha='right')
         ax.legend()
         ax.grid(alpha=0.3)
     
-    # Panel 4: Sample price paths
+    # Panel 4: Sample price paths (in dollars)
     ax = axes[1, 0]
     for i, (name, results) in enumerate(results_dict.items()):
         if results is not None:
             # Plot 20 sample paths
             for j in range(min(20, results['sim_prices'].shape[0])):
                 ax.plot(results['sim_prices'][j, :], alpha=0.1, color=colors[i])
-    ax.set_title('Sample Price Paths')
+    ax.set_title('Sample Portfolio Paths ($)')
     ax.set_xlabel('Trading Days')
-    ax.set_ylabel('Portfolio Value')
+    ax.set_ylabel('Portfolio Value ($)')
     ax.grid(alpha=0.3)
     
-    # Panel 5: Risk-return scatter
+    # Panel 5: Risk-return scatter (annualized)
     ax = axes[1, 1]
     for i, (name, results) in enumerate(results_dict.items()):
         if results is not None:
-            ax.scatter(results['expected_vol'], results['expected_return'], 
+            ax.scatter(results['expected_vol'], results['expected_return'] * 100, 
                       s=100, label=name, color=colors[i], alpha=0.7)
             # Add text annotation
-            ax.text(results['expected_vol']*1.01, results['expected_return']*1.01, 
+            ax.text(results['expected_vol']*1.01, results['expected_return']*100*1.01, 
                    name, fontsize=9, alpha=0.8)
     ax.axhline(y=0, color='black', linestyle='--', linewidth=0.5)
     ax.axvline(x=0, color='black', linestyle='--', linewidth=0.5)
-    ax.set_title('Expected Risk-Return Profile')
-    ax.set_xlabel('Expected Volatility')
-    ax.set_ylabel('Expected Return')
+    ax.set_title('Expected Risk-Return Profile (Annualized)')
+    ax.set_xlabel('Expected Volatility (Annualized)')
+    ax.set_ylabel('Expected Return (% Annualized)')
     ax.grid(alpha=0.3)
     
     # Panel 6: Probability of positive return
@@ -804,8 +822,6 @@ def main():
     st.sidebar.write(f"**MA Length:** {FIXED_MA_LENGTH}")
     st.sidebar.write(f"**MA Type:** {FIXED_MA_TYPE.upper()}")
     
-    
-
     run_clicked = st.sidebar.button("Run Backtest")
     if not run_clicked:
         st.stop()
@@ -991,7 +1007,7 @@ def main():
         ma_flip_multiplier=0.0     # No MA flips for SIG
     )
 
-    # Sigma (MA Filter) - 2x quarterly + 4x MA flips = 6x total
+    # Sigma (MA Filter) - 2x quarterly + 3x MA flips
     hybrid_eq, hybrid_rw, hybrid_sw, hybrid_rebals = run_sig_engine(
         risk_on_simple,
         risk_off_daily,
@@ -1001,7 +1017,7 @@ def main():
         pure_sig_sw=pure_sig_sw,
         quarter_end_dates=mapped_q_ends,
         quarterly_multiplier=2.0,  # 2x quarterly part
-        ma_flip_multiplier=3.0     # 4x when MA flips
+        ma_flip_multiplier=3.0     # 3x when MA flips
     )
     
     # ============================================================
@@ -1113,7 +1129,6 @@ def main():
 
     hybrid_simple = hybrid_eq.pct_change().fillna(0) if len(hybrid_eq) > 0 else pd.Series([], dtype=float)
     hybrid_perf = compute_enhanced_performance(hybrid_simple, hybrid_eq)
-    
     
     pure_sig_simple = pure_sig_eq.pct_change().fillna(0) if len(pure_sig_eq) > 0 else pd.Series([], dtype=float)
     pure_sig_perf = compute_enhanced_performance(pure_sig_simple, pure_sig_eq)
@@ -1385,37 +1400,40 @@ def main():
     st.pyplot(diag_fig)
 
     # ============================================================
-    # MONTE CARLO STRESS TESTING - 12-MONTH FORECAST
+    # MONTE CARLO STRESS TESTING - 12-MONTH FORECAST (CORRECTED)
     # ============================================================
     
     st.subheader("🎯 Monte Carlo Stress Testing - 12-Month Forward Forecast")
     
-    # Prepare strategy data for Monte Carlo
+    # Get total current portfolio value from user inputs
+    total_current_portfolio = real_cap_1 + real_cap_2 + real_cap_3
+    
+    # Prepare strategy data for Monte Carlo with user's actual portfolio value
     strategies_mc = {
         "MA Strategy": {
             "returns": best_result["returns"],
             "equity": best_result["equity_curve"],
-            "signal": sig
+            "initial_capital": total_current_portfolio
         },
         "Sharpe Optimal": {
             "returns": sharp_returns,
             "equity": sharp_eq,
-            "signal": pd.Series(True, index=sharp_returns.index) if len(sharp_returns) > 0 else pd.Series([], dtype=bool)
+            "initial_capital": total_current_portfolio
         },
         "Buy & Hold": {
             "returns": risk_on_simple,
             "equity": risk_on_eq,
-            "signal": pd.Series(True, index=risk_on_simple.index)
+            "initial_capital": total_current_portfolio
         },
         "Sigma": {
             "returns": hybrid_simple,
             "equity": hybrid_eq,
-            "signal": sig
+            "initial_capital": total_current_portfolio
         },
         "SIG": {
             "returns": pure_sig_simple,
             "equity": pure_sig_eq,
-            "signal": pd.Series(True, index=pure_sig_simple.index) if len(pure_sig_simple) > 0 else pd.Series([], dtype=bool)
+            "initial_capital": total_current_portfolio
         }
     }
     
@@ -1428,10 +1446,16 @@ def main():
                     data["returns"],
                     data["equity"],
                     n_sim=10000,
-                    periods=252
+                    periods=252,
+                    initial_capital=data["initial_capital"]
                 )
             else:
                 mc_results[name] = None
+    
+    # Display portfolio value info
+    st.write(f"**Current Total Portfolio Value:** ${total_current_portfolio:,.2f}")
+    st.write(f"**Monte Carlo Projection Horizon:** 12 months (252 trading days)")
+    st.write(f"**Number of Simulations:** 10,000 per strategy")
     
     # Display Monte Carlo results
     if any(v is not None for v in mc_results.values()):
@@ -1439,31 +1463,48 @@ def main():
         mc_fig = plot_monte_carlo_results(mc_results, list(strategies_mc.keys()))
         st.pyplot(mc_fig)
         
-        # Detailed percentile table
-        st.subheader("📊 Detailed 12-Month Return Percentiles & CVaR")
+        # Display terminal value projections
+        st.subheader("📊 12-Month Portfolio Value Projections")
         
-        percentile_data = []
+        terminal_value_data = []
         for name, results in mc_results.items():
             if results is not None:
-                row = [name]
-                # Add percentiles from 5 to 95 in 5% increments
-                for p in range(5, 100, 5):
-                    percentile_idx = (p - 5) // 5
-                    if percentile_idx < len(results['percentiles']):
-                        row.append(f"{results['percentiles'][percentile_idx]:.2%}")
-                    else:
-                        row.append("—")
-                # Add CVaR metrics
-                row.append(f"{results['cvar_95']:.2%}")
-                row.append(f"{results['cvar_99']:.2%}")
-                row.append(f"{results['expected_return']:.2%}")
-                row.append(f"{results['prob_positive']:.1%}")
-                percentile_data.append(row)
+                terminal_value_data.append({
+                    "Strategy": name,
+                    "Current Value": f"${results['initial_price']:,.2f}",
+                    "Expected Value": f"${np.mean(results['terminal_values']):,.2f}",
+                    "5th %ile (Worst 5%)": f"${results['terminal_value_percentiles'][0]:,.2f}",
+                    "25th %ile": f"${results['terminal_value_percentiles'][1]:,.2f}",
+                    "Median": f"${results['terminal_value_percentiles'][2]:,.2f}",
+                    "75th %ile": f"${results['terminal_value_percentiles'][3]:,.2f}",
+                    "95th %ile (Best 5%)": f"${results['terminal_value_percentiles'][4]:,.2f}",
+                })
         
-        if percentile_data:
-            columns = ["Strategy"] + [f"P{p}%" for p in range(5, 100, 5)] + ["CVaR 95%", "CVaR 99%", "Expected Return", "Prob > 0%"]
-            percentile_df = pd.DataFrame(percentile_data, columns=columns)
-            st.dataframe(percentile_df, use_container_width=True)
+        if terminal_value_data:
+            terminal_value_df = pd.DataFrame(terminal_value_data)
+            st.dataframe(terminal_value_df, use_container_width=True)
+        
+        # Display return projections
+        st.subheader("📈 12-Month Return Projections (%)")
+        
+        return_data = []
+        for name, results in mc_results.items():
+            if results is not None:
+                return_data.append({
+                    "Strategy": name,
+                    "Expected Return": f"{results['expected_return']:.1%}",
+                    "5th %ile": f"{np.percentile(results['terminal_returns'], 5):.1%}",
+                    "25th %ile": f"{np.percentile(results['terminal_returns'], 25):.1%}",
+                    "Median": f"{np.percentile(results['terminal_returns'], 50):.1%}",
+                    "75th %ile": f"{np.percentile(results['terminal_returns'], 75):.1%}",
+                    "95th %ile": f"{np.percentile(results['terminal_returns'], 95):.1%}",
+                    "Prob > 0%": f"{results['prob_positive']:.1%}",
+                    "CVaR 95%": f"{results['cvar_95']:.1%}"
+                })
+        
+        if return_data:
+            return_df = pd.DataFrame(return_data)
+            st.dataframe(return_df, use_container_width=True)
             
             # Key insights
             st.subheader("🔍 Key Insights from Monte Carlo")
