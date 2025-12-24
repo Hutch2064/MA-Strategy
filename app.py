@@ -380,8 +380,7 @@ def compute_enhanced_performance(simple_returns, eq_curve, rf=0.0):
             "TotalReturn": 0, "DD_Series": pd.Series([], dtype=float),
             "Calmar": 0, "Sortino": 0, "Omega": 0, "Skewness": 0,
             "Kurtosis": 0, "VaR_95": 0, "CVaR_95": 0, "WinRate": 0,
-            "AvgWin": 0, "AvgLoss": 0, "ProfitFactor": 0,
-            "RecoveryFactor": 0, "UlcerIndex": 0, "TailRatio": 0
+            "ProfitFactor": 0, "RecoveryFactor": 0, "UlcerIndex": 0, "TailRatio": 0
         }
     
     # Basic metrics
@@ -411,8 +410,6 @@ def compute_enhanced_performance(simple_returns, eq_curve, rf=0.0):
     positive_rets = simple_returns[simple_returns > 0]
     negative_rets = simple_returns[simple_returns < 0]
     win_rate = len(positive_rets) / len(simple_returns) if len(simple_returns) > 0 else 0
-    avg_win = positive_rets.mean() * 252 if len(positive_rets) > 0 else 0
-    avg_loss = negative_rets.mean() * 252 if len(negative_rets) > 0 else 0
     gross_profit = positive_rets.sum()
     gross_loss = abs(negative_rets.sum())
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0
@@ -446,8 +443,6 @@ def compute_enhanced_performance(simple_returns, eq_curve, rf=0.0):
         "MaxDrawdown": max_dd,
         "TotalReturn": eq_curve.iloc[-1] / eq_curve.iloc[0] - 1 if eq_curve.iloc[0] != 0 else 0,
         "WinRate": win_rate,
-        "AvgWin": avg_win,
-        "AvgLoss": avg_loss,
         "ProfitFactor": profit_factor,
         "VaR_95": var_95,
         "CVaR_95": cvar_95,
@@ -1111,8 +1106,6 @@ def main():
             "MaxDD": perf["MaxDrawdown"],
             "Total": perf["TotalReturn"],
             "WinRate": perf["WinRate"],
-            "AvgWin": perf["AvgWin"],
-            "AvgLoss": perf["AvgLoss"],
             "ProfitFactor": perf["ProfitFactor"],
             "VaR_95": perf["VaR_95"],
             "CVaR_95": perf["CVaR_95"],
@@ -1180,8 +1173,6 @@ def main():
         ("Max Drawdown", "MaxDD"),
         ("Total Return", "Total"),
         ("Win Rate", "WinRate"),
-        ("Avg Win (annual)", "AvgWin"),
-        ("Avg Loss (annual)", "AvgLoss"),
         ("Profit Factor", "ProfitFactor"),
         ("VaR (95%)", "VaR_95"),
         ("CVaR (95%)", "CVaR_95"),
@@ -1208,7 +1199,7 @@ def main():
         hv = hybrid_stats.get(key, np.nan)
         ps = pure_sig_stats.get(key, np.nan)
 
-        if key in ["CAGR", "Volatility", "MaxDD", "Total", "WinRate", "AvgWin", "AvgLoss", "VaR_95", "CVaR_95", "TID"]:
+        if key in ["CAGR", "Volatility", "MaxDD", "Total", "WinRate", "VaR_95", "CVaR_95", "TID"]:
             row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(rv), fmt_pct(hv), fmt_pct(ps)]
         elif key in ["Sharpe", "Sortino", "Calmar", "Omega", "ProfitFactor", "Skew", "Kurtosis", "UlcerIndex", "RecoveryFactor", "TailRatio", "PainGain", "MAR"]:
             row = [label, fmt_dec(sv), fmt_dec(sh), fmt_dec(rv), fmt_dec(hv), fmt_dec(ps)]
