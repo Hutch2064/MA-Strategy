@@ -1445,7 +1445,7 @@ def main():
                 mc_results[name] = monte_carlo_strategy_analysis(
                     data["returns"],
                     data["equity"],
-                    n_sim=10000,
+                    n_sim=100000,
                     periods=252,
                     initial_capital=data["initial_capital"]
                 )
@@ -1506,26 +1506,6 @@ def main():
             return_df = pd.DataFrame(return_data)
             st.dataframe(return_df, use_container_width=True)
             
-            # Key insights
-            st.subheader("🔍 Key Insights from Monte Carlo")
-            
-            col1, col2, col3 = st.columns(3)
-            
-            # Find strategies with valid results
-            valid_results = [(name, r) for name, r in mc_results.items() if r is not None]
-            
-            if valid_results:
-                with col1:
-                    safest = min(valid_results, key=lambda x: x[1]['cvar_95'])
-                    st.metric("Most Conservative (Lowest CVaR 95%)", safest[0])
-                
-                with col2:
-                    highest_return = max(valid_results, key=lambda x: x[1]['expected_return'])
-                    st.metric("Highest Expected Return", highest_return[0])
-                
-                with col3:
-                    highest_prob = max(valid_results, key=lambda x: x[1]['prob_positive'])
-                    st.metric("Highest Probability of Gain", highest_prob[0])
                 
                 # Risk-reward analysis
                 st.write("#### Risk-Reward Analysis")
