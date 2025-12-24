@@ -588,7 +588,7 @@ def plot_diagnostics(hybrid_eq, bh_eq, hybrid_signal):
 # MONTE CARLO SIMULATION FUNCTIONS - CORRECTED VERSION
 # ============================================================
 
-def monte_carlo_strategy_analysis(strategy_returns, strategy_equity, n_sim=10000, periods=252, initial_capital=None):
+def monte_carlo_strategy_analysis(strategy_returns, strategy_equity, n_sim=100000, periods=252, initial_capital=None):
     """
     Run Monte Carlo simulation for a strategy with user-specified initial capital.
     
