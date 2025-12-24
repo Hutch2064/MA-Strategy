@@ -55,16 +55,32 @@ def load_price_data(tickers, start_date, end_date=None):
 
 
 # ============================================================
-# BUILD PORTFOLIO INDEX — SIMPLE RETURNS
+# BUILD PORTFOLIO INDEX — SIMPLE RETURNS WITH DRAG
 # ============================================================
 
-def build_portfolio_index(prices, weights_dict):
+def build_portfolio_index(prices, weights_dict, annual_drag_pct=0.0):
+    """
+    Build portfolio index with optional daily drag applied to entire portfolio.
+    
+    Args:
+        prices: DataFrame of prices
+        weights_dict: Dictionary of ticker weights
+        annual_drag_pct: Annual drag percentage as decimal (e.g., 0.04 for 4%)
+                        Applied to entire portfolio. If 0, no drag is applied.
+    """
     simple_rets = prices.pct_change().fillna(0)
     idx_rets = pd.Series(0.0, index=simple_rets.index)
 
-    for a, w in weights_dict.items():
-        if a in simple_rets.columns:
-            idx_rets += simple_rets[a] * w
+    for ticker, weight in weights_dict.items():
+        if ticker in simple_rets.columns:
+            idx_rets += simple_rets[ticker] * weight
+    
+    # Apply daily drag to ENTIRE portfolio if drag > 0
+    if annual_drag_pct > 0:
+        # Convert annual drag to daily: (1 - drag)^(1/252)
+        daily_drag_factor = (1 - annual_drag_pct) ** (1/252)
+        # Apply drag to entire portfolio return: (1 + portfolio_return) * daily_drag_factor - 1
+        idx_rets = (1 + idx_rets) * daily_drag_factor - 1
     
     # Create cumulative product
     cumprod = (1 + idx_rets).cumprod()
@@ -142,7 +158,7 @@ def generate_testfol_signal_vectorized(price, ma, tol_series):
     
     return pd.Series(sig, index=ma.index).fillna(False)
 
-def optimize_tolerance(portfolio_index, opt_ma, prices, risk_on_weights, risk_off_weights):
+def optimize_tolerance(portfolio_index, opt_ma, prices, risk_on_weights, risk_off_weights, annual_drag_pct=0.0):
     """
     Selects tolerance in [0, 5%] that maximizes Sharpe / trades_per_year.
     """
@@ -168,7 +184,8 @@ def optimize_tolerance(portfolio_index, opt_ma, prices, risk_on_weights, risk_of
             risk_on_weights,
             risk_off_weights,
             FLIP_COST,
-            ma_flip_multiplier=3.0
+            ma_flip_multiplier=3.0,
+            annual_drag_pct=annual_drag_pct
         )
 
         sharpe = result["performance"]["Sharpe"]
@@ -330,7 +347,7 @@ def run_sig_engine(
 
 
 # ============================================================
-# BACKTEST ENGINE
+# BACKTEST ENGINE WITH DRAG
 # ============================================================
 
 def build_weight_df(prices, signal, risk_on_weights, risk_off_weights):
@@ -454,7 +471,7 @@ def compute_enhanced_performance(simple_returns, eq_curve, rf=0.0):
         "DD_Series": dd
     }
 
-def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=3.0):
+def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_flip_multiplier=3.0, annual_drag_pct=0.0):
     simple = prices.pct_change().fillna(0)
     weights = build_weight_df(prices, signal, risk_on_weights, risk_off_weights)
 
@@ -464,6 +481,12 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_fl
 
     # MA flip costs with multiplier
     flip_costs = np.where(flip_mask, -flip_cost * ma_flip_multiplier, 0.0)
+    
+    # Apply portfolio drag (if any) to strategy returns
+    if annual_drag_pct > 0:
+        daily_drag_factor = (1 - annual_drag_pct) ** (1/252)
+        strategy_simple = (1 + strategy_simple) * daily_drag_factor - 1
+    
     strat_adj = strategy_simple + flip_costs
 
     eq = (1 + strat_adj).cumprod()
@@ -800,6 +823,19 @@ def main():
         "Weights", ",".join(str(w) for w in RISK_OFF_WEIGHTS.values())
     )
     
+    # PORTFOLIO DRAG INPUT
+    st.sidebar.header("Portfolio Drag")
+    annual_drag_pct = st.sidebar.number_input(
+        "Annual Portfolio Drag (%)", 
+        min_value=0.0, 
+        max_value=20.0, 
+        value=0.0,  # Default to 0% (no drag)
+        step=0.1,
+        format="%.1f",
+        help="Annual decay/drag applied to entire portfolio. Use ~4.0% for leveraged ETFs."
+    )
+    annual_drag_decimal = annual_drag_pct / 100.0
+    
     # REMOVED OPTIMIZATION SETTINGS
     
     st.sidebar.header("Quarterly Portfolio Values")
@@ -816,6 +852,7 @@ def main():
     st.sidebar.header("Fixed Parameters")
     st.sidebar.write(f"**MA Length:** {FIXED_MA_LENGTH}")
     st.sidebar.write(f"**MA Type:** {FIXED_MA_TYPE.upper()}")
+    st.sidebar.write(f"**Portfolio Drag:** {annual_drag_pct:.1f}% annual")
     
     run_clicked = st.sidebar.button("Run Backtest")
     if not run_clicked:
@@ -847,7 +884,7 @@ def main():
     
     
     # Generate signal with fixed parameters
-    portfolio_index = build_portfolio_index(prices, risk_on_weights)
+    portfolio_index = build_portfolio_index(prices, risk_on_weights, annual_drag_pct=annual_drag_decimal)
     
     # ============================================================
     # OPTIMAL TOLERANCE (Sharpe per trade)
@@ -860,7 +897,8 @@ def main():
         opt_ma,
         prices,
         risk_on_weights,
-        risk_off_weights
+        risk_off_weights,
+        annual_drag_pct=annual_drag_decimal
     )
 
     tol_series = pd.Series(best_tol, index=portfolio_index.index)
@@ -871,6 +909,10 @@ def main():
         f"**Length:** {best_len}  —  "
         f"**Tolerance:** {best_tol:.2%}"
     )
+    if annual_drag_pct > 0:
+        daily_drag_factor = (1 - annual_drag_decimal) ** (1/252)
+        daily_drag_pct = (1 - daily_drag_factor) * 100
+        st.write(f"**Portfolio Drag:** {annual_drag_pct:.1f}% annual (≈{daily_drag_pct:.4f}% daily)")
 
     sig = generate_testfol_signal_vectorized(
         portfolio_index,
@@ -879,7 +921,8 @@ def main():
     )
     
     # Run backtest with fixed parameters
-    best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, ma_flip_multiplier=3.0)
+    best_result = backtest(prices, sig, risk_on_weights, risk_off_weights, FLIP_COST, 
+                          ma_flip_multiplier=3.0, annual_drag_pct=annual_drag_decimal)
     
     latest_signal = sig.iloc[-1]
     current_regime = "RISK-ON" if latest_signal else "RISK-OFF"
@@ -898,12 +941,23 @@ def main():
         if a in simple_rets.columns:
             risk_on_simple += simple_rets[a] * w
 
+    # Apply drag to risk-on portfolio returns
+    if annual_drag_decimal > 0:
+        daily_drag_factor = (1 - annual_drag_decimal) ** (1/252)
+        risk_on_simple = (1 + risk_on_simple) * daily_drag_factor - 1
+
     risk_on_eq = (1 + risk_on_simple).cumprod()
     risk_on_perf = compute_enhanced_performance(risk_on_simple, risk_on_eq)
 
     risk_on_px = prices[[t for t in risk_on_tickers if t in prices.columns]].dropna()
     if len(risk_on_px) > 0:
         risk_on_rets = risk_on_px.pct_change().dropna()
+        # Apply drag to Sharpe optimal calculation
+        if annual_drag_decimal > 0:
+            daily_drag_factor = (1 - annual_drag_decimal) ** (1/252)
+            for ticker in risk_on_rets.columns:
+                if "BTC" in ticker.upper():
+                    risk_on_rets[ticker] = (1 + risk_on_rets[ticker]) * daily_drag_factor - 1
     else:
         risk_on_rets = pd.DataFrame()
 
@@ -1344,7 +1398,7 @@ def main():
     # Final Performance Plot (updated with Buy & Hold with rebalance)
     st.subheader("Portfolio Strategy Performance Comparison")
 
-    plot_index = build_portfolio_index(prices, risk_on_weights)
+    plot_index = build_portfolio_index(prices, risk_on_weights, annual_drag_pct=annual_drag_decimal)
     plot_ma = compute_ma(plot_index, best_len, best_type)
 
     plot_index_norm = normalize(plot_index)
@@ -1430,7 +1484,7 @@ def main():
     
     # Run Monte Carlo for each strategy
     mc_results = {}
-    with st.spinner("Running Monte Carlo simulations (10,000 paths each)..."):
+    with st.spinner("Running Monte Carlo simulations (100,000 paths each)..."):
         for name, data in strategies_mc.items():
             if len(data["returns"]) > 100:  # Need sufficient data
                 mc_results[name] = monte_carlo_strategy_analysis(
@@ -1651,13 +1705,10 @@ The strategy is designed to:
 - Upon re-entering RISK-ON:
   - The system resumes Pure Sig allocations using the last valid weights.
 
-**Leverage Rationale**
-- Backtesting indicates that **2× exposure via QQUP** provides meaningfully
-  higher growth with comparable Sharpe relative to 1× exposure.
-- 3× exposure is avoided due to product availability and inferior
-  long-term CAGR characteristics (e.g., TQQQ).
-- Objective: maximize upside asymmetry while remaining solvent across
-  extended drawdown regimes.
+**Portfolio Drag**
+- An optional annual drag can be applied to simulate costs of leveraged ETFs
+- Drag compounds daily and applies to entire portfolio returns
+- Set to 0% for no drag, ~4.0% for realistic leveraged ETF simulation
 
 ---
 
