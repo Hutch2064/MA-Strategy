@@ -58,7 +58,7 @@ def load_price_data(tickers, start_date, end_date=None):
 # BUILD PORTFOLIO INDEX — SIMPLE RETURNS WITH DRAG
 # ============================================================
 
-def build_portfolio_index(prices, weights_dict, annual_drag_pct=0.0):
+def build_portfolio_index(prices, weights_dict, annual_drag_pct=5.0):
     """
     Build portfolio index with optional daily drag applied to entire portfolio.
     
