@@ -1670,7 +1670,7 @@ The strategy is designed to:
 
 ---
 
-### **Roth IRA — Modified Risk-On (Buy & Hold)**
+### **Roth IRA — (Buy & Hold)**
 
 The Roth IRA is treated as a permanent risk-on vehicle with no MA-based
 de-risking, prioritizing long-term asymmetric growth and tax efficiency.
