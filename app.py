@@ -14,10 +14,9 @@ DEFAULT_START_DATE = "1900-01-01"
 RISK_FREE_RATE = 0.0
 
 RISK_ON_WEIGHTS = {
-    "BTC-USD": .6666,
-    "TQQQ": .3333,
+    "BITU": .3333,
+    "QQQU": .3333,
     "UGL":.3333,
-    "SHY":-.3333,
 }
 
 RISK_OFF_WEIGHTS = {
@@ -58,7 +57,7 @@ def load_price_data(tickers, start_date, end_date=None):
 # BUILD PORTFOLIO INDEX — SIMPLE RETURNS WITH DRAG
 # ============================================================
 
-def build_portfolio_index(prices, weights_dict, annual_drag_pct=5.0):
+def build_portfolio_index(prices, weights_dict, annual_drag_pct=0.0):
     """
     Build portfolio index with optional daily drag applied to entire portfolio.
     
@@ -829,7 +828,7 @@ def main():
         "Annual Portfolio Drag (%)", 
         min_value=0.0, 
         max_value=20.0, 
-        value=5.0,  # Default to 0% (no drag)
+        value=0.0,  # Default to 0% (no drag)
         step=0.1,
         format="%.1f",
         help="Annual decay/drag applied to entire portfolio. Use ~4.0% for leveraged ETFs."
