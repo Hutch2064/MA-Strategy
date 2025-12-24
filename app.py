@@ -17,7 +17,7 @@ RISK_ON_WEIGHTS = {
     "BTC-USD": .6666,
     "TQQQ": .3333,
     "UGL":.3333,
-    "SHY":.00,
+    "SHY":-.4667,
 }
 
 RISK_OFF_WEIGHTS = {
