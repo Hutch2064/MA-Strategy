@@ -1708,7 +1708,8 @@ The strategy is designed to:
 **Portfolio Drag**
 - An optional annual drag can be applied to simulate costs of leveraged ETFs
 - Drag compounds daily and applies to entire portfolio returns
-- Set to 0% for no drag, ~4.0% for realistic leveraged ETF simulation
+
+Leverage Drag Estimation: https://testfol.io/?s=cVJni7zRUsA
 
 ---
 
