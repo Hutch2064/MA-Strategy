@@ -829,7 +829,7 @@ def main():
         "Annual Portfolio Drag (%)", 
         min_value=0.0, 
         max_value=20.0, 
-        value=0.0,  # Default to 0% (no drag)
+        value=5.0,  # Default to 0% (no drag)
         step=0.1,
         format="%.1f",
         help="Annual decay/drag applied to entire portfolio. Use ~4.0% for leveraged ETFs."
