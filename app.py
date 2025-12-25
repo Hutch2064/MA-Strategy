@@ -1720,9 +1720,9 @@ de-risking, prioritizing long-term asymmetric growth and tax efficiency.
 - Sharpe optimal of the underlying Risk-On Sigma sleeve (1x & Represents the Sharpe-optimal risk-on foundation).
 
 **Overall Roth Allocation**
-- 45% QBIG 
-- 25% IBIT
-- 30% GLD
+- 33.33% QBIG 
+- 33.33% IBIT
+- 33.33% GLD
 
 ---
 
