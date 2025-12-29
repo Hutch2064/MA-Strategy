@@ -843,9 +843,9 @@ def main():
     qs_cap_3 = st.sidebar.number_input("Joint – Portfolio Value at Last Rebalance ($)", min_value=0.0, value=4189.76, step=100.0)
 
     st.sidebar.header("Current Portfolio Values (Today)")
-    real_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value Today ($)", min_value=0.0, value=70959.35, step=100.0)
-    real_cap_2 = st.sidebar.number_input("Tax-Sheltered – Portfolio Value Today ($)", min_value=0.0, value=8988.32, step=100.0)
-    real_cap_3 = st.sidebar.number_input("Joint – Portfolio Value Today ($)", min_value=0.0, value=4064.94, step=100.0)
+    real_cap_1 = st.sidebar.number_input("Taxable – Portfolio Value Today ($)", min_value=0.0, value=68847.01, step=100.0)
+    real_cap_2 = st.sidebar.number_input("Tax-Sheltered – Portfolio Value Today ($)", min_value=0.0, value=9272.74, step=100.0)
+    real_cap_3 = st.sidebar.number_input("Joint – Portfolio Value Today ($)", min_value=0.0, value=3929.74, step=100.0)
 
     # Add fixed parameters display
     st.sidebar.header("Fixed Parameters")
@@ -1131,9 +1131,9 @@ def main():
         date_str = next_q.strftime("%m/%d/%Y")
         days_str = f"{days_to_next_q} days"
         if gap > 0:
-            return f"Increase deployed sleeve by **${gap:,.2f}** on **{date_str}** ({days_str})"
+            return f"Increase deployed capital sleeve by **${gap:,.2f}** on **{date_str}** ({days_str})"
         elif gap < 0:
-            return f"Decrease deployed sleeve by **${abs(gap):,.2f}** on **{date_str}** ({days_str})"
+            return f"Decrease deployed capital sleeve by **${abs(gap):,.2f}** on **{date_str}** ({days_str})"
         else:
             return f"No rebalance needed until **{date_str}** ({days_str})"
 
