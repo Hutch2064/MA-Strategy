@@ -42,8 +42,11 @@ FIXED_MA_TYPE = "sma"  # or "ema" - you can choose which one to fix
 def load_price_data(tickers, start_date, end_date=None):
     data = yf.download(tickers, start=start_date, end=end_date, progress=False)
 
+    # Prefer Adjusted Close, but fall back to Close if Adj Close is missing
     if "Adj Close" in data.columns:
         px = data["Adj Close"].copy()
+        if "Close" in data.columns:
+            px = px.combine_first(data["Close"])
     else:
         px = data["Close"].copy()
 
