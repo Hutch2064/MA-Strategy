@@ -868,13 +868,7 @@ def main():
     all_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
     end_val = end if end.strip() else None
 
-    prices = load_price_data(all_tickers, start, end_val)
-
-    # Allow 1-day settlement lag for any ticker (e.g. leveraged ETFs)
-    prices = prices.sort_index().ffill(limit=1)
-
-    # Still require at least one valid price per row
-    prices = prices.dropna(how="all")
+    prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
     
     # Check if we have any data
     if len(prices) == 0:
