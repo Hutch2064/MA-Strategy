@@ -1718,16 +1718,24 @@ Leverage Drag Estimation: https://testfol.io/?s=cVJni7zRUsA
 ### **Roth IRA — (Buy & Hold)**
 
 The Roth IRA is treated as a permanent risk-on vehicle with no MA-based
-de-risking, prioritizing long-term asymmetric growth and tax efficiency.
+de-risking, prioritizing long-term asymmetric growth.
 
-- Sharpe optimal of the underlying Risk-On Sigma sleeve (1x & Represents the Sharpe-optimal risk-on foundation).
-
-**Overall Roth Allocation**
+**Overall Roth IRA Allocation**
 - 33.33% QBIG 
 - 33.33% IBIT
 - 33.33% GLD
 
 ---
+
+### **401K — (Buy & Hold)**
+
+The 401K is treated as a permanent risk-on vehicle with no MA-based
+de-risking, prioritizing long-term asymmetric growth.
+
+**Overall 401K Allocation**
+- 33.33% QBIG 
+- 33.33% IBIT
+- 33.33% GLD
 
 ### **Important Notes**
 - The system is fully rules-based and non-discretionary.
