@@ -899,7 +899,7 @@ def main():
     all_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
     end_val = end if end.strip() else None
 
-    prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
+    prices = load_price_data(all_tickers, start, end_val).dropna(how="all")
     
     # Check if we have any data
     if len(prices) == 0:
