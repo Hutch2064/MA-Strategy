@@ -822,7 +822,7 @@ def main():
     # ============================================================
 
     st.caption(
-        f"📅 **Official Strategy Inception Date:** {OFFICIAL_STRATEGY_START_DATE} "
+        f"**Official Strategy Inception Date:** {OFFICIAL_STRATEGY_START_DATE} "
         "— performance after this date is documented for actual performance tracking."
     )
 
