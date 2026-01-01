@@ -1099,6 +1099,105 @@ def main():
     hybrid_perf = compute_enhanced_performance(hybrid_simple, hybrid_eq)
     
     # ============================================================
+    # SINCE-INCEPTION SERIES (Sigma vs Buy & Hold vs QQQ)
+    # ============================================================
+
+    inception = pd.to_datetime(OFFICIAL_STRATEGY_START_DATE)
+
+    # --- Sigma ---
+    sigma_eq_si = hybrid_eq.loc[hybrid_eq.index >= inception]
+    sigma_ret_si = sigma_eq_si.pct_change().fillna(0)
+
+    # --- Buy & Hold ---
+    bh_eq_si = risk_on_eq.loc[risk_on_eq.index >= inception]
+    bh_ret_si = bh_eq_si.pct_change().fillna(0)
+
+    # --- QQQ ---
+    qqq_px = load_price_data(["QQQ"], inception)
+    qqq_eq_si = (qqq_px["QQQ"] / qqq_px["QQQ"].iloc[0]).reindex(sigma_eq_si.index).ffill()
+    qqq_ret_si = qqq_eq_si.pct_change().fillna(0)
+    
+    # ============================================================
+    # SINCE-INCEPTION EQUITY CURVE
+    # ============================================================
+
+    st.subheader("📈 Since-Inception Performance (Sigma vs Buy & Hold vs QQQ)")
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    ax.plot(
+        sigma_eq_si / sigma_eq_si.iloc[0],
+        label="Sigma",
+        linewidth=2,
+        color="blue"
+    )
+
+    ax.plot(
+        bh_eq_si / bh_eq_si.iloc[0],
+        label="Buy & Hold",
+        linewidth=2,
+        alpha=0.7
+    )
+
+    ax.plot(
+        qqq_eq_si,
+        label="QQQ",
+        linewidth=2,
+        linestyle="--",
+        color="black",
+        alpha=0.7
+    )
+
+    ax.set_ylabel("Growth of $1")
+    ax.set_title(f"Performance Since {OFFICIAL_STRATEGY_START_DATE}")
+    ax.legend()
+    ax.grid(alpha=0.3)
+
+    st.pyplot(fig)
+    
+    # ============================================================
+    # SINCE-INCEPTION PERFORMANCE METRICS TABLE
+    # ============================================================
+
+    sigma_perf_si = compute_enhanced_performance(sigma_ret_si, sigma_eq_si)
+    bh_perf_si    = compute_enhanced_performance(bh_ret_si, bh_eq_si)
+    qqq_perf_si   = compute_enhanced_performance(qqq_ret_si, qqq_eq_si)
+
+    rows = [
+        ("CAGR", "CAGR", "pct"),
+        ("Volatility", "Volatility", "pct"),
+        ("Sharpe", "Sharpe", "dec"),
+        ("Sortino", "Sortino", "dec"),
+        ("Max Drawdown", "MaxDrawdown", "pct"),
+        ("Total Return", "TotalReturn", "pct"),
+    ]
+
+    def fmt(val, kind):
+        if pd.isna(val):
+            return "—"
+        if kind == "pct":
+            return f"{val:.2%}"
+        return f"{val:.3f}"
+
+    table_data = []
+    for label, key, kind in rows:
+        table_data.append([
+            label,
+            fmt(sigma_perf_si[key], kind),
+            fmt(bh_perf_si[key], kind),
+            fmt(qqq_perf_si[key], kind),
+        ])
+
+    si_table = pd.DataFrame(
+        table_data,
+        columns=["Metric", "Sigma", "Buy & Hold", "QQQ"]
+    )
+
+    st.subheader("📊 Since-Inception Performance Metrics")
+    st.dataframe(si_table, use_container_width=True)
+    
+    
+    # ============================================================
     # LIVE PERFORMANCE SINCE STRATEGY INCEPTION (INFO ONLY)
     # ============================================================
 
