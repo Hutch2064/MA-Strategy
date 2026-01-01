@@ -1196,46 +1196,6 @@ def main():
     st.subheader("📊 Since-Inception Performance Metrics")
     st.dataframe(si_table, use_container_width=True)
     
-    
-    # ============================================================
-    # LIVE PERFORMANCE SINCE STRATEGY INCEPTION (INFO ONLY)
-    # ============================================================
-
-    inception = OFFICIAL_STRATEGY_START_DATE
-
-    # Sigma
-    sigma_ret = compute_total_return(hybrid_eq, inception)
-
-    # Buy & Hold (Risk-On)
-    bh_ret = compute_total_return(risk_on_eq, inception)
-
-    # QQQ benchmark (Yahoo Finance)
-    qqq_px = load_price_data(["QQQ"], inception)
-    if "QQQ" in qqq_px.columns and len(qqq_px) > 1:
-        qqq_eq = qqq_px["QQQ"] / qqq_px["QQQ"].iloc[0]
-        qqq_ret = qqq_eq.iloc[-1] - 1
-    else:
-        qqq_ret = np.nan
-
-    st.markdown("### 📈 Live Performance Since Inception")
-
-    perf_cols = st.columns(3)
-
-    perf_cols[0].metric(
-        "Sigma Strategy",
-        f"{sigma_ret:.2%}" if pd.notna(sigma_ret) else "—"
-    )
-
-    perf_cols[1].metric(
-        "Buy & Hold (Risk-On)",
-        f"{bh_ret:.2%}" if pd.notna(bh_ret) else "—"
-    )
-
-    perf_cols[2].metric(
-        "QQQ (Benchmark)",
-        f"{qqq_ret:.2%}" if pd.notna(qqq_ret) else "—"
-    )
-    
     # IMPORTANT: `perf` always means Sigma performance
     perf = hybrid_perf
     
