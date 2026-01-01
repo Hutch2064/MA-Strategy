@@ -10,7 +10,6 @@ from scipy.optimize import minimize
 # CONFIG
 # ============================================================
 
-OFFICIAL_STRATEGY_START_DATE = "2025-12-22"  # Canonical live inception date
 
 DEFAULT_START_DATE = "1900-01-01"
 RISK_FREE_RATE = 0.0
@@ -821,8 +820,16 @@ def main():
     # OFFICIAL STRATEGY INCEPTION & LIVE PERFORMANCE SNAPSHOT
     # ============================================================
 
+    OFFICIAL_STRATEGY_START_DATE = st.date_input(
+    "Official Strategy Inception Date",
+    value=pd.to_datetime("2025-12-22"),
+    help="This date defines official live performance tracking for Sigma vs Buy & Hold vs QQQ."
+)
+
+    OFFICIAL_STRATEGY_START_DATE = pd.to_datetime(OFFICIAL_STRATEGY_START_DATE)
+
     st.caption(
-        f"**Official Strategy Inception Date:** {OFFICIAL_STRATEGY_START_DATE} "
+        f"**Official Strategy Inception Date:** {OFFICIAL_STRATEGY_START_DATE.date()} "
         "— performance after this date is documented for actual performance tracking."
     )
 
