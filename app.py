@@ -10,6 +10,8 @@ from scipy.optimize import minimize
 # CONFIG
 # ============================================================
 
+OFFICIAL_STRATEGY_START_DATE = "2025-12-22"  # Canonical live inception date
+
 DEFAULT_START_DATE = "1900-01-01"
 RISK_FREE_RATE = 0.0
 
