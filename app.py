@@ -10,6 +10,7 @@ from scipy.optimize import minimize
 # CONFIG
 # ============================================================
 
+OFFICIAL_STRATEGY_START_DATE = "2025-12-22"  # Canonical live inception date
 
 DEFAULT_START_DATE = "1900-01-01"
 RISK_FREE_RATE = 0.0
@@ -820,16 +821,8 @@ def main():
     # OFFICIAL STRATEGY INCEPTION & LIVE PERFORMANCE SNAPSHOT
     # ============================================================
 
-    OFFICIAL_STRATEGY_START_DATE = st.date_input(
-    "Official Strategy Inception Date",
-    value=pd.to_datetime("2025-12-22"),
-    help="This date defines official live performance tracking for Sigma vs Buy & Hold vs QQQ."
-)
-
-    OFFICIAL_STRATEGY_START_DATE = pd.to_datetime(OFFICIAL_STRATEGY_START_DATE)
-
     st.caption(
-        f"**Official Strategy Inception Date:** {OFFICIAL_STRATEGY_START_DATE.date()} "
+        f"**Official Strategy Inception Date:** {OFFICIAL_STRATEGY_START_DATE} "
         "— performance after this date is documented for actual performance tracking."
     )
 
@@ -899,7 +892,7 @@ def main():
     all_tickers = sorted(set(risk_on_tickers + risk_off_tickers))
     end_val = end if end.strip() else None
 
-    prices = load_price_data(all_tickers, start, end_val).dropna(how="all")
+    prices = load_price_data(all_tickers, start, end_val).dropna(how="any")
     
     # Check if we have any data
     if len(prices) == 0:
