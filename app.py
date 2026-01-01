@@ -501,6 +501,16 @@ def backtest(prices, signal, risk_on_weights, risk_off_weights, flip_cost, ma_fl
         "performance": compute_enhanced_performance(strat_adj, eq),  # Changed to enhanced
         "flip_mask": flip_mask,
     }
+    
+def compute_total_return(eq_series, start_date):
+    """
+    Compute total return from a given start date to latest.
+    """
+    eq = eq_series.loc[eq_series.index >= pd.to_datetime(start_date)]
+    if len(eq) < 2:
+        return np.nan
+    return eq.iloc[-1] / eq.iloc[0] - 1
+    
 # ============================================================
 # QUARTERLY PROGRESS HELPER (unchanged)
 # ============================================================
@@ -804,6 +814,15 @@ def main():
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
     st.title("Portfolio Strategy")
+    
+    # ============================================================
+    # OFFICIAL STRATEGY INCEPTION & LIVE PERFORMANCE SNAPSHOT
+    # ============================================================
+
+    st.caption(
+        f"📅 **Official Strategy Inception Date:** {OFFICIAL_STRATEGY_START_DATE} "
+        "— performance prior to this date is exploratory and non-governed."
+    )
 
     # Backtest inputs unchanged...
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
@@ -1076,7 +1095,46 @@ def main():
     # ============================================================
     hybrid_simple = hybrid_eq.pct_change().fillna(0)
     hybrid_perf = compute_enhanced_performance(hybrid_simple, hybrid_eq)
+    
+    # ============================================================
+    # LIVE PERFORMANCE SINCE STRATEGY INCEPTION (INFO ONLY)
+    # ============================================================
 
+    inception = OFFICIAL_STRATEGY_START_DATE
+
+    # Sigma
+    sigma_ret = compute_total_return(hybrid_eq, inception)
+
+    # Buy & Hold (Risk-On)
+    bh_ret = compute_total_return(risk_on_eq, inception)
+
+    # QQQ benchmark (Yahoo Finance)
+    qqq_px = load_price_data(["QQQ"], inception)
+    if "QQQ" in qqq_px.columns and len(qqq_px) > 1:
+        qqq_eq = qqq_px["QQQ"] / qqq_px["QQQ"].iloc[0]
+        qqq_ret = qqq_eq.iloc[-1] - 1
+    else:
+        qqq_ret = np.nan
+
+    st.markdown("### 📈 Live Performance Since Inception")
+
+    perf_cols = st.columns(3)
+
+    perf_cols[0].metric(
+        "Sigma Strategy",
+        f"{sigma_ret:.2%}" if pd.notna(sigma_ret) else "—"
+    )
+
+    perf_cols[1].metric(
+        "Buy & Hold (Risk-On)",
+        f"{bh_ret:.2%}" if pd.notna(bh_ret) else "—"
+    )
+
+    perf_cols[2].metric(
+        "QQQ (Benchmark)",
+        f"{qqq_ret:.2%}" if pd.notna(qqq_ret) else "—"
+    )
+    
     # IMPORTANT: `perf` always means Sigma performance
     perf = hybrid_perf
     
