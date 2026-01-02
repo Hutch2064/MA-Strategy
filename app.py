@@ -1216,9 +1216,9 @@ def main():
         date_str = next_q.strftime("%m/%d/%Y")
         days_str = f"{days_to_next_q} days"
         if gap > 0:
-            return f"Increase deployed capital sleeve by **${gap:,.2f}** on **{date_str}** ({days_str})"
+            return f"Increase (Buy) Risk On Capital by **${gap:,.2f}** on **{date_str}** ({days_str})"
         elif gap < 0:
-            return f"Decrease deployed capital sleeve by **${abs(gap):,.2f}** on **{date_str}** ({days_str})"
+            return f"Decrease (Sell) Risk On Capital by **${abs(gap):,.2f}** on **{date_str}** ({days_str})"
         else:
             return f"No rebalance needed until **{date_str}** ({days_str})"
 
