@@ -972,6 +972,42 @@ def main():
     risk_on_eq = (1 + risk_on_simple).cumprod()
     risk_on_perf = compute_enhanced_performance(risk_on_simple, risk_on_eq)
 
+    risk_on_px = prices[[t for t in risk_on_tickers if t in prices.columns]].dropna()
+    if len(risk_on_px) > 0:
+        risk_on_rets = risk_on_px.pct_change().dropna()
+        # Apply drag to Sharpe optimal calculation
+        if annual_drag_decimal > 0:
+            daily_drag_factor = (1 - annual_drag_decimal) ** (1/252)
+            for ticker in risk_on_rets.columns:
+                if "BTC" in ticker.upper():
+                    risk_on_rets[ticker] = (1 + risk_on_rets[ticker]) * daily_drag_factor - 1
+    else:
+        risk_on_rets = pd.DataFrame()
+
+    if len(risk_on_rets) > 0:
+        mu = risk_on_rets.mean().values
+        cov = risk_on_rets.cov().values + np.eye(len(mu)) * 1e-10
+
+        def neg_sharpe(w):
+            r = np.dot(mu, w)
+            v = np.sqrt(np.dot(w.T, cov @ w))
+            return -(r / v) if v > 0 else 1e9
+
+        n = len(mu)
+        bounds = [(0, 1)] * n
+        cons = {"type": "eq", "fun": lambda w: np.sum(w) - 1}
+
+        res = minimize(neg_sharpe, np.ones(n) / n, bounds=bounds, constraints=cons)
+        w_opt = res.x
+
+        sharp_returns = (risk_on_rets * w_opt).sum(axis=1)
+        sharp_eq = (1 + sharp_returns).cumprod()
+        sharp_perf = compute_enhanced_performance(sharp_returns, sharp_eq)
+    else:
+        w_opt = np.array([])
+        sharp_returns = pd.Series([], dtype=float)
+        sharp_eq = pd.Series([], dtype=float)
+        sharp_perf = compute_enhanced_performance(pd.Series([], dtype=float), pd.Series([], dtype=float))
 
     # ============================================================
     # REAL CALENDAR QUARTER LOGIC BEGINS HERE
@@ -1301,7 +1337,7 @@ def main():
     )
 
     # ENHANCED STAT TABLE WITH NEW METRICS
-    st.subheader("MA vs Buy & Hold (Quarterly Rebalanced) vs Sigma vs SIG")
+    st.subheader("MA vs Sharpe vs Buy & Hold (with rebalance) vs Sigma/MA vs SIG")
     rows = [
         ("CAGR", "CAGR"),
         ("Volatility", "Volatility"),
@@ -1333,14 +1369,15 @@ def main():
     table_data = []
     for label, key in rows:
         sv = strat_stats.get(key, np.nan)
+        sh = sharp_perf.get(key, np.nan)
         rv = risk_stats.get(key, np.nan)
         hv = hybrid_stats.get(key, np.nan)
         ps = pure_sig_stats.get(key, np.nan)
 
         if key in ["CAGR", "Volatility", "MaxDD", "Total", "WinRate", "VaR_95", "CVaR_95", "TID"]:
-            row = [label, fmt_pct(sv), fmt_pct(rv), fmt_pct(hv), fmt_pct(ps)]
+            row = [label, fmt_pct(sv), fmt_pct(sh), fmt_pct(rv), fmt_pct(hv), fmt_pct(ps)]
         elif key in ["Sharpe", "Sortino", "Calmar", "Omega", "ProfitFactor", "Skew", "Kurtosis", "UlcerIndex", "RecoveryFactor", "TailRatio", "PainGain", "MAR"]:
-            row = [label, fmt_dec(sv), fmt_dec(rv), fmt_dec(hv), fmt_dec(ps)]
+            row = [label, fmt_dec(sv), fmt_dec(sh), fmt_dec(rv), fmt_dec(hv), fmt_dec(ps)]
         else:
             row = [label, fmt_num(sv), fmt_num(sh), fmt_num(rv), fmt_num(hv), fmt_num(ps)]
 
@@ -1351,6 +1388,7 @@ def main():
         columns=[
             "Metric",
             "MA",
+            "Sharpe",
             "Buy & Hold",
             "Sigma",
             "SIG",
@@ -1369,6 +1407,9 @@ def main():
         for t, w in roff_w.items():
             alloc[t] = safe_dollars * w
         return alloc
+
+    def compute_sharpe_alloc(account_value, tickers, weights):
+        return {t: account_value * w for t, w in zip(tickers, weights)}
 
     def add_pct(df_dict):
         out = pd.DataFrame.from_dict(df_dict, orient="index", columns=["$"])
@@ -1405,6 +1446,10 @@ def main():
 
             st.write(f"### {label} — SIG")
             st.dataframe(add_pct(compute_allocations(cap, pure_r, pure_s, risk_on_weights, risk_off_weights)))
+
+            if len(w_opt) > 0:
+                st.write(f"### {label} — Sharpe")
+                st.dataframe(add_pct(compute_sharpe_alloc(cap, risk_on_px.columns, w_opt)))
 
             st.write(f"### {label} — MA")
             if latest_signal:
@@ -1481,6 +1526,7 @@ def main():
     plot_ma_norm = normalize(plot_ma.dropna()) if len(plot_ma.dropna()) > 0 else pd.Series([], dtype=float)
 
     strat_eq_norm  = normalize(best_result["equity_curve"])
+    sharp_eq_norm  = normalize(sharp_eq) if len(sharp_eq) > 0 else pd.Series([], dtype=float)
     hybrid_eq_norm = normalize(hybrid_eq) if len(hybrid_eq) > 0 else pd.Series([], dtype=float)
     pure_sig_norm  = normalize(pure_sig_eq) if len(pure_sig_eq) > 0 else pd.Series([], dtype=float)
     risk_on_norm   = normalize(risk_on_eq) if len(risk_on_eq) > 0 else pd.Series([], dtype=float)
@@ -1488,6 +1534,8 @@ def main():
     if len(strat_eq_norm) > 0:
         fig, ax = plt.subplots(figsize=(12, 6))
         ax.plot(strat_eq_norm, label="MA", linewidth=2)
+        if len(sharp_eq_norm) > 0:
+            ax.plot(sharp_eq_norm, label="Sharpe", linewidth=2, color="magenta")
         if len(risk_on_norm) > 0:
             ax.plot(risk_on_norm, label="Buy & Hold", alpha=0.65)
         if len(hybrid_eq_norm) > 0:
@@ -1531,6 +1579,11 @@ def main():
         "MA Strategy": {
             "returns": best_result["returns"],
             "equity": best_result["equity_curve"],
+            "initial_capital": total_current_portfolio
+        },
+        "Sharpe Optimal": {
+            "returns": sharp_returns,
+            "equity": sharp_eq,
             "initial_capital": total_current_portfolio
         },
         "Buy & Hold": {
@@ -1730,6 +1783,7 @@ def main():
 - At each calendar quarter-end, input your portfolio value at last rebalance & today's portfolio value.
 - Execute the exact dollar adjustment recommended by the model (increase/decrease deployed sleeve) on the rebalance date.
 
+Current Sharpe-optimal portfolio: https://testfol.io/optimizer?s=iLUBGrQrDwF
 
 ## **Portfolio Allocation & Implementation Notes**
 
