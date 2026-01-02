@@ -830,7 +830,7 @@ def main():
     start = st.sidebar.text_input("Start Date", DEFAULT_START_DATE)
     end = st.sidebar.text_input("End Date (optional)", "")
 
-    st.sidebar.header("Deployed Capital Sleeve")
+    st.sidebar.header("Risk On Capital")
     risk_on_tickers_str = st.sidebar.text_input(
         "Tickers", ",".join(RISK_ON_WEIGHTS.keys())
     )
@@ -838,7 +838,7 @@ def main():
         "Weights", ",".join(str(w) for w in RISK_ON_WEIGHTS.values())
     )
 
-    st.sidebar.header("Treasury Sleeve")
+    st.sidebar.header("Risk Off Capital")
     risk_off_tickers_str = st.sidebar.text_input(
         "Tickers", ",".join(RISK_OFF_WEIGHTS.keys())
     )
