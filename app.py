@@ -10,7 +10,7 @@ from scipy.optimize import minimize
 # CONFIG
 # ============================================================
 
-OFFICIAL_STRATEGY_START_DATE_DEFAULT = "2025-12-22"  # Default live inception date
+OFFICIAL_STRATEGY_START_DATE = "2025-12-22"  # Canonical live inception date
 
 DEFAULT_START_DATE = "1900-01-01"
 RISK_FREE_RATE = 0.0
@@ -816,11 +816,6 @@ def main():
 
     st.set_page_config(page_title="Portfolio MA Regime Strategy", layout="wide")
     st.title("Portfolio Strategy")
-    
-    OFFICIAL_STRATEGY_START_DATE = st.sidebar.text_input(
-    	"Official Strategy Start Date (YYYY-MM-DD)",
-    	OFFICIAL_STRATEGY_START_DATE_DEFAULT
-	)
     
     # ============================================================
     # OFFICIAL STRATEGY INCEPTION & LIVE PERFORMANCE SNAPSHOT
